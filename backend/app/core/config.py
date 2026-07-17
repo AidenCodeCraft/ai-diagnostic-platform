@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     DATABASE_URL: str = "postgresql://ai:ai@localhost:5432/diagnostic"
+    UPLOAD_DIR: str = "data/raw"
 
     class Config:
         env_file = ".env"

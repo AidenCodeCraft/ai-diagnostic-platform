@@ -2,6 +2,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
+from app.database.base import Base
+from app.models import log, project, user  # noqa: F401
 
 
 engine = create_engine(
@@ -16,9 +18,22 @@ SessionLocal = sessionmaker(
 )
 
 
+def init_db() -> None:
+    Base.metadata.create_all(bind=engine)
+
+
 def get_db():
+    init_db()
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+
+def get_session_factory():
+    return SessionLocal
+
+
+def create_session():
+    return SessionLocal()

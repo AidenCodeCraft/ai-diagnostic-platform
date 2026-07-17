@@ -1,8 +1,6 @@
 # AI Diagnostic Platform
 
-
 AI-powered device log diagnosis platform.
-
 
 ## Features
 
@@ -12,11 +10,9 @@ AI-powered device log diagnosis platform.
 - Plugin system
 - Multi-platform client
 
-
 ## Architecture
 
 docs/
-
 
 ## License
 
