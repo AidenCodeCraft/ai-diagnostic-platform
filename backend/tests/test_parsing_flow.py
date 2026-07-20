@@ -3,6 +3,7 @@ import importlib
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 
 from app.database import session as session_module
@@ -19,7 +20,7 @@ def client(monkeypatch, tmp_path):
     config_module.settings.DATABASE_URL = "sqlite:///:memory:"
     config_module.settings.UPLOAD_DIR = str(tmp_path / "uploads")
 
-    engine = create_engine("sqlite:///:memory:")
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     session_module.engine = engine
     session_module.SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 

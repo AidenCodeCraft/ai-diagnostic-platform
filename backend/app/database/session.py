@@ -3,7 +3,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 from app.database.base import Base
-from app.models import log, project, user  # noqa: F401
+from app.models import log, project, user, analysis, report, knowledge  # noqa: F401
+from app.models.agent_task import AgentTask  # noqa: F401
 
 
 engine = create_engine(

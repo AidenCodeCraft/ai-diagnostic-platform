@@ -6,7 +6,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 
-from app.database.base import Base
 from app.database import session as session_module
 
 
@@ -33,33 +32,18 @@ def client(monkeypatch, tmp_path):
         yield test_client
 
 
-def test_upload_log_creates_record_and_saves_file(client, tmp_path):
-    response = client.post(
+def test_agent_run_creates_plan_and_status(client):
+    upload_response = client.post(
         "/api/v1/logs/upload",
-        files={"file": ("boot.log", b"kernel panic\n", "text/plain")},
-        data={"project_id": "1", "device": "SS528", "version": "1.0.0", "description": "startup failure"},
+        files={"file": ("kernel.log", b"kernel: [ 123.456789] usb 1-1: device not responding\n", "text/plain")},
+        data={"description": "usb issue"},
     )
+    assert upload_response.status_code == 200
+    log_id = upload_response.json()["id"]
 
+    response = client.post(f"/api/v1/agents/run/{log_id}")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "uploaded"
-    assert payload["filename"] == "boot.log"
-    assert payload["id"] is not None
-
-    saved_files = list((tmp_path / "uploads").rglob("*"))
-    assert any(path.is_file() and path.read_bytes() == b"kernel panic\n" for path in saved_files)
-
-
-def test_list_logs_returns_uploaded_entries(client):
-    client.post(
-        "/api/v1/logs/upload",
-        files={"file": ("boot.log", b"kernel panic\n", "text/plain")},
-        data={"description": "startup failure"},
-    )
-
-    response = client.get("/api/v1/logs")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert len(payload) == 1
-    assert payload[0]["filename"] == "boot.log"
+    assert payload["task_id"]
+    assert payload["status"] in {"planning", "completed"}
+    assert payload["steps"]

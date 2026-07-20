@@ -1,7 +1,7 @@
 """add structured analysis fields
 
 Revision ID: f3e2d5b6a1c2
-Revises: 4ec90464782f
+Revises: 6ecbd9e1ec74
 Create Date: 2026-07-17 17:30:00.000000
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = "f3e2d5b6a1c2"
-down_revision: Union[str, None] = "4ec90464782f"
+down_revision: Union[str, None] = "6ecbd9e1ec74"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

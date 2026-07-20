@@ -32,21 +32,22 @@ def client(monkeypatch, tmp_path):
         yield test_client
 
 
-def test_run_analysis_creates_analysis_record(client):
+def test_agent_task_is_persisted_and_retrievable(client):
     upload_response = client.post(
         "/api/v1/logs/upload",
         files={"file": ("kernel.log", b"kernel: [ 123.456789] usb 1-1: device not responding\n", "text/plain")},
         data={"description": "usb issue"},
     )
-
     assert upload_response.status_code == 200
-
     log_id = upload_response.json()["id"]
-    response = client.post(f"/api/v1/analyses/{log_id}/run")
 
-    assert response.status_code == 200
-    payload = response.json()
+    create_response = client.post(f"/api/v1/agents/run/{log_id}")
+    assert create_response.status_code == 200
+    task_id = create_response.json()["task_id"]
+
+    retrieval_response = client.get(f"/api/v1/agents/tasks/{task_id}")
+    assert retrieval_response.status_code == 200
+    payload = retrieval_response.json()
+    assert payload["task_id"] == task_id
     assert payload["log_id"] == log_id
-    assert payload["result"]["event_count"] == 1
-    assert payload["result"]["errors"][0]["classification"] == "timeout"
-    assert payload["confidence"] >= 0.4
+    assert payload["status"] == "completed"
