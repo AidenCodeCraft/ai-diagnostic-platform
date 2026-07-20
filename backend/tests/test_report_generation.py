@@ -38,7 +38,6 @@ def test_report_generation_returns_structured_report(client):
         files={"file": ("kernel.log", b"kernel: [ 123.456789] usb 1-1: device not responding\n", "text/plain")},
         data={"description": "usb issue"},
     )
-
     assert upload_response.status_code == 200
     log_id = upload_response.json()["id"]
 
@@ -52,3 +51,35 @@ def test_report_generation_returns_structured_report(client):
     assert payload["root_cause"]
     assert payload["next_steps"]
     assert payload["report_id"]
+
+
+def test_report_markdown_export(client):
+    upload_response = client.post(
+        "/api/v1/logs/upload",
+        files={"file": ("kernel.log", b"kernel: [ 123.456789] usb 1-1: device not responding\n", "text/plain")},
+        data={"description": "usb issue"},
+    )
+    assert upload_response.status_code == 200
+    log_id = upload_response.json()["id"]
+
+    client.post(f"/api/v1/analyses/run?log_id={log_id}")
+    report_resp = client.post(f"/api/v1/reports/{log_id}")
+    report_id = report_resp.json()["report_id"]
+
+    md_resp = client.get(f"/api/v1/reports/{report_id}/markdown")
+    assert md_resp.status_code == 200
+    md = md_resp.text
+    assert "# " in md
+    assert "## Summary" in md
+    assert "## Root Cause" in md
+    assert "## Recommended Next Steps" in md
+
+
+def test_report_generation_missing_analysis(client):
+    upload_response = client.post(
+        "/api/v1/logs/upload",
+        files={"file": ("kernel.log", b"noise\n", "text/plain")},
+    )
+    log_id = upload_response.json()["id"]
+    resp = client.post(f"/api/v1/reports/{log_id}")
+    assert resp.status_code == 404

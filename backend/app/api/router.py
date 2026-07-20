@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.agent_tasks import router as agent_tasks_router
 from app.api.agents import router as agents_router
 from app.api.analyses import router as analyses_router
+from app.api.knowledge import router as knowledge_router
 from app.api.logs import router as logs_router
 from app.api.parser import router as parser_router
 from app.api.parsing import router as parsing_router
@@ -17,6 +18,7 @@ api_router.include_router(analyses_router)
 api_router.include_router(reports_router)
 api_router.include_router(agents_router)
 api_router.include_router(agent_tasks_router)
+api_router.include_router(knowledge_router)
 
 
 @api_router.get("/test")
