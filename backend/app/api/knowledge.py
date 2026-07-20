@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import session as session_module
@@ -41,6 +41,35 @@ def create_document(
 ) -> Any:
     """Create a new knowledge document."""
     return KnowledgeService(db).create(body.model_dump())
+
+
+@router.post("/upload", response_model=KnowledgeResponse, status_code=201)
+def upload_document(
+    file: UploadFile = File(...),
+    category: Optional[str] = Form(default=None),
+    doc_type: str = Form(default="manual"),
+    db: Session = Depends(get_db_session),
+) -> Any:
+    """Upload a document file (.md, .txt) and import into knowledge base."""
+    from pathlib import Path
+    from app.services.document_importer import DocumentImporter
+
+    tmp_path = Path("/tmp") / (file.filename or "upload")
+    tmp_path.write_bytes(file.file.read())
+
+    try:
+        importer = DocumentImporter()
+        result = importer.parse_file(tmp_path)
+        return KnowledgeService(db).create({
+            "title": result["title"],
+            "content": result["content"],
+            "category": category,
+            "doc_type": doc_type,
+            "source": file.filename,
+        })
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
 
 
 # ------------------------------------------------------------------

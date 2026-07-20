@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 
 from app.database.base import Base
 
@@ -14,6 +14,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=True)
     role = Column(String(20), default="engineer")  # admin / engineer / viewer
     is_active = Column(Boolean, default=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,

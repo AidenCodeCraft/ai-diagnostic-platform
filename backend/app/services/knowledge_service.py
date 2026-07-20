@@ -88,10 +88,36 @@ class KnowledgeService:
         page: int = 1,
         page_size: int = 20,
     ) -> Dict[str, Any]:
-        """Keyword-based search across title and content.
+        """Hybrid search: tries vector search first, falls back to keyword.
 
-        In future iterations this will be replaced by Milvus vector search.
+        Vector search via Milvus (production) or FAISS (development).
+        Keyword search via SQL ILIKE as final fallback.
         """
+        # Try vector search first
+        from app.services.vector_service import VectorService
+        vector = VectorService()
+        vector_results = vector.search(query_text, top_k=page_size)
+
+        if vector_results:
+            doc_ids = [r["id"] for r in vector_results]
+            docs = self.db.query(KnowledgeDocument).filter(
+                KnowledgeDocument.id.in_(doc_ids),
+                KnowledgeDocument.status == "active",
+            ).all()
+            doc_map = {d.id: d for d in docs}
+            results = []
+            for vr in vector_results:
+                doc = doc_map.get(vr["id"])
+                if doc:
+                    results.append({
+                        "id": doc.id, "title": doc.title,
+                        "category": doc.category, "doc_type": doc.doc_type,
+                        "relevance_score": round(vr.get("score", 0), 2),
+                        "snippet": self._extract_snippet(doc.content, query_text),
+                    })
+            return {"items": results, "total": len(results), "page": page, "page_size": page_size}
+
+        # Fallback to keyword search
         pattern = f"%{query_text}%"
         base_query = self.db.query(KnowledgeDocument).filter(
             KnowledgeDocument.status == "active",
@@ -100,34 +126,18 @@ class KnowledgeService:
                 KnowledgeDocument.content.ilike(pattern),
             ),
         )
-
         total = base_query.count()
-        items = (
-            base_query.order_by(KnowledgeDocument.updated_at.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-            .all()
-        )
-
+        items = base_query.order_by(KnowledgeDocument.updated_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
         results = []
         for doc in items:
             score = self._relevance_score(doc, query_text)
-            snippet = self._extract_snippet(doc.content, query_text)
             results.append({
-                "id": doc.id,
-                "title": doc.title,
-                "category": doc.category,
-                "doc_type": doc.doc_type,
+                "id": doc.id, "title": doc.title,
+                "category": doc.category, "doc_type": doc.doc_type,
                 "relevance_score": round(score, 2),
-                "snippet": snippet,
+                "snippet": self._extract_snippet(doc.content, query_text),
             })
-
-        return {
-            "items": results,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-        }
+        return {"items": results, "total": total, "page": page, "page_size": page_size}
 
     # ------------------------------------------------------------------
     # Update

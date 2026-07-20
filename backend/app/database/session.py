@@ -3,8 +3,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 from app.database.base import Base
-from app.models import log, project, user, analysis, report, knowledge  # noqa: F401
+from app.models import log, project, user, analysis, report, knowledge, organization  # noqa: F401
 from app.models.agent_task import AgentTask  # noqa: F401
+from app.models.bug_case import BugCase  # noqa: F401
+from app.models.chat_session import ChatSession, ChatMessage  # noqa: F401
+from app.models.api_key import ApiKey  # noqa: F401
 
 
 engine = create_engine(
