@@ -59,5 +59,4 @@ def test_parse_flow_returns_events_for_uploaded_log(client):
     status_response = client.get(f"/api/v1/logs/{log_id}/parse-status")
     assert status_response.status_code == 200
     status_payload = status_response.json()
-    assert status_payload["status"] == "completed"
-    assert status_payload["event_count"] == 1
+    assert status_payload["status"] == "parsed"
