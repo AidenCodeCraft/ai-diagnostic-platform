@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import session as session_module
@@ -95,5 +95,6 @@ def delete_log(log_id: int, db: Session = Depends(get_db_session)):
     """Delete a log record and remove its file from storage."""
     try:
         LogService(db).delete_log(log_id)
+        return Response(status_code=204)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

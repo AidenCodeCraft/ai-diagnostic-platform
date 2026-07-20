@@ -3,7 +3,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env")
+    # Docker 部署时环境变量通过 docker-compose 注入；
+    # 本地开发时从 .env 读取（如果存在）
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     # Application
     APP_NAME: str = "AI Diagnostic Platform"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
@@ -89,9 +89,10 @@ def export_report_markdown(
 def delete_report(
     report_id: int,
     db: Session = Depends(get_db_session),
-) -> None:
+):
     """Delete a report."""
     try:
         ReportService(db).delete_report(report_id)
+        return Response(status_code=204)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

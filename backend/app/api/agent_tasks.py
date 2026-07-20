@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.database import session as session_module
@@ -43,9 +43,10 @@ def get_task(task_id: str, db: Session = Depends(get_db_session)) -> Dict[str, A
 
 
 @router.delete("/{task_id}", status_code=204)
-def delete_task(task_id: str, db: Session = Depends(get_db_session)) -> None:
+def delete_task(task_id: str, db: Session = Depends(get_db_session)):
     """Delete an agent task record."""
     try:
         AgentTaskService(db).delete_task(task_id)
+        return Response(status_code=204)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

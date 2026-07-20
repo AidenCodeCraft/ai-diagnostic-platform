@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.database import session as session_module
@@ -125,9 +125,10 @@ def update_document(
 def delete_document(
     doc_id: int,
     db: Session = Depends(get_db_session),
-) -> None:
+):
     """Delete a knowledge document."""
     try:
         KnowledgeService(db).delete(doc_id)
+        return Response(status_code=204)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

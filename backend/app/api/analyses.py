@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.database import session as session_module
@@ -105,9 +105,10 @@ def get_analysis_result(
 def delete_analysis(
     analysis_id: int,
     db: Session = Depends(get_db_session),
-) -> None:
+):
     """Delete an analysis task."""
     try:
         AnalysisTaskService(db).delete_analysis(analysis_id)
+        return Response(status_code=204)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
