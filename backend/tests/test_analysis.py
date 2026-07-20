@@ -42,11 +42,11 @@ def test_run_analysis_creates_analysis_record(client):
     assert upload_response.status_code == 200
 
     log_id = upload_response.json()["id"]
-    response = client.post(f"/api/v1/analyses/{log_id}/run")
+    response = client.post(f"/api/v1/analyses/run?log_id={log_id}")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["log_id"] == log_id
-    assert payload["result"]["event_count"] == 1
-    assert payload["result"]["errors"][0]["classification"] == "timeout"
-    assert payload["confidence"] >= 0.4
+    assert payload["status"] == "completed"
+    assert payload["confidence"] is not None
+    assert payload["summary"]

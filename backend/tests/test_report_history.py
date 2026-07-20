@@ -41,7 +41,7 @@ def test_list_reports_returns_generated_reports(client):
     assert upload_response.status_code == 200
     log_id = upload_response.json()["id"]
 
-    analysis_response = client.post(f"/api/v1/analysis/{log_id}/llm")
+    analysis_response = client.post(f"/api/v1/analyses/run?log_id={log_id}")
     assert analysis_response.status_code == 200
 
     create_report_response = client.post(f"/api/v1/reports/{log_id}")

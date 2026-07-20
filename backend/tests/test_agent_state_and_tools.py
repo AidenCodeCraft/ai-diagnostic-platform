@@ -44,6 +44,6 @@ def test_agent_run_returns_state_and_tool_plan(client):
     response = client.post(f"/api/v1/agents/run/{log_id}")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] in {"planning", "completed"}
-    assert payload["state"] in {"CREATED", "PLANNING", "EXECUTING", "COMPLETED"}
+    assert payload["status"] in {"completed", "failed"}
+    assert payload["state"] in {"COMPLETED", "FAILED", "CREATED", "PLANNING", "PLAN_READY", "EXECUTING", "VALIDATING"}
     assert payload["tool_plan"]

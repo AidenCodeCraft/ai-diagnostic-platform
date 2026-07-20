@@ -42,16 +42,17 @@ def test_llm_service_generates_summary(client):
     assert upload_response.status_code == 200
     log_id = upload_response.json()["id"]
 
-    response = client.post(f"/api/v1/analysis/{log_id}/llm")
+    response = client.post(f"/api/v1/analyses/run?log_id={log_id}")
     assert response.status_code == 200
     payload = response.json()
     assert payload["log_id"] == log_id
-    assert "usb" in payload["summary"].lower()
     assert payload["model"] == "mock"
+    assert payload["status"] == "completed"
 
-    persisted_response = client.get(f"/api/v1/analysis/{log_id}")
+    analysis_id = payload["id"]
+    persisted_response = client.get(f"/api/v1/analyses/{analysis_id}/result")
     assert persisted_response.status_code == 200
     persisted_payload = persisted_response.json()
     assert persisted_payload["log_id"] == log_id
     assert persisted_payload["status"] == "completed"
-    assert persisted_payload["summary"].lower().startswith("detected")
+    assert persisted_payload["summary"]

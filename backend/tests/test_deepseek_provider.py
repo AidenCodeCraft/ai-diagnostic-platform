@@ -14,4 +14,4 @@ def test_deepseek_provider_returns_fallback_without_key(monkeypatch):
     provider = DeepSeekProvider()
     result = provider.generate_summary("usb timeout", [{"is_error": True, "module": "usb"}])
     assert result["model"] == "deepseek"
-    assert "fallback" in result["summary"].lower()
+    assert "not configured" in result["summary"].lower()

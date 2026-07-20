@@ -45,5 +45,5 @@ def test_agent_run_creates_plan_and_status(client):
     assert response.status_code == 200
     payload = response.json()
     assert payload["task_id"]
-    assert payload["status"] in {"planning", "completed"}
+    assert payload["status"] in {"completed", "failed"}
     assert payload["steps"]

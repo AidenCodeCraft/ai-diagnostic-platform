@@ -7,8 +7,14 @@ def test_provider_registry_uses_mock_by_default():
     assert provider.name == "mock"
 
 
-def test_provider_registry_supports_deepseek_override(monkeypatch):
-    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+def test_provider_registry_supports_deepseek_override():
     registry = ProviderRegistry()
-    provider = registry.get_provider()
+    provider = registry.get_provider("deepseek")
     assert provider.name == "deepseek"
+
+
+def test_provider_registry_available_providers():
+    registry = ProviderRegistry()
+    available = registry.available_providers
+    assert "mock" in available
+    assert "deepseek" in available

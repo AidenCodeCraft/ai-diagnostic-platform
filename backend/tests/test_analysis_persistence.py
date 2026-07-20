@@ -42,10 +42,13 @@ def test_analysis_result_is_persisted_in_structured_form(client):
     assert upload_response.status_code == 200
     log_id = upload_response.json()["id"]
 
-    response = client.post(f"/api/v1/analysis/{log_id}/llm")
-    assert response.status_code == 200
+    # Run analysis via new endpoint
+    run_response = client.post(f"/api/v1/analyses/run?log_id={log_id}")
+    assert run_response.status_code == 200
+    analysis_id = run_response.json()["id"]
 
-    persisted_response = client.get(f"/api/v1/analysis/{log_id}")
+    # Get result
+    persisted_response = client.get(f"/api/v1/analyses/{analysis_id}/result")
     assert persisted_response.status_code == 200
     payload = persisted_response.json()
     assert payload["summary"]

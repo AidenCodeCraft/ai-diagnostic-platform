@@ -1,3 +1,5 @@
+"""Agent service — orchestrates diagnostic workflows using the Agent Framework."""
+
 from __future__ import annotations
 
 import uuid
@@ -5,60 +7,80 @@ from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
+from app.agents.core.agent import AgentResult, BaseAgent
+from app.agents.core.state import AgentState
+from app.agents.planner.simple_planner import SimplePlanner
+from app.agents.tools.builtin import create_default_registry
+from app.agents.core.tool import ToolRegistry
 from app.models.log import Log
 from app.services.agent_task_service import AgentTaskService
-from app.services.analysis_result_service import AnalysisResultService
-from app.services.parsing_service import ParsingService
 
 
-class ToolManager:
-    def build_tool_plan(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        return [
-            {"name": "parse_log", "status": "ready"},
-            {"name": "rule_check", "status": "ready"},
-            {"name": "generate_analysis", "status": "ready"},
-            {"name": "generate_report", "status": "ready"},
-        ]
+class DiagnosticAgent(BaseAgent):
+    """Agent that executes a full diagnostic workflow on a log file."""
+
+    name = "diagnostic_agent"
+    description = "Parses device logs, runs rule checks, calls LLM, and generates reports."
+
+    def __init__(self, tool_registry: ToolRegistry | None = None) -> None:
+        super().__init__(tool_registry or create_default_registry())
+        self.planner = SimplePlanner()
+
+    def plan(self, **context: Any) -> List[str]:
+        log_id = context.pop("log_id", 0)
+        return self.planner.build_plan(log_id, **context)
 
 
 class AgentService:
-    def __init__(self, db: Session):
-        self.db = db
-        self.tool_manager = ToolManager()
+    """Service layer for running diagnostic agents and persisting results."""
 
-    def _build_plan(self, log: Log, events: List[Dict[str, Any]]) -> List[str]:
-        return [tool["name"] for tool in self.tool_manager.build_tool_plan(events)]
+    def __init__(self, db: Session) -> None:
+        self.db = db
 
     def run(self, log_id: int) -> Dict[str, Any]:
+        """Execute the diagnostic agent on a log file."""
         log = self.db.query(Log).filter(Log.id == log_id).first()
         if not log:
             raise ValueError("log not found")
 
-        events = ParsingService(self.db).parse_log(log_id)
-        plan = self._build_plan(log, events)
-        tool_plan = self.tool_manager.build_tool_plan(events)
+        # Build context
+        with open(log.file_path, "r", encoding="utf-8", errors="ignore") as f:
+            log_content = f.read()
 
-        analysis_service = AnalysisResultService(self.db)
-        analysis_service.create_or_update_analysis(log_id)
-
-        task_id = str(uuid.uuid4())
-        payload = {
-            "task_id": task_id,
+        context = {
             "log_id": log_id,
-            "status": "completed",
-            "state": "COMPLETED",
-            "steps": plan,
-            "tool_plan": tool_plan,
-            "summary": f"Planned and executed diagnostic workflow for {log.filename}",
+            "log_file_path": log.file_path,
+            "log_filename": log.filename,
+            "log_content": log_content,
+            "db_session": self.db,
         }
-        AgentTaskService(self.db).save_task(
+
+        # Run agent
+        agent = DiagnosticAgent()
+        result = agent.run(**context)
+
+        # Persist
+        task_id = str(uuid.uuid4())
+        task_service = AgentTaskService(self.db)
+
+        task_service.save_task(
             task_id=task_id,
             log_id=log_id,
-            status=payload["status"],
-            state=payload["state"],
-            steps=payload["steps"],
-            tool_plan=payload["tool_plan"],
-            summary=payload["summary"],
+            status="completed" if result.success else "failed",
+            state=result.state.value,
+            steps=result.steps,
+            tool_plan=result.tool_plan,
+            summary=result.summary,
+            error_message=result.error,
         )
 
-        return payload
+        return {
+            "task_id": task_id,
+            "log_id": log_id,
+            "status": "completed" if result.success else "failed",
+            "state": result.state.value,
+            "steps": result.steps,
+            "tool_plan": result.tool_plan,
+            "summary": result.summary,
+            "error": result.error,
+        }

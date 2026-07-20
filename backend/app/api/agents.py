@@ -1,3 +1,7 @@
+"""Agent execution API."""
+
+from __future__ import annotations
+
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,6 +24,7 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 @router.post("/run/{log_id}")
 def run_agent(log_id: int, db: Session = Depends(get_db_session)) -> Dict[str, Any]:
+    """Execute the diagnostic agent on a log file."""
     try:
         return AgentService(db).run(log_id)
     except ValueError as exc:
