@@ -44,11 +44,6 @@ export const useUserStore = defineStore('user', () => {
     return data
   }
 
-  async function register(username: string, password: string, email?: string) {
-    const { data } = await axios.post('/api/v1/auth/register', { username, password, email })
-    return data
-  }
-
   function logout() {
     token.value = ''
     user.value = null
@@ -56,5 +51,5 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('user')
   }
 
-  return { token, user, isLoggedIn, isAdmin, userName, setAuth, restoreFromStorage, login, register, logout }
+  return { token, user, isLoggedIn, isAdmin, userName, setAuth, restoreFromStorage, login, logout }
 })

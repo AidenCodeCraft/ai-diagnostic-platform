@@ -1,4 +1,4 @@
-"""Authentication service — registration, login, JWT management (no external deps)."""
+"""Authentication service — login with brute-force protection, JWT management."""
 
 from __future__ import annotations
 
@@ -14,55 +14,133 @@ from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 
 from app.models.user import User
+from app.models.login_attempt import LoginAttempt
 
 
 class AuthService:
-    """Handles user registration, login, and JWT token operations."""
+    """Handles login with MAC-based brute-force protection and JWT tokens."""
 
     _DEFAULT_SECRET = "ai-diagnostic-jwt-secret-change-in-production"
+
+    # Brute-force parameters
+    INITIAL_MAX_ATTEMPTS = 5       # 前 5 次错误后锁定
+    INITIAL_LOCK_MINUTES = 20      # 首次锁定 20 分钟
+    CYCLE_LOCK_MINUTES = 60        # 循环锁定 1 小时
+    CYCLE_ATTEMPTS = 1             # 循环阶段每次解锁仅 1 次尝试
 
     def __init__(self, db: Session):
         self.db = db
 
     # ------------------------------------------------------------------
-    # Registration
+    # Login (with brute-force protection)
     # ------------------------------------------------------------------
 
-    def register(self, username: str, password: str, email: Optional[str] = None) -> User:
-        existing = self.db.query(User).filter(User.username == username).first()
-        if existing:
-            raise ValueError("username already exists")
-        if email:
-            if self.db.query(User).filter(User.email == email).first():
-                raise ValueError("email already registered")
+    def login(self, username: str, password: str, mac_address: str) -> Dict[str, Any]:
+        """Login with MAC-based brute-force protection.
 
-        user = User(
-            username=username,
-            email=email,
-            password_hash=self._hash_password(password),
-            role="engineer",
-            is_active=True,
-        )
-        self.db.add(user)
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+        Raises ValueError with specific messages for different failure modes.
+        """
+        now = datetime.now(timezone.utc)
 
-    # ------------------------------------------------------------------
-    # Login
-    # ------------------------------------------------------------------
+        # 1. Check brute-force lock
+        lock_error = self._check_lock(mac_address, now)
+        if lock_error:
+            raise ValueError(lock_error)
 
-    def login(self, username: str, password: str) -> Dict[str, Any]:
+        # 2. Verify credentials
         user = self.db.query(User).filter(User.username == username).first()
         if not user or not self._verify_password(password, user.password_hash or ""):
-            raise ValueError("用户名或密码无效")
+            self._record_failure(mac_address, username, now)
+            raise ValueError("用户名或密码错误")
+
         if not user.is_active:
             raise ValueError("账户已禁用")
+
+        # 3. Success — clear all attempt records for this MAC
+        self._clear_attempts(mac_address)
+
         return {
             "access_token": self._create_token(user),
             "token_type": "bearer",
             "user": user,
         }
+
+    # ------------------------------------------------------------------
+    # Brute-force protection
+    # ------------------------------------------------------------------
+
+    def _check_lock(self, mac_address: str, now: datetime) -> Optional[str]:
+        """Check if MAC is currently locked. Returns error message or None."""
+        record = (
+            self.db.query(LoginAttempt)
+            .filter(LoginAttempt.mac_address == mac_address)
+            .order_by(LoginAttempt.locked_until.desc())
+            .first()
+        )
+
+        if not record or not record.locked_until:
+            return None
+
+        if now < record.locked_until:
+            remaining = int((record.locked_until - now).total_seconds() / 60)
+            return f"登录已被锁定，请在 {remaining} 分钟后重试"
+
+        # Lock expired — check cycle phase for attempt allowance
+        if record.cycle_phase > 0:
+            # In cycle phase: each unlock gives exactly 1 attempt
+            # The attempt will be consumed in _record_failure if wrong
+            pass
+
+        return None
+
+    def _record_failure(self, mac_address: str, username: str, now: datetime):
+        """Record a failed login attempt and apply lock if needed."""
+        record = (
+            self.db.query(LoginAttempt)
+            .filter(LoginAttempt.mac_address == mac_address)
+            .order_by(LoginAttempt.id.desc())
+            .first()
+        )
+
+        if not record:
+            # First failure for this MAC
+            record = LoginAttempt(
+                mac_address=mac_address,
+                username=username,
+                attempt_count=1,
+                cycle_phase=0,
+                last_attempt_at=now,
+            )
+            self.db.add(record)
+        else:
+            # If previously locked and now expired, this is the "1 attempt" in cycle phase
+            was_locked = record.locked_until and record.locked_until <= now
+
+            if was_locked and record.cycle_phase > 0:
+                # Cycle phase: this was the 1 allowed attempt — failed → lock again
+                record.attempt_count = 1
+                record.locked_until = now + timedelta(minutes=self.CYCLE_LOCK_MINUTES)
+                record.last_attempt_at = now
+            else:
+                record.attempt_count += 1
+                record.last_attempt_at = now
+
+                if record.cycle_phase == 0 and record.attempt_count >= self.INITIAL_MAX_ATTEMPTS:
+                    # Initial phase: 5th failure → lock 20 min, enter cycle phase
+                    record.locked_until = now + timedelta(minutes=self.INITIAL_LOCK_MINUTES)
+                    record.cycle_phase = 1
+                elif record.cycle_phase > 0 and record.attempt_count >= self.CYCLE_ATTEMPTS:
+                    # Already in cycle: re-lock for 1 hour
+                    record.locked_until = now + timedelta(minutes=self.CYCLE_LOCK_MINUTES)
+
+        self.db.commit()
+
+    def _clear_attempts(self, mac_address: str):
+        """Clear all attempt records after successful login."""
+        self.db.query(LoginAttempt).filter(
+            LoginAttempt.mac_address == mac_address
+        ).delete()
+        self.db.commit()
 
     # ------------------------------------------------------------------
     # Token
@@ -99,7 +177,6 @@ class AuthService:
             raise ValueError("invalid token format")
         header_b64, payload_b64, sig_b64 = parts
 
-        # Verify signature
         expected_sig = self._sign(header_b64 + "." + payload_b64)
         if not hmac.compare_digest(expected_sig, self._b64url_decode(sig_b64)):
             raise ValueError("invalid signature")
@@ -132,7 +209,7 @@ class AuthService:
         return base64.urlsafe_b64decode(data)
 
     # ------------------------------------------------------------------
-    # Password hashing
+    # Password hashing (PBKDF2-SHA256)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -150,4 +227,3 @@ class AuthService:
             return hmac.compare_digest(expected.hex(), hash_hex)
         except (ValueError, AttributeError):
             return False
-
