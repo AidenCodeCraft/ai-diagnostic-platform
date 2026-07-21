@@ -28,6 +28,7 @@ class KnowledgeService:
             category=data.get("category"),
             source=data.get("source"),
             doc_type=data.get("doc_type", "manual"),
+            parent_id=data.get("parent_id"),
             project_id=data.get("project_id"),
             status="active",
         )
@@ -55,8 +56,16 @@ class KnowledgeService:
         category: Optional[str] = None,
         doc_type: Optional[str] = None,
         status: Optional[str] = None,
+        parent_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         query = self.db.query(KnowledgeDocument)
+
+        # 文件夹层级过滤
+        if parent_id is not None:
+            query = query.filter(KnowledgeDocument.parent_id == parent_id)
+        else:
+            # 默认只显示根级文档（parent_id IS NULL）
+            query = query.filter(KnowledgeDocument.parent_id.is_(None))
 
         if category:
             query = query.filter(KnowledgeDocument.category == category)
@@ -157,9 +166,64 @@ class KnowledgeService:
     # ------------------------------------------------------------------
 
     def delete(self, doc_id: int) -> None:
+        """Delete a document and all its descendants recursively.
+
+        Raises ValueError if the document does not exist.
+        Handles folders with child documents by deleting children first.
+        """
         doc = self.get(doc_id)
+        self._delete_children(doc_id)
+        self.db.flush()  # 确保子节点删除已写入数据库，避免 FK 约束冲突
         self.db.delete(doc)
         self.db.commit()
+
+    def _delete_children(self, parent_id: int) -> None:
+        """Recursively delete all child documents of a given parent."""
+        children = (
+            self.db.query(KnowledgeDocument)
+            .filter(KnowledgeDocument.parent_id == parent_id)
+            .all()
+        )
+        for child in children:
+            self._delete_children(child.id)  # 递归删除孙节点
+            self.db.delete(child)
+            self.db.flush()  # 每个子节点立即 flush，确保递归删除时序正确
+
+    # ------------------------------------------------------------------
+    # Tree
+    # ------------------------------------------------------------------
+
+    def get_tree(self) -> List[Dict[str, Any]]:
+        """Build full folder/document tree from flat records."""
+        docs = (
+            self.db.query(KnowledgeDocument)
+            .filter(KnowledgeDocument.status == "active")
+            .order_by(KnowledgeDocument.doc_type.desc(), KnowledgeDocument.updated_at.desc())
+            .all()
+        )
+
+        doc_map: Dict[int, Dict[str, Any]] = {}
+        roots: List[Dict[str, Any]] = []
+
+        for d in docs:
+            node = {
+                "id": d.id,
+                "title": d.title,
+                "doc_type": d.doc_type,
+                "category": d.category,
+                "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+                "children": [],
+            }
+            doc_map[d.id] = node
+
+        for d in docs:
+            node = doc_map[d.id]
+            if d.parent_id and d.parent_id in doc_map:
+                doc_map[d.parent_id]["children"].append(node)
+            else:
+                roots.append(node)
+
+        return roots
 
     # ------------------------------------------------------------------
     # Categories

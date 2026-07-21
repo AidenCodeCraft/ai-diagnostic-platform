@@ -14,6 +14,7 @@ from app.schemas.knowledge import (
     KnowledgeUpdate,
     KnowledgeListResponse,
     KnowledgeSearchResult,
+    KnowledgeTreeResponse,
 )
 from app.services.knowledge_service import KnowledgeService
 
@@ -84,6 +85,7 @@ def list_documents(
     category: Optional[str] = Query(default=None),
     doc_type: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
+    parent_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """List knowledge documents with optional filters."""
@@ -91,6 +93,7 @@ def list_documents(
         page=page,
         page_size=page_size,
         category=category,
+        parent_id=parent_id,
         doc_type=doc_type,
         status=status,
     )
@@ -113,6 +116,14 @@ def list_categories(
 ) -> List[str]:
     """List all active document categories."""
     return KnowledgeService(db).list_categories()
+
+
+@router.get("/tree", response_model=KnowledgeTreeResponse)
+def get_tree(
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """Get full knowledge base folder/document tree."""
+    return {"tree": KnowledgeService(db).get_tree()}
 
 
 @router.get("/{doc_id}", response_model=KnowledgeResponse)
@@ -156,8 +167,11 @@ def delete_document(
     db: Session = Depends(get_db_session),
 ):
     """Delete a knowledge document."""
+    from sqlalchemy.exc import IntegrityError
     try:
         KnowledgeService(db).delete(doc_id)
         return Response(status_code=204)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="Cannot delete: document has dependencies") from exc

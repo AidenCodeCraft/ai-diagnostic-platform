@@ -47,6 +47,11 @@
               <line x1="16" y1="13" x2="8" y2="13" />
               <line x1="16" y1="17" x2="8" y2="17" />
             </svg><span>诊断报告</span></div>
+          <div v-if="userStore.isAdmin" class="nav-item admin-entry" @click="navigateTo('/admin')"><svg width="16" height="16" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg><span>管理后台</span></div>
         </div>
         <div class="sidebar-history" v-show="!sidebarCollapsed">
           <div class="section-title">最近对话</div>
@@ -196,10 +201,16 @@
     </teleport>
 
     <!-- ============================================================ -->
-    <!-- 对话主区域 — ChatGPT 风格居中                                 -->
+    <!-- ============================================================ -->
+    <!-- 对话主区域 — ChatGPT 风格居中 / 子路由内容                     -->
     <!-- ============================================================ -->
     <main class="chat-main" :class="{ 'has-messages': messages.length > 0 }">
-      <!-- 空状态：提示语 + 输入框整体居中 -->
+      <!-- 非对话路由：显示子页面 -->
+      <div v-if="$route.path !== '/chat' && $route.path !== '/'" class="sub-page">
+        <router-view />
+      </div>
+      <!-- 对话内容 -->
+      <div v-else class="chat-content">
       <div v-if="messages.length === 0" class="welcome-full">
         <div class="welcome-inner">
           <div class="welcome-icon">
@@ -256,7 +267,7 @@
       </div>
 
       <!-- 有消息时 -->
-      <template v-else>
+      <div v-else class="chat-messages-wrap">
         <div class="chat-messages" ref="msgContainer">
           <div v-for="msg in messages" :key="msg.id" class="message-row" :class="msg.role">
             <div class="message-avatar" v-if="msg.role === 'assistant'"><svg width="24" height="24" viewBox="0 0 24 24"
@@ -320,7 +331,8 @@
             </div>
           </div>
         </div>
-      </template>
+      </div>
+      </div>
     </main>
   </div>
 </template>
@@ -330,8 +342,10 @@ import { ref, nextTick, onMounted, reactive, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { chatApi, type ChatMessage } from '@/api/chat'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
 const sidebarCollapsed = ref(false)
 const selectedModel = ref('mock')
 const inputText = ref('')
@@ -358,7 +372,7 @@ interface ChatRecord { id: string; title: string; pinned?: boolean; messages?: C
 const recentChats = ref<ChatRecord[]>([])
 const chatMenu = reactive({ visible: false, x: 0, y: 0, chatId: '' })
 
-const userName = ref('用户')
+const userName = computed(() => userStore.userName)
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
 
 // ============================================================
@@ -367,15 +381,22 @@ function toggleSearch() { }
 function navigateTo(path: string) { router.push(path) }
 function saveSettings() { localStorage.setItem('theme', settings.theme) }
 
-function newChat() { messages.value = []; currentChatId.value = ''; canGenerateReport.value = false; inputText.value = ''; attachedFile.value = null }
-function selectChat(id: string) { const chat = recentChats.value.find(c => c.id === id); if (chat?.messages) { currentChatId.value = id; messages.value = [...chat.messages]; canGenerateReport.value = true; nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight }) } }
+function newChat() { messages.value = []; currentChatId.value = ''; canGenerateReport.value = false; inputText.value = ''; attachedFile.value = null; router.push('/chat') }
+function selectChat(id: string) { const chat = recentChats.value.find(c => c.id === id); if (chat?.messages) { currentChatId.value = id; messages.value = [...chat.messages]; canGenerateReport.value = true; router.push('/chat'); nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight }) } }
 function saveCurrentChat() { if (!currentChatId.value || messages.value.length === 0) return; const chat = recentChats.value.find(c => c.id === currentChatId.value); if (chat) { chat.messages = [...messages.value]; saveChats() } }
 function openChatMenu(e: MouseEvent, chat: ChatRecord) { chatMenu.visible = true; chatMenu.x = e.clientX - 8; chatMenu.y = e.clientY + 4; chatMenu.chatId = chat.id }
 function closeChatMenu() { chatMenu.visible = false }
 async function renameChat() { const chat = recentChats.value.find(c => c.id === chatMenu.chatId); if (!chat) return; try { const { value } = await ElMessageBox.prompt('新标题', '重命名', { inputValue: chat.title }); if (value?.trim()) { chat.title = value.trim(); saveChats() } } catch { }; closeChatMenu() }
 function pinChat() { const idx = recentChats.value.findIndex(c => c.id === chatMenu.chatId); if (idx > 0) { const [item] = recentChats.value.splice(idx, 1); recentChats.value.unshift(item); saveChats() }; closeChatMenu() }
 function analyzeChat() { ElMessage.info('分析功能开发中'); closeChatMenu() }
-function deleteChat() { recentChats.value = recentChats.value.filter(c => c.id !== chatMenu.chatId); saveChats(); closeChatMenu() }
+async function deleteChat() {
+  try {
+    await ElMessageBox.confirm('删除后，该对话将不可恢复', '确认删除', { confirmButtonText: '删除该对话', cancelButtonText: '取消', type: 'warning' })
+    recentChats.value = recentChats.value.filter(c => c.id !== chatMenu.chatId)
+    saveChats()
+  } catch {}
+  closeChatMenu()
+}
 function autoTitle(text: string, file?: File | null): string { if (file) return file.name.length > 24 ? file.name.slice(0, 24) + '…' : file.name; const cleaned = text.replace(/[🎯📊🔍❌📚]/g, '').trim(); return cleaned.length > 28 ? cleaned.slice(0, 28) + '…' : cleaned }
 function addChatToHistory(title: string) { const id = Date.now().toString(); recentChats.value.unshift({ id, title, messages: [...messages.value] }); currentChatId.value = id; saveChats() }
 function saveChats() { localStorage.setItem('recent-chats', JSON.stringify(recentChats.value.map(({ id, title, pinned, messages: m }) => ({ id, title, pinned, messages: m })))) }
@@ -384,7 +405,7 @@ function saveChats() { localStorage.setItem('recent-chats', JSON.stringify(recen
 function downloadApp() { ElMessage.info('桌面版下载页面开发中'); showUserMenu.value = false }
 function openSettings() { showUserMenu.value = false; showSettings.value = true }
 function openHelp() { ElMessage.info('帮助文档开发中'); showUserMenu.value = false }
-function logout() { ElMessage.success('已退出登录'); showUserMenu.value = false }
+function logout() { userStore.logout(); showUserMenu.value = false; router.push('/login') }
 async function changePwd() { try { const { value } = await ElMessageBox.prompt('请输入新密码', '修改密码', { inputType: 'password' }); if (value) ElMessage.success('密码修改成功') } catch { } }
 async function clearData() { try { await ElMessageBox.confirm('确定清除所有对话数据？不可恢复。', '确认', { type: 'warning' }); localStorage.removeItem('recent-chats'); recentChats.value = []; ElMessage.success('已清除'); showSettings.value = false } catch { } }
 
@@ -932,7 +953,7 @@ onMounted(() => { recentChats.value = JSON.parse(localStorage.getItem('recent-ch
 }
 
 /* ============================================================
-   对话区 — ChatGPT 风格：空状态整体居中
+   对话区 — ChatGPT 风格
    ============================================================ */
 .chat-main {
   flex: 1;
@@ -940,6 +961,15 @@ onMounted(() => { recentChats.value = JSON.parse(localStorage.getItem('recent-ch
   flex-direction: column;
   min-width: 0;
   position: relative;
+  overflow: hidden;
+}
+
+/* 子页面统一宽度 + 居中 */
+.sub-page {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
 }
 
 /* 空状态：flex居中整块内容 */
@@ -952,29 +982,24 @@ onMounted(() => { recentChats.value = JSON.parse(localStorage.getItem('recent-ch
   padding: 0 24px;
   gap: 24px;
 }
+.welcome-inner { text-align: center; }
+.welcome-icon { margin-bottom: 12px; opacity: 0.5; }
+.welcome-inner h2 { font-size: 22px; font-weight: 500; color: #374151; margin: 0; }
+.welcome-input { width: 100%; max-width: 720px; }
 
-.welcome-inner {
-  text-align: center;
+/* 有消息：chat-content 撑满，消息区滚动，输入框固定底部 */
+.chat-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
-
-.welcome-icon {
-  margin-bottom: 12px;
-  opacity: 0.5;
+.chat-messages-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
-
-.welcome-inner h2 {
-  font-size: 22px;
-  font-weight: 500;
-  color: #374151;
-  margin: 0;
-}
-
-.welcome-input {
-  width: 100%;
-  max-width: 720px;
-}
-
-/* 有消息 */
 .chat-messages {
   flex: 1;
   overflow-y: auto;

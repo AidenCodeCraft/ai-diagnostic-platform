@@ -55,9 +55,9 @@ class AuthService:
     def login(self, username: str, password: str) -> Dict[str, Any]:
         user = self.db.query(User).filter(User.username == username).first()
         if not user or not self._verify_password(password, user.password_hash or ""):
-            raise ValueError("invalid username or password")
+            raise ValueError("用户名或密码无效")
         if not user.is_active:
-            raise ValueError("account is disabled")
+            raise ValueError("账户已禁用")
         return {
             "access_token": self._create_token(user),
             "token_type": "bearer",

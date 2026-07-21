@@ -14,7 +14,7 @@ export const knowledgeApi = {
   create(data: { title: string; content: string; category?: string; doc_type?: string }) {
     return client.post<KnowledgeDoc>('/knowledge', data)
   },
-  list(params?: { page?: number; page_size?: number; category?: string; doc_type?: string }) {
+  list(params?: { page?: number; page_size?: number; category?: string; doc_type?: string; parent_id?: number }) {
     return client.get('/knowledge', { params })
   },
   get(id: number) {
@@ -31,5 +31,8 @@ export const knowledgeApi = {
   },
   categories() {
     return client.get<string[]>('/knowledge/categories')
+  },
+  tree() {
+    return client.get<{ tree: any[] }>('/knowledge/tree')
   },
 }

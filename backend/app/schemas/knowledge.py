@@ -13,6 +13,7 @@ class KnowledgeCreate(BaseModel):
     source: Optional[str] = Field(default=None, max_length=200)
     doc_type: str = Field(default="manual", max_length=50)
     project_id: Optional[int] = None
+    parent_id: Optional[int] = None
 
 
 class KnowledgeUpdate(BaseModel):
@@ -55,3 +56,19 @@ class KnowledgeListResponse(BaseModel):
     total: int
     page: int = 1
     page_size: int = 20
+
+
+class KnowledgeTreeNode(BaseModel):
+    """Recursive tree node for folder/document hierarchy."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    doc_type: str
+    category: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    children: List["KnowledgeTreeNode"] = []
+
+
+class KnowledgeTreeResponse(BaseModel):
+    tree: List[KnowledgeTreeNode]
