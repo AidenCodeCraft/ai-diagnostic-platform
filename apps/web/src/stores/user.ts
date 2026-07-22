@@ -8,14 +8,24 @@ interface UserInfo {
   email: string | null
   role: string
   is_active: boolean
+  organization?: string | null
+}
+
+function loadUserFromStorage(): UserInfo | null {
+  const u = localStorage.getItem('user')
+  if (!u) return null
+  try { return JSON.parse(u) } catch { return null }
 }
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('token') || '')
-  const user = ref<UserInfo | null>(null)
+  const user = ref<UserInfo | null>(loadUserFromStorage())
 
   const isLoggedIn = computed(() => !!token.value)
-  const isAdmin = computed(() => user.value?.role === 'admin')
+  const isAdmin = computed(() => {
+    const r = user.value?.role
+    return r === 'admin' || r === 'developer'
+  })
   const userName = computed(() => user.value?.username || '用户')
 
   function setAuth(t: string, u: UserInfo) {
@@ -23,19 +33,6 @@ export const useUserStore = defineStore('user', () => {
     user.value = u
     localStorage.setItem('token', t)
     localStorage.setItem('user', JSON.stringify(u))
-  }
-
-  function restoreFromStorage() {
-    const t = localStorage.getItem('token')
-    const u = localStorage.getItem('user')
-    if (t && u) {
-      try {
-        token.value = t
-        user.value = JSON.parse(u)
-      } catch {
-        logout()
-      }
-    }
   }
 
   async function login(username: string, password: string) {
@@ -51,5 +48,5 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('user')
   }
 
-  return { token, user, isLoggedIn, isAdmin, userName, setAuth, restoreFromStorage, login, logout }
+  return { token, user, isLoggedIn, isAdmin, userName, setAuth, login, logout }
 })

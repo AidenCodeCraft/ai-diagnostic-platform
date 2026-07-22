@@ -81,15 +81,14 @@ class AuthService:
         if not record or not record.locked_until:
             return None
 
-        if now < record.locked_until:
-            remaining = int((record.locked_until - now).total_seconds() / 60)
-            return f"登录已被锁定，请在 {remaining} 分钟后重试"
+        # Ensure locked_until is timezone-aware for comparison
+        locked = record.locked_until
+        if locked.tzinfo is None:
+            locked = locked.replace(tzinfo=timezone.utc)
 
-        # Lock expired — check cycle phase for attempt allowance
-        if record.cycle_phase > 0:
-            # In cycle phase: each unlock gives exactly 1 attempt
-            # The attempt will be consumed in _record_failure if wrong
-            pass
+        if now < locked:
+            remaining = int((locked - now).total_seconds() / 60)
+            return f"登录已被锁定，请在 {remaining} 分钟后重试"
 
         return None
 
@@ -114,7 +113,10 @@ class AuthService:
             self.db.add(record)
         else:
             # If previously locked and now expired, this is the "1 attempt" in cycle phase
-            was_locked = record.locked_until and record.locked_until <= now
+            locked = record.locked_until
+            if locked and locked.tzinfo is None:
+                locked = locked.replace(tzinfo=timezone.utc)
+            was_locked = locked and locked <= now
 
             if was_locked and record.cycle_phase > 0:
                 # Cycle phase: this was the 1 allowed attempt — failed → lock again

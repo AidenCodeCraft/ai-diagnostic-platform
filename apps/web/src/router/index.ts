@@ -58,8 +58,9 @@ router.beforeEach((to, _from, next) => {
     return next('/login')
   }
 
-  // 3) 需要管理员权限但非 admin → 重定向到对话页
-  if (to.meta.requiresAdmin && user?.role !== 'admin') {
+  // 3) 需要管理权限（admin/developer）但无权限 → 重定向到对话页
+  const adminRoles = ['admin', 'developer']
+  if (to.meta.requiresAdmin && !adminRoles.includes(user?.role || '')) {
     return next('/chat')
   }
 
