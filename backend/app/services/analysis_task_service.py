@@ -72,45 +72,31 @@ class AnalysisTaskService:
             raise
 
     def _execute_analysis(self, analysis: Analysis) -> Dict[str, Any]:
-        """Core analysis logic: verify → parse → LLM → persist."""
+        """Core analysis: verify → pipeline(parse → rules → RAG → LLM) → persist."""
         log = self._get_log(analysis.log_id)
 
-        # Verify file exists
         from pathlib import Path
         file_path = Path(log.file_path)
         if not file_path.exists():
             raise FileNotFoundError(f"Log file not found: {log.file_path}")
 
-        # Auto-update log status to analyzing
         if log.status in ("uploaded", "parsing", "parsed"):
             log.status = "analyzing"
             self.db.commit()
 
-        # Parse log
-        parser = LogParserService()
-        raw_events = parser.parse_structured(str(file_path))
-        events = [e.to_dict() for e in raw_events]
+        # Run full diagnostic pipeline (Rule Engine + RAG + LLM)
+        from app.services.diagnosis_pipeline import DiagnosisPipeline
+        pipeline = DiagnosisPipeline(self.db, model=analysis.model)
+        result = pipeline.run(str(file_path), user_query="")
 
-        # Run LLM
-        log_content = file_path.read_text(encoding="utf-8", errors="ignore")
-
-        llm_result = LLMService(model=analysis.model).generate_summary(log_content, events)
-        payload = self._normalize_payload(llm_result)
-
-        # Extract fields
-        summary = payload.get("summary") or "No summary generated."
-        root_cause = payload.get("root_cause") or "Unable to determine root cause."
-        confidence = float(payload.get("confidence", 0.8) or 0.8)
-        next_steps = self._normalize_next_steps(payload.get("next_steps", []))
-        model_name = payload.get("model") or analysis.model or "mock"
-
-        # Persist result fields
-        analysis.result = json.dumps(payload)
-        analysis.summary = summary
-        analysis.root_cause = root_cause
-        analysis.confidence = confidence
-        analysis.next_steps = json.dumps(next_steps)
-        analysis.model = str(model_name)
+        # Persist
+        analysis.result = json.dumps(result)
+        analysis.summary = result.get("summary", "")
+        analysis.root_cause = result.get("root_cause", "")
+        analysis.confidence = float(result.get("confidence", 0.5) or 0.5)
+        next_steps = result.get("next_steps", [])
+        analysis.next_steps = json.dumps(self._normalize_next_steps(next_steps))
+        analysis.model = str(analysis.model or "diagnosis-pipeline")
 
         self.db.commit()
         self.db.refresh(analysis)
@@ -119,11 +105,11 @@ class AnalysisTaskService:
             "id": analysis.id,
             "log_id": analysis.log_id,
             "status": analysis.status,
-            "summary": summary,
-            "root_cause": root_cause,
-            "confidence": confidence,
-            "next_steps": next_steps,
-            "model": model_name,
+            "summary": analysis.summary,
+            "root_cause": analysis.root_cause,
+            "confidence": analysis.confidence,
+            "next_steps": self._normalize_next_steps(analysis.next_steps),
+            "model": analysis.model,
             "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
         }
 
