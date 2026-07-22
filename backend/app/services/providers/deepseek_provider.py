@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any, Dict, Generator, List
 
 import httpx
@@ -11,11 +12,28 @@ from app.services.prompts.diagnostic_prompt import DiagnosticPrompt
 from app.services.providers.base import BaseProvider
 
 
+def _load_admin_llm_config() -> Dict[str, str]:
+    """Read LLM config from the admin panel's system_config.json.
+
+    Returns empty dict if file doesn't exist or is malformed.
+    """
+    config_path = Path("data") / "raw" / "system_config.json"
+    try:
+        if config_path.exists():
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+            return data.get("llm", {})
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
 class DeepSeekProvider(BaseProvider):
     """LLM provider for DeepSeek Chat API (https://api.deepseek.com).
 
-    Requires DEEPSEEK_API_KEY environment variable.
-    Falls back to local analysis if the key is missing or the request fails.
+    API key lookup order:
+    1. Explicit constructor arg
+    2. DEEPSEEK_API_KEY environment variable
+    3. Admin panel system_config.json (saved via 管理后台 → 系统配置)
     """
 
     name = "deepseek"
@@ -29,12 +47,14 @@ class DeepSeekProvider(BaseProvider):
         timeout: float = 30.0,
         max_retries: int = 2,
     ) -> None:
-        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
+        # Merge: explicit arg → env var → admin panel saved config
+        file_cfg = _load_admin_llm_config()
+        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY", "") or file_cfg.get("api_key", "")
         self.base_url = base_url or os.getenv(
             "DEEPSEEK_BASE_URL",
-            "https://api.deepseek.com/v1/chat/completions",
+            file_cfg.get("base_url") or "https://api.deepseek.com/v1/chat/completions",
         )
-        self.model = model or os.getenv("DEEPSEEK_MODEL", self.default_model)
+        self.model = model or os.getenv("DEEPSEEK_MODEL", file_cfg.get("model") or self.default_model)
         self.timeout = timeout
         self.max_retries = max_retries
 
@@ -105,12 +125,22 @@ class DeepSeekProvider(BaseProvider):
     def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
         """Stream chat via DeepSeek SSE."""
         if not self.api_key:
-            yield "[DeepSeek API key not configured]"
+            yield (
+                "## ⚠️ DeepSeek API Key 未配置\n\n"
+                "请在管理后台 → 系统配置 → LLM 配置中填写 DeepSeek API Key。"
+            )
             return
         try:
             yield from self._call_api_stream(messages)
-        except Exception:
-            yield "[DeepSeek API unavailable]"
+        except Exception as exc:
+            yield (
+                f"## DeepSeek API 连接失败\n\n"
+                f"**错误：** {exc}\n\n"
+                f"可能原因：\n"
+                f"1. Docker 容器无法访问外网（检查 DNS/代理设置）\n"
+                f"2. API Key 无效或已过期\n"
+                f"3. Base URL 配置错误（当前：{self._api_url}）"
+            )
 
     def health_check(self) -> bool:
         return bool(self.api_key)
@@ -119,12 +149,20 @@ class DeepSeekProvider(BaseProvider):
     # Internals
     # ------------------------------------------------------------------
 
+    @property
+    def _api_url(self) -> str:
+        """Construct the full chat/completions endpoint URL."""
+        url = self.base_url.rstrip("/")
+        if not url.endswith("/v1/chat/completions"):
+            url += "/v1/chat/completions"
+        return url
+
     def _call_api_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
         """Stream tokens from DeepSeek API."""
         with httpx.Client(timeout=60.0) as client:
             with client.stream(
                 "POST",
-                self.base_url,
+                self._api_url,
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
@@ -156,7 +194,7 @@ class DeepSeekProvider(BaseProvider):
         """Send arbitrary messages to DeepSeek and return the raw response content."""
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(
-                self.base_url,
+                self._api_url,
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
@@ -181,7 +219,7 @@ class DeepSeekProvider(BaseProvider):
         """Send request to DeepSeek and return the raw response content."""
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(
-                self.base_url,
+                self._api_url,
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",

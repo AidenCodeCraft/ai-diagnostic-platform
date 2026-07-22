@@ -74,14 +74,14 @@
     <!-- ============================================================ -->
     <main class="chat-main">
       <!-- 非对话路由：显示子页面 -->
-      <div v-if="$route.path !== '/chat' && $route.path !== '/'" class="sub-page">
+      <div v-show="$route.path !== '/chat' && $route.path !== '/'" class="sub-page">
         <router-view />
       </div>
       <!-- 对话内容 -->
-      <div v-else class="chat-content">
+      <div v-show="$route.path === '/chat' || $route.path === '/'" class="chat-content">
         <ChatMessageList
           ref="msgListRef"
-          :messages="messages"
+          :messages="displayMessages"
           :loading="loading"
           @previewFile="previewFile"
         />
@@ -134,10 +134,24 @@ const sidebarCollapsed = ref(false)
 const selectedModel = ref(localStorage.getItem('selectedModel') || 'mock')
 const inputText = ref('')
 const loading = ref(false)
-const messages = ref<InstanceType<typeof chatApi> extends { ChatMessage: infer M } ? M[] : any[]>([])
+const messages = ref<any[]>([])
 const currentChatId = ref(0)
 const canGenerateReport = ref(false)
 const lastAnalysis = ref<any>(null)
+
+// ★ 最终渲染防线：去重 + 按 createdAt 升序。无论原始 messages 里有什么，显示绝不重复。
+const displayMessages = computed(() => {
+  const seen = new Set<string>()
+  return [...messages.value]
+    .filter(m => {
+      const hash = `${m.role}|${(m.content || '').slice(0, 200)}`
+      if (seen.has(hash)) return false
+      seen.add(hash)
+      return true
+    })
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+})
+const messageIds = new Set<string>()  // ★ 去重：记录已渲染的消息 ID
 
 const attachedFiles = ref<FileAttachment[]>([])
 const showUserMenu = ref(false)
@@ -197,7 +211,9 @@ async function loadSessions() {
 
 async function newChat() {
   messages.value = []
+  messageIds.clear()
   currentChatId.value = 0
+  sessionStorage.removeItem('activeChatId')  // ★ 清除记忆
   canGenerateReport.value = false
   lastAnalysis.value = null
   inputText.value = ''
@@ -208,14 +224,17 @@ async function newChat() {
 async function selectChat(id: number) {
   try {
     const { data: msgs } = await chatApi.getMessages(id)
+    messageIds.clear()
     messages.value = msgs.map((m: any) => ({
       id: m.id.toString(),
       role: m.role,
       content: m.content,
-      timestamp: new Date(m.created_at).toLocaleTimeString(),
+      createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
       files: extractFiles(m),
     }))
+    messages.value.forEach((m: any) => messageIds.add(m.id))
     currentChatId.value = id
+    sessionStorage.setItem('activeChatId', String(id))  // ★ 记住当前会话
     canGenerateReport.value = true
     router.push('/chat')
     setTimeout(() => msgListRef.value?.scrollToBottom(), 100)
@@ -280,6 +299,7 @@ async function deleteChat() {
     if (currentChatId.value === chatMenu.chatId) {
       messages.value = []
       currentChatId.value = 0
+      sessionStorage.removeItem('activeChatId')
     }
   } catch { /* cancelled */ }
   closeChatMenu()
@@ -344,7 +364,8 @@ async function sendMessage() {
     try {
       const { data: s } = await chatApi.createSession(text.slice(0, 30) || '新对话', selectedModel.value)
       currentChatId.value = s.id
-      recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model })
+      sessionStorage.setItem('activeChatId', String(s.id))
+      recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model || undefined })
     } catch { /* fallback */ }
   }
 
@@ -463,11 +484,21 @@ async function streamChat(text: string) {
 }
 
 function addMessage(role: string, content: string, files?: MsgAttachment[]) {
+  // ★ 防重复：基于 role+content 前 100 字符做快速去重
+  const duplicate = messages.value.find(
+    m => m.role === role && m.content && m.content.slice(0, 100) === content.slice(0, 100)
+  )
+  if (duplicate) return
+
+  const id = Date.now().toString()
+  if (messageIds.has(id)) return
+  messageIds.add(id)
+
   messages.value.push({
-    id: Date.now().toString(),
+    id,
     role: role as any,
     content,
-    timestamp: new Date().toLocaleTimeString(),
+    createdAt: Date.now(),  // ★ 数字纪元，仅用于排序，不显示
     files,
   } as any)
   setTimeout(() => msgListRef.value?.scrollToBottom(), 50)
@@ -485,6 +516,15 @@ async function generateDiagnosticReport() {
 
 onMounted(() => {
   selectedModel.value = localStorage.getItem('selectedModel') || 'mock'
+  // ★ 重载后自动恢复上次会话
+  const savedChatId = sessionStorage.getItem('activeChatId')
+  if (savedChatId) {
+    const id = parseInt(savedChatId, 10)
+    if (!isNaN(id) && id > 0) {
+      selectChat(id).catch(() => { currentChatId.value = 0 })
+      return
+    }
+  }
   loadSessions()
 })
 </script>

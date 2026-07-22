@@ -25,7 +25,7 @@ def get_db_session():
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw", "system_config.json")
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "raw", "system_config.json")
 
 
 def _load_config() -> Dict[str, Any]:
@@ -87,14 +87,20 @@ def get_stats(
 
 @router.get("/config/llm")
 def get_llm_config():
-    """Get saved LLM configuration."""
+    """Get saved LLM configuration (merged with environment variables)."""
+    import os
     config = _load_config()
-    return config.get("llm", {
+    llm = config.get("llm", {
         "provider": "deepseek",
         "api_key": "",
         "base_url": "https://api.deepseek.com",
         "model": "deepseek-chat",
     })
+    # 环境变量优先级高于文件配置（Docker Compose 直接注入）
+    env_key = os.getenv("DEEPSEEK_API_KEY", "")
+    if env_key:
+        llm["api_key"] = env_key
+    return llm
 
 
 @router.put("/config/llm")

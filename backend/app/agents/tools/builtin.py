@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from app.agents.core.tool import Tool, ToolRegistry, ToolResult
-from app.services.llm_service import LLMService
-from app.services.parser_service import LogParserService
-from app.services.report_service import ReportService
-from app.services.rule_engine import RuleEngine
+from app.services.infrastructure.llm_service import LLMService
+from app.services.diagnostics.parser_service import LogParserService
+from app.services.diagnostics.report_service import ReportService
+from app.services.system.rule_engine import RuleEngine
 
 
 class ParseLogTool(Tool):

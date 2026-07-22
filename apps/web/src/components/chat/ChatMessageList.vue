@@ -15,7 +15,7 @@
     </div>
 
     <template v-else>
-      <div v-for="msg in messages" :key="msg.id" class="message-row" :class="msg.role">
+      <div v-for="msg in sorted" :key="msg.id" class="message-row" :class="msg.role">
         <div class="message-avatar" v-if="msg.role === 'assistant'">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="1.5">
             <circle cx="12" cy="12" r="10" />
@@ -59,21 +59,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { marked } from 'marked'
 import { useFormat } from '@/composables/useFormat'
-import type { ChatMessage } from '@/api/chat'
 
 const { formatFileSize, fileIcon } = useFormat()
 
 const props = defineProps<{
-  messages: ChatMessage[]
+  messages: any[]
   loading: boolean
 }>()
 
 defineEmits<{
   (e: 'previewFile', file: { name: string; size: number; type: string }): void
 }>()
+
+// ★ 按 createdAt 升序排列（去重已在父组件 displayMessages 完成）
+const sorted = computed(() => {
+  return [...props.messages].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+})
 
 const container = ref<HTMLElement>()
 
