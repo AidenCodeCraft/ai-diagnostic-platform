@@ -1,8 +1,11 @@
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
 .venv/
 .pytest_cache/
+*.egg
 
 # Node
 node_modules/
@@ -11,6 +14,7 @@ dist/
 # IDE
 .idea/
 .vscode/
+.cursor/
 
 # Environment
 .env
@@ -18,16 +22,23 @@ dist/
 
 # Logs
 *.log
+logs/
 
 # AI Models
 *.bin
 *.pt
 *.safetensors
+*.onnx
 
-# Data
+# Data (runtime artifacts)
 data/raw/*
 data/processed/*
+backend/data/raw/*
+backend/data/processed/*
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Docker
+.docker/
