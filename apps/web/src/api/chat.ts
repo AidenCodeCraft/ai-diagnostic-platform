@@ -99,8 +99,10 @@ export const chatApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  runAnalysis(logId: number) {
-    return client.post('/analyses/run', null, { params: { log_id: logId } })
+  runAnalysis(logId: number, model?: string) {
+    const params: any = { log_id: logId }
+    if (model) params.model = model
+    return client.post('/analyses/run', null, { params })
   },
   getAnalysisResult(analysisId: number) {
     return client.get(`/analyses/${analysisId}/result`)

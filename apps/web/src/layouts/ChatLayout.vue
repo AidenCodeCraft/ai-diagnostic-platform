@@ -260,13 +260,13 @@
                     </svg><span v-if="messages.length > 0">生成报告</span></button>
                 </div>
                 <div class="actions-right">
-                  <label class="action-btn attach-btn" title="上传文件"><svg width="16" height="16" viewBox="0 0 24 24"
+                  <label class="action-btn attach-btn" title="上传文件 (最大 200MB)"><svg width="16" height="16" viewBox="0 0 24 24"
                       fill="none" stroke="currentColor" stroke-width="2">
                       <path
                         d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                     </svg><input type="file" accept=".log,.txt,.zip" @change="onFileInput" hidden multiple /></label>
-                  <button class="action-btn send-btn" :disabled="(!inputText.trim() && attachedFiles.length === 0) || isUploading"
-                    :class="{ active: (inputText.trim() || attachedFiles.length > 0) && !isUploading }" @click="sendMessage"><svg width="16"
+                  <button class="action-btn send-btn" :disabled="!inputText.trim() || isUploading"
+                    :class="{ active: inputText.trim() && !isUploading }" @click="sendMessage"><svg width="16"
                       height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
                       <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
                     </svg></button>
@@ -287,8 +287,16 @@
                 <path d="M8 14s1.5 2 4 2 4-2 4-2" />
               </svg></div>
             <div class="message-body">
+              <!-- 附件卡片 -->
+              <div v-if="msg.files && msg.files.length > 0" class="msg-files">
+                <div v-for="(f, i) in msg.files" :key="i" class="msg-file-card" @click="previewFile(f)" :title="'点击预览 ' + f.name">
+                  <span class="msg-file-icon">{{ fileIcon(f.type) }}</span>
+                  <span class="msg-file-name">{{ f.name }}</span>
+                  <span class="msg-file-size">{{ formatFileSize(f.size) }}</span>
+                </div>
+              </div>
               <div class="message-bubble">
-                <div class="msg-content" v-html="renderContent(msg.content)"></div>
+                <div class="msg-content" v-html="renderContent(msg.content, msg.files && msg.files.length > 0)"></div>
               </div>
             </div>
           </div>
@@ -306,12 +314,21 @@
         </div>
         <div class="input-wrapper">
           <div class="input-container">
-            <div v-if="attachedFile" class="attached-file"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" stroke-width="2">
-                <path
-                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-              </svg><span>{{ attachedFile.name }}</span><button class="remove-file"
-                @click="attachedFile = null">&times;</button></div>
+            <div v-if="attachedFiles.length > 0" class="upload-area">
+              <div v-for="fa in attachedFiles" :key="fa.id" class="upload-file-card">
+                <div class="ufc-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                <div class="ufc-info">
+                  <span class="ufc-name">{{ fa.name }}</span>
+                  <span class="ufc-size">{{ formatFileSize(fa.file.size) }}</span>
+                  <div class="ufc-progress-wrap" v-if="fa.status !== 'pending'">
+                    <div class="ufc-progress"><div class="ufc-progress-bar" :class="fa.status" :style="{width:fa.progress+'%'}"></div></div>
+                    <span class="ufc-status" :class="fa.status">{{ fa.status === 'uploading' ? `上传中 ${fa.progress}%` : fa.status === 'parsing' ? '解析中...' : fa.status === 'done' ? '✓ 完成' : '✕ 失败' }}</span>
+                  </div>
+                  <span v-if="fa.error" class="ufc-error">{{ fa.error }}</span>
+                </div>
+                <button class="ufc-remove" @click="removeFile(fa.id)" :disabled="fa.status === 'uploading'">&times;</button>
+              </div>
+            </div>
             <div class="input-box">
               <textarea ref="inputEl" v-model="inputText" placeholder="输入问题或拖拽日志文件..." class="msg-textarea" :rows="1"
                 @keydown.enter.exact.prevent="sendMessage" @input="autoResize"></textarea>
@@ -327,13 +344,13 @@
                     </svg><span v-if="messages.length > 0">生成报告</span></button>
                 </div>
                 <div class="actions-right">
-                  <label class="action-btn attach-btn" title="上传文件"><svg width="16" height="16" viewBox="0 0 24 24"
+                  <label class="action-btn attach-btn" title="上传文件 (最大 200MB)"><svg width="16" height="16" viewBox="0 0 24 24"
                       fill="none" stroke="currentColor" stroke-width="2">
                       <path
                         d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                     </svg><input type="file" accept=".log,.txt,.zip" @change="onFileInput" hidden multiple /></label>
-                  <button class="action-btn send-btn" :disabled="(!inputText.trim() && attachedFiles.length === 0) || isUploading"
-                    :class="{ active: (inputText.trim() || attachedFiles.length > 0) && !isUploading }" @click="sendMessage"><svg width="16"
+                  <button class="action-btn send-btn" :disabled="!inputText.trim() || isUploading"
+                    :class="{ active: inputText.trim() && !isUploading }" @click="sendMessage"><svg width="16"
                       height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
                       <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
                     </svg></button>
@@ -345,6 +362,11 @@
       </div>
       </div>
     </main>
+
+    <!-- 文件预览弹窗 -->
+    <el-dialog v-model="previewVisible" :title="previewName" width="700px" top="5vh">
+      <pre class="file-preview-content">{{ previewContent }}</pre>
+    </el-dialog>
   </div>
 </template>
 
@@ -419,7 +441,23 @@ async function newChat() {
 async function selectChat(id: number) {
   try {
     const { data: msgs } = await chatApi.getMessages(id)
-    messages.value = msgs.map((m: any) => ({ id: m.id.toString(), role: m.role, content: m.content, timestamp: new Date(m.created_at).toLocaleTimeString() }))
+    messages.value = msgs.map((m: any) => {
+      const msg: any = { id: m.id.toString(), role: m.role, content: m.content, timestamp: new Date(m.created_at).toLocaleTimeString() }
+      // Reconstruct file attachments from user messages
+      if (m.role === 'user') {
+        const match = m.content.match(/\[上传文件:\s*(.+?)\]/)
+        if (match) {
+          msg.files = match[1].split(/,\s*/).map((entry: string) => {
+            const sizeMatch = entry.match(/^(.+?)\s*\((.+?)\)$/)
+            const name = sizeMatch ? sizeMatch[1].trim() : entry.trim()
+            const sizeStr = sizeMatch ? sizeMatch[2] : '0 B'
+            const size = parseFloat(sizeStr) * (sizeStr.includes('KB') ? 1024 : sizeStr.includes('MB') ? 1048576 : 1) || 0
+            return { name, size, type: name.split('.').pop() || 'log' }
+          })
+        }
+      }
+      return msg
+    })
     currentChatId.value = id
     canGenerateReport.value = true
     router.push('/chat')
@@ -485,15 +523,45 @@ function formatFileSize(bytes: number) {
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / 1048576).toFixed(1) + ' MB'
 }
+function fileIcon(type: string) {
+  if (/pdf/i.test(type)) return '📄'
+  if (/zip|tar|gz|rar/i.test(type)) return '📦'
+  if (/image/i.test(type)) return '🖼️'
+  return '📋'
+}
+const previewVisible = ref(false)
+const previewContent = ref('')
+const previewName = ref('')
+async function previewFile(f: MsgAttachment) {
+  previewName.value = f.name; previewContent.value = '加载中...'; previewVisible.value = true
+  // Find the file from attachedFiles or try to read from stored reference
+  const found = attachedFiles.value.find(af => af.name === f.name)
+  if (found) {
+    const reader = new FileReader()
+    reader.onload = (e) => { previewContent.value = (e.target?.result as string) || '无法读取文件内容' }
+    reader.readAsText(found.file.slice(0, 50000)) // limit to 50KB
+  } else {
+    previewContent.value = '该附件已不在当前会话中，无法预览。'
+  }
+}
 function autoResize() { if (!inputEl.value) return; inputEl.value.style.height = 'auto'; inputEl.value.style.height = Math.min(inputEl.value.scrollHeight, 200) + 'px' }
-function addMessage(role: string, content: string) { messages.value.push({ id: Date.now().toString(), role: role as any, content, timestamp: new Date().toLocaleTimeString() } as any); nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight }) }
-function renderContent(text: string) {
-  try { return marked.parse(text) as string } catch { return text.replace(/\n/g, '<br>') }
+interface MsgAttachment { name: string; size: number; type: string }
+function addMessage(role: string, content: string, files?: MsgAttachment[]) {
+  messages.value.push({ id: Date.now().toString(), role: role as any, content, timestamp: new Date().toLocaleTimeString(), files } as any)
+  nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight })
+}
+function renderContent(text: string, hasFiles?: boolean) {
+  // Strip file tag from display (file cards already show it)
+  let display = text
+  if (hasFiles) {
+    display = display.replace(/\n?\[上传文件:.*?\]/g, '')
+  }
+  try { return marked.parse(display) as string } catch { return display.replace(/\n/g, '<br>') }
 }
 
 async function sendMessage() {
   const text = inputText.value.trim(); const files = [...attachedFiles.value]
-  if (!text && files.length === 0) return
+  if (!text) return
   const isNewChat = !currentChatId.value
   inputText.value = ''; attachedFiles.value = []; if (inputEl.value) inputEl.value.style.height = 'auto'
 
@@ -506,10 +574,13 @@ async function sendMessage() {
     } catch { /* fallback to local-only */ }
   }
 
-  // Build user message with file names
-  const fileNames = files.map(f => f.name).join(', ')
-  const userMsg = text || (files.length ? `[上传文件: ${fileNames}]` : '')
-  addMessage('user', userMsg)
+  // Build user message with file attachments (file info always embedded for persistence)
+  const attachments: MsgAttachment[] = files.map(f => ({ name: f.name, size: f.file.size, type: f.file.type || f.name.split('.').pop() || '' }))
+  const fileTag = files.length ? `[上传文件: ${files.map(f => `${f.name} (${formatFileSize(f.file.size)})`).join(', ')}]` : ''
+  const userMsg = text ? (fileTag ? `${text}\n${fileTag}` : text) : fileTag
+  addMessage('user', userMsg, attachments)
+  // Persist user message to backend (so it survives page navigation)
+  if (currentChatId.value) chatApi.saveMessage(currentChatId.value, 'user', userMsg).catch(() => {})
   loading.value = true
 
   try {
@@ -529,7 +600,7 @@ async function sendMessage() {
           addMessage('assistant', `🔍 正在解析并分析 \`${fa.name}\`...`)
           const processingMsg = messages.value[messages.value.length - 1]
           try {
-            const analysisRes = await chatApi.runAnalysis(logId)
+            const analysisRes = await chatApi.runAnalysis(logId, selectedModel.value)
             if (analysisRes.data?.id) {
               const detail = (await chatApi.getAnalysisResult(analysisRes.data.id)).data
               lastAnalysis.value = detail
@@ -1356,10 +1427,29 @@ function onModelChange(model: string) {
 }
 
 .attach-btn {
-  width: 30px;
-  padding: 0;
+  width: auto; min-width: 30px;
+  padding: 0 8px;
   justify-content: center;
   cursor: pointer;
+  gap: 4px;
+  position: relative;
+}
+/* File cards in chat messages */
+.msg-files { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; align-items: flex-end; }
+.msg-file-card {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+  cursor: pointer; transition: background 0.15s; max-width: 280px;
+}
+.msg-file-card:hover { background: #dbeafe; }
+.msg-file-icon { font-size: 18px; flex-shrink: 0; }
+.msg-file-name { font-size: 12px; color: #1e40af; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.msg-file-size { font-size: 11px; color: #93c5fd; flex-shrink: 0; }
+
+/* File preview */
+.file-preview-content {
+  max-height: 60vh; overflow: auto; padding: 16px; background: #1e293b; color: #e2e8f0;
+  border-radius: 8px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
 }
 
 .send-btn {

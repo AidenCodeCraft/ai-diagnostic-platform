@@ -9,6 +9,26 @@ import App from './App.vue'
 import router from './router'
 import './styles/global.css'
 
+// VMdEditor plugins — register once globally to avoid "already in use" errors
+import VMdEditor from '@kangc/v-md-editor'
+import '@kangc/v-md-editor/lib/style/base-editor.css'
+import vuepressTheme from '@kangc/v-md-editor/lib/theme/vuepress.js'
+import '@kangc/v-md-editor/lib/theme/style/vuepress.css'
+import createCopyCodePlugin from '@kangc/v-md-editor/lib/plugins/copy-code/index'
+import '@kangc/v-md-editor/lib/plugins/copy-code/copy-code.css'
+import Prism from 'prismjs'
+import 'prismjs/components/prism-python'
+import 'prismjs/components/prism-javascript'
+import 'prismjs/components/prism-bash'
+import 'prismjs/components/prism-json'
+import 'prismjs/components/prism-yaml'
+import 'prismjs/components/prism-markdown'
+import 'prismjs/components/prism-css'
+import 'prismjs/components/prism-sql'
+
+VMdEditor.use(vuepressTheme, { Prism })
+VMdEditor.use(createCopyCodePlugin())
+
 const app = createApp(App)
 
 app.use(createPinia())

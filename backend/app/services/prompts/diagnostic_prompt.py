@@ -13,49 +13,41 @@ from typing import Any, Dict, List
 class DiagnosticPrompt:
     """Build structured prompts for device log diagnostic analysis."""
 
-    VERSION = "1.0"
+    VERSION = "2.0"
 
     SYSTEM_PROMPT = (
-        "You are an expert embedded systems and device diagnostics engineer. "
-        "Your job is to analyze device logs, identify root causes, and provide "
-        "actionable next steps for engineers.\n\n"
-        "Rules:\n"
-        "1. Base conclusions ONLY on evidence found in the log.\n"
-        "2. Never fabricate errors or symptoms not present in the log.\n"
-        "3. Provide confidence scores reflecting how certain you are.\n"
-        "4. Give specific, actionable next steps (not generic advice).\n"
-        "5. Output ONLY valid JSON — no markdown, no explanation outside JSON.\n"
+        "你是一名资深的嵌入式系统与设备诊断工程师。"
+        "你的任务是根据用户上传的设备日志，找出根本原因，并给出可执行的排查建议。\n\n"
+        "规则：\n"
+        "1. 仅根据日志中实际存在的数据得出结论，不得凭空捏造。\n"
+        "2. 所有输出内容必须使用中文。\n"
+        "3. 给出合理的置信度评分。\n"
+        "4. 给出具体、可操作的排查步骤（避免泛泛而谈）。\n"
+        "5. 只输出合法的 JSON，不要包含 JSON 之外的任何说明文字。\n"
     )
 
     OUTPUT_SCHEMA = {
-        "summary": "A concise 1-3 sentence summary of what was found.",
-        "confidence": "A float between 0.0 and 1.0 indicating diagnostic confidence.",
-        "root_cause": "The most likely root cause based on log evidence.",
-        "next_steps": "A list of 2-5 specific, actionable investigation steps.",
+        "summary": "用中文简要总结日志中发现了什么（1-3句话）。",
+        "confidence": "介于 0.0 到 1.0 之间的浮点数，表示诊断置信度。",
+        "root_cause": "根据日志证据给出的最可能的根本原因（中文）。",
+        "next_steps": "2-5 条具体的、可操作的排查步骤（中文列表）。",
     }
 
     @classmethod
     def build(cls, log_content: str, events: List[Dict[str, Any]]) -> str:
-        """Build the full user prompt for diagnostic analysis.
-
-        Args:
-            log_content: Raw log file content.
-            events: Pre-parsed structured events from the parser engine.
-        """
-        # Build a focused event summary
         error_events = [e for e in events if e.get("is_error")]
         error_summary = cls._build_error_summary(error_events)
 
         return (
             f"{cls.SYSTEM_PROMPT}\n\n"
-            f"--- LOG ANALYSIS TASK ---\n\n"
-            f"PARSED EVENTS: {len(events)} total, {len(error_events)} errors\n\n"
-            f"ERROR SUMMARY:\n{error_summary}\n\n"
-            f"RAW LOG CONTENT:\n{log_content[:8000]}\n\n"
+            f"--- 日志分析任务 ---\n\n"
+            f"解析事件总数: {len(events)}，其中错误事件: {len(error_events)}\n\n"
+            f"错误概览:\n{error_summary}\n\n"
+            f"原始日志内容:\n{log_content[:8000]}\n\n"
             f"---\n"
-            f"Return a JSON object with these fields:\n"
-            f"{json.dumps(cls.OUTPUT_SCHEMA, indent=2)}\n\n"
-            f"Output ONLY the JSON object, nothing else."
+            f"请返回以下格式的 JSON 对象:\n"
+            f"{json.dumps(cls.OUTPUT_SCHEMA, indent=2, ensure_ascii=False)}\n\n"
+            f"只输出 JSON 对象本身，不要包含其他内容。"
         )
 
     @classmethod
