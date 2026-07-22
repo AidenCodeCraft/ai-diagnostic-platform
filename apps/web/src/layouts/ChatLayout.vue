@@ -1,80 +1,22 @@
 <template>
   <div class="chat-layout">
-    <!-- ============================================================ -->
-    <!-- 左侧边栏                                                     -->
-    <!-- ============================================================ -->
-    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
-      <div class="sidebar-inner">
-        <div class="sidebar-top">
-          <button class="sidebar-icon-btn" title="搜索" @click="toggleSearch">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="11" cy="11" r="8" />
-              <path d="m21 21-4.35-4.35" />
-            </svg>
-          </button>
-          <button class="sidebar-icon-btn" :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'" @click="toggleSidebar">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <path :d="sidebarCollapsed ? 'M9 3v18' : 'M15 3v18'" />
-            </svg>
-          </button>
-        </div>
-        <div class="sidebar-new-chat" v-show="!sidebarCollapsed">
-          <button class="new-chat-btn" @click="newChat">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <span>新对话</span>
-          </button>
-        </div>
-        <div class="sidebar-nav" v-show="!sidebarCollapsed">
-          <div class="nav-item" @click="navigateTo('/knowledge')"><svg width="16" height="16" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
-            </svg><span>知识库</span></div>
-          <div class="nav-item" @click="navigateTo('/plugins')"><svg width="16" height="16" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg><span>插件管理</span></div>
-          <div class="nav-item" @click="navigateTo('/reports')"><svg width="16" height="16" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="16" y1="13" x2="8" y2="13" />
-              <line x1="16" y1="17" x2="8" y2="17" />
-            </svg><span>诊断报告</span></div>
-          <div v-if="userStore.isAdmin" class="nav-item admin-entry" @click="navigateTo('/admin')"><svg width="16" height="16" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg><span>管理后台</span></div>
-        </div>
-        <div class="sidebar-history" v-show="!sidebarCollapsed">
-          <div class="section-title">最近对话</div>
-          <div v-for="chat in recentChats" :key="chat.id" class="history-item"
-            :class="{ active: chat.id === currentChatId }" @click="selectChat(chat.id)">
-            <span class="history-title">{{ chat.title }}</span>
-            <button class="history-more-btn" @click.stop="openChatMenu($event, chat)"><svg width="14" height="14"
-                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="5" r="1" />
-                <circle cx="12" cy="12" r="1" />
-                <circle cx="12" cy="19" r="1" />
-              </svg></button>
-          </div>
-          <div v-if="recentChats.length === 0" class="empty-hint">暂无对话记录</div>
-        </div>
-        <div class="sidebar-user" v-show="!sidebarCollapsed" @click="showUserMenu = !showUserMenu">
-          <div class="user-avatar">{{ userInitial }}</div>
-          <span class="user-name">{{ userName }}</span>
-        </div>
-      </div>
-    </aside>
+    <!-- 左侧边栏 -->
+    <ChatSidebar
+      v-model:collapsed="sidebarCollapsed"
+      :chats="recentChats"
+      :activeChatId="currentChatId"
+      :userName="userName"
+      :userInitial="userInitial"
+      :isAdmin="userStore.isAdmin"
+      @toggleSearch="toggleSearch"
+      @newChat="newChat"
+      @navigate="navigateTo"
+      @selectChat="selectChat"
+      @chatMenu="openChatMenu"
+      @toggleUserMenu="showUserMenu = !showUserMenu"
+    />
 
-    <button v-if="sidebarCollapsed" class="float-open-btn" @click="toggleSidebar" title="展开侧栏">
+    <button v-if="sidebarCollapsed" class="float-open-btn" @click="sidebarCollapsed = false" title="展开侧栏">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <rect x="3" y="3" width="18" height="18" rx="2" />
         <path d="M9 3v18" />
@@ -82,284 +24,82 @@
     </button>
 
     <!-- 用户菜单 -->
-    <teleport to="body">
-      <div v-if="showUserMenu" class="menu-overlay" @click="showUserMenu = false"></div>
-      <div v-if="showUserMenu" class="user-menu-popup">
-        <button @click="downloadApp">📥 下载桌面版</button>
-        <button @click="openSettings">⚙️ 设置</button>
-        <button @click="openHelp">💬 帮助与反馈</button>
-        <hr>
-        <button class="danger" @click="logout">🚪 退出登录</button>
-      </div>
-    </teleport>
+    <UserMenu
+      :visible="showUserMenu"
+      @close="showUserMenu = false"
+      @action="handleUserAction"
+    />
 
     <!-- 对话菜单 -->
     <teleport to="body">
       <div v-if="chatMenu.visible" class="menu-overlay" @click="closeChatMenu"></div>
       <div v-if="chatMenu.visible" class="chat-menu-popup" :style="{ top: chatMenu.y + 'px', left: chatMenu.x + 'px' }">
-        <button @click="renameChat"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2">
+        <button @click="renameChat">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-          </svg> 重命名</button>
-        <button @click="pinChat"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2">
+          </svg> 重命名
+        </button>
+        <button @click="pinChat">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="12" y1="5" x2="12" y2="19" />
             <polyline points="19 12 12 19 5 12" />
-          </svg> 置顶</button>
-        <button @click="analyzeChat"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2">
+          </svg> 置顶
+        </button>
+        <button @click="analyzeChat">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-          </svg> 分析</button>
-        <hr>
-        <button class="danger" @click="deleteChat"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2">
+          </svg> 分析
+        </button>
+        <hr />
+        <button class="danger" @click="deleteChat">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="3 6 5 6 21 6" />
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-          </svg> 删除</button>
+          </svg> 删除
+        </button>
       </div>
     </teleport>
 
-    <!-- 设置弹窗 — 左右分栏 + 平滑动画 -->
-    <teleport to="body">
-      <div v-if="showSettings" class="menu-overlay settings-overlay" @click="showSettings = false"></div>
-      <transition name="settings-modal">
-        <div v-if="showSettings" class="settings-dialog">
-          <div class="settings-header">
-            <h3>设置</h3>
-            <button class="settings-close" @click="showSettings = false">&times;</button>
-          </div>
-          <div class="settings-layout">
-            <!-- 左侧导航 -->
-            <nav class="settings-nav">
-              <div v-for="tab in settingTabs" :key="tab.key" class="settings-nav-item"
-                :class="{ active: activeSettingTab === tab.key }" @click="activeSettingTab = tab.key">
-                <span v-html="tab.icon"></span>
-                <span>{{ tab.label }}</span>
-              </div>
-            </nav>
-            <!-- 右侧内容 -->
-            <div class="settings-content">
-              <!-- 通用 -->
-              <div v-show="activeSettingTab === 'general'">
-                <div class="setting-group">
-                  <h4>主题</h4>
-                  <div class="theme-switch">
-                    <button :class="{ active: settings.theme === 'light' }"
-                      @click="settings.theme = 'light'; saveSettings()">☀️ 浅色</button>
-                    <button :class="{ active: settings.theme === 'dark' }"
-                      @click="settings.theme = 'dark'; saveSettings()">🌙 深色</button>
-                    <button :class="{ active: settings.theme === 'system' }"
-                      @click="settings.theme = 'system'; saveSettings()">💻 跟随系统</button>
-                  </div>
-                </div>
-                <div class="setting-group">
-                  <h4>语言</h4>
-                  <el-select v-model="settings.language" size="small" style="width:150px" @change="saveSettings">
-                    <el-option label="简体中文" value="zh-CN" />
-                    <el-option label="English" value="en" />
-                  </el-select>
-                </div>
-              </div>
-
-              <!-- 账号 -->
-              <div v-show="activeSettingTab === 'account'">
-                <div class="setting-group">
-                  <h4>个人信息</h4>
-                  <div class="setting-row"><span>用户名</span><span class="setting-value">{{ userName }}</span></div>
-                </div>
-                <div class="setting-group">
-                  <h4>安全</h4>
-                  <div class="setting-row"><span>修改密码</span><el-button size="small" @click="changePwd">修改</el-button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 数据 -->
-              <div v-show="activeSettingTab === 'data'">
-                <div class="setting-group">
-                  <h4>清除数据</h4>
-                  <p class="setting-desc">清除后将不可恢复，请谨慎操作。</p>
-                  <el-button size="small" type="danger" @click="clearData">清除所有对话数据</el-button>
-                </div>
-              </div>
-
-              <!-- 关于 -->
-              <div v-show="activeSettingTab === 'about'">
-                <div class="setting-group">
-                  <h4>AI Diagnostic Platform</h4>
-                  <p class="setting-desc">版本 v0.1.0</p>
-                </div>
-                <div class="setting-group">
-                  <h4>服务条款</h4>
-                  <p class="setting-desc">本平台为 AI 驱动的设备日志诊断工具。上传的日志文件仅用于分析诊断，AI 分析结果仅供参考。</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </transition>
-    </teleport>
+    <!-- 设置弹窗 -->
+    <SettingsDialog
+      :visible="showSettings"
+      :userName="userName"
+      @close="showSettings = false"
+      @changePassword="changePwd"
+      @clearData="clearData"
+    />
 
     <!-- ============================================================ -->
+    <!-- 对话主区域                                                    -->
     <!-- ============================================================ -->
-    <!-- 对话主区域 — ChatGPT 风格居中 / 子路由内容                     -->
-    <!-- ============================================================ -->
-    <main class="chat-main" :class="{ 'has-messages': messages.length > 0 }">
+    <main class="chat-main">
       <!-- 非对话路由：显示子页面 -->
       <div v-if="$route.path !== '/chat' && $route.path !== '/'" class="sub-page">
         <router-view />
       </div>
       <!-- 对话内容 -->
       <div v-else class="chat-content">
-      <div v-if="messages.length === 0" class="welcome-full">
-        <div class="welcome-inner">
-          <div class="welcome-icon">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-              <line x1="9" y1="9" x2="9.01" y2="9" />
-              <line x1="15" y1="9" x2="15.01" y2="9" />
-            </svg>
-          </div>
-          <h2>有什么可以帮助你的？</h2>
-        </div>
-        <!-- 输入框也在居中区域内 -->
-        <div class="welcome-input">
-          <div class="input-container">
-            <div v-if="attachedFiles.length > 0" class="upload-area">
-              <div v-for="fa in attachedFiles" :key="fa.id" class="upload-file-card">
-                <div class="ufc-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                </div>
-                <div class="ufc-info">
-                  <span class="ufc-name">{{ fa.name }}</span>
-                  <span class="ufc-size">{{ formatFileSize(fa.file.size) }}</span>
-                  <div class="ufc-progress-wrap" v-if="fa.status !== 'pending'">
-                    <div class="ufc-progress"><div class="ufc-progress-bar" :class="fa.status" :style="{width:fa.progress+'%'}"></div></div>
-                    <span class="ufc-status" :class="fa.status">
-                      {{ fa.status === 'uploading' ? `上传中 ${fa.progress}%` : fa.status === 'parsing' ? '解析中...' : fa.status === 'done' ? '✓ 完成' : '✕ 失败' }}
-                    </span>
-                  </div>
-                  <span v-if="fa.error" class="ufc-error">{{ fa.error }}</span>
-                </div>
-                <button class="ufc-remove" @click="removeFile(fa.id)" :disabled="fa.status === 'uploading'">&times;</button>
-              </div>
-            </div>
-            <div class="input-box">
-              <textarea ref="inputEl" v-model="inputText" placeholder="输入问题或拖拽日志文件..." class="msg-textarea" :rows="1"
-                @keydown.enter.exact.prevent="sendMessage" @input="autoResize"></textarea>
-              <div class="input-actions">
-                <div class="actions-left">
-                  <el-select v-model="selectedModel" size="small" class="model-select" @change="onModelChange"><el-option label="Mock (开发模式)"
-                      value="mock" /><el-option label="DeepSeek" value="deepseek" /></el-select>
-                  <button class="action-btn report-btn" :disabled="!canGenerateReport" title="生成诊断报告"
-                    @click="generateDiagnosticReport"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" stroke-width="2">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <polyline points="14 2 14 8 20 8" />
-                    </svg><span v-if="messages.length > 0">生成报告</span></button>
-                </div>
-                <div class="actions-right">
-                  <label class="action-btn attach-btn" title="上传文件 (最大 200MB)"><svg width="16" height="16" viewBox="0 0 24 24"
-                      fill="none" stroke="currentColor" stroke-width="2">
-                      <path
-                        d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                    </svg><input type="file" accept=".log,.txt,.zip" @change="onFileInput" hidden multiple /></label>
-                  <button class="action-btn send-btn" :disabled="!inputText.trim() || isUploading"
-                    :class="{ active: inputText.trim() && !isUploading }" @click="sendMessage"><svg width="16"
-                      height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                      <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
-                    </svg></button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 有消息时 -->
-      <div v-else class="chat-messages-wrap">
-        <div class="chat-messages" ref="msgContainer">
-          <div v-for="msg in messages" :key="msg.id" class="message-row" :class="msg.role">
-            <div class="message-avatar" v-if="msg.role === 'assistant'"><svg width="24" height="24" viewBox="0 0 24 24"
-                fill="none" stroke="#2563eb" stroke-width="1.5">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-              </svg></div>
-            <div class="message-body">
-              <!-- 附件卡片 -->
-              <div v-if="msg.files && msg.files.length > 0" class="msg-files">
-                <div v-for="(f, i) in msg.files" :key="i" class="msg-file-card" @click="previewFile(f)" :title="'点击预览 ' + f.name">
-                  <span class="msg-file-icon">{{ fileIcon(f.type) }}</span>
-                  <span class="msg-file-name">{{ f.name }}</span>
-                  <span class="msg-file-size">{{ formatFileSize(f.size) }}</span>
-                </div>
-              </div>
-              <div class="message-bubble">
-                <div class="msg-content" v-html="renderContent(msg.content, msg.files && msg.files.length > 0)"></div>
-              </div>
-            </div>
-          </div>
-          <div v-if="loading" class="message-row assistant">
-            <div class="message-avatar"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2563eb"
-                stroke-width="1.5">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-              </svg></div>
-            <div class="message-body">
-              <div class="message-bubble typing"><span class="dot"></span><span class="dot"></span><span
-                  class="dot"></span></div>
-            </div>
-          </div>
-        </div>
+        <ChatMessageList
+          ref="msgListRef"
+          :messages="messages"
+          :loading="loading"
+          @previewFile="previewFile"
+        />
         <div class="input-wrapper">
-          <div class="input-container">
-            <div v-if="attachedFiles.length > 0" class="upload-area">
-              <div v-for="fa in attachedFiles" :key="fa.id" class="upload-file-card">
-                <div class="ufc-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
-                <div class="ufc-info">
-                  <span class="ufc-name">{{ fa.name }}</span>
-                  <span class="ufc-size">{{ formatFileSize(fa.file.size) }}</span>
-                  <div class="ufc-progress-wrap" v-if="fa.status !== 'pending'">
-                    <div class="ufc-progress"><div class="ufc-progress-bar" :class="fa.status" :style="{width:fa.progress+'%'}"></div></div>
-                    <span class="ufc-status" :class="fa.status">{{ fa.status === 'uploading' ? `上传中 ${fa.progress}%` : fa.status === 'parsing' ? '解析中...' : fa.status === 'done' ? '✓ 完成' : '✕ 失败' }}</span>
-                  </div>
-                  <span v-if="fa.error" class="ufc-error">{{ fa.error }}</span>
-                </div>
-                <button class="ufc-remove" @click="removeFile(fa.id)" :disabled="fa.status === 'uploading'">&times;</button>
-              </div>
-            </div>
-            <div class="input-box">
-              <textarea ref="inputEl" v-model="inputText" placeholder="输入问题或拖拽日志文件..." class="msg-textarea" :rows="1"
-                @keydown.enter.exact.prevent="sendMessage" @input="autoResize"></textarea>
-              <div class="input-actions">
-                <div class="actions-left">
-                  <el-select v-model="selectedModel" size="small" class="model-select" @change="onModelChange"><el-option label="Mock (开发模式)"
-                      value="mock" /><el-option label="DeepSeek" value="deepseek" /></el-select>
-                  <button class="action-btn report-btn" :disabled="!canGenerateReport" title="生成诊断报告"
-                    @click="generateDiagnosticReport"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" stroke-width="2">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <polyline points="14 2 14 8 20 8" />
-                    </svg><span v-if="messages.length > 0">生成报告</span></button>
-                </div>
-                <div class="actions-right">
-                  <label class="action-btn attach-btn" title="上传文件 (最大 200MB)"><svg width="16" height="16" viewBox="0 0 24 24"
-                      fill="none" stroke="currentColor" stroke-width="2">
-                      <path
-                        d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                    </svg><input type="file" accept=".log,.txt,.zip" @change="onFileInput" hidden multiple /></label>
-                  <button class="action-btn send-btn" :disabled="!inputText.trim() || isUploading"
-                    :class="{ active: inputText.trim() && !isUploading }" @click="sendMessage"><svg width="16"
-                      height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                      <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
-                    </svg></button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ChatInputArea
+            v-model="inputText"
+            :files="attachedFiles"
+            :selectedModel="selectedModel"
+            :isUploading="isUploading"
+            :canReport="canGenerateReport"
+            :hasMessages="messages.length > 0"
+            @send="sendMessage"
+            @fileInput="onFileInput"
+            @removeFile="removeFile"
+            @modelChange="onModelChange"
+            @generateReport="generateDiagnosticReport"
+          />
         </div>
-      </div>
       </div>
     </main>
 
@@ -371,59 +111,82 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, reactive, computed } from 'vue'
+import { ref, computed, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { marked } from 'marked'
 import client from '@/api/client'
-import { chatApi, type ChatMessage } from '@/api/chat'
+import { chatApi } from '@/api/chat'
 import { useUserStore } from '@/stores/user'
+
+import ChatSidebar from '@/components/chat/ChatSidebar.vue'
+import ChatMessageList from '@/components/chat/ChatMessageList.vue'
+import ChatInputArea from '@/components/chat/ChatInputArea.vue'
+import UserMenu from '@/components/common/UserMenu.vue'
+import SettingsDialog from '@/components/common/SettingsDialog.vue'
+import type { ChatRecord, FileAttachment, MsgAttachment } from '@/components/chat/types'
+
+// ── State ──────────────────────────────────────────────────────
 
 const router = useRouter()
 const userStore = useUserStore()
+
 const sidebarCollapsed = ref(false)
 const selectedModel = ref(localStorage.getItem('selectedModel') || 'mock')
 const inputText = ref('')
 const loading = ref(false)
-const attachedFile = ref<File | null>(null)
-const inputEl = ref<HTMLTextAreaElement>()
-const msgContainer = ref<HTMLElement>()
-const messages = ref<ChatMessage[]>([])
+const messages = ref<InstanceType<typeof chatApi> extends { ChatMessage: infer M } ? M[] : any[]>([])
 const currentChatId = ref(0)
 const canGenerateReport = ref(false)
 const lastAnalysis = ref<any>(null)
-const isUploading = computed(() => attachedFiles.value.some(f => f.status === 'uploading'))
 
-// Multi-file attachment
-interface FileAttachment {
-  id: string; file: File; name: string; progress: number
-  status: 'pending' | 'uploading' | 'parsing' | 'done' | 'error'; error?: string
-}
 const attachedFiles = ref<FileAttachment[]>([])
 const showUserMenu = ref(false)
 const showSettings = ref(false)
 
-const settings = reactive({ theme: (localStorage.getItem('theme') || 'light'), language: 'zh-CN' })
-const activeSettingTab = ref('general')
-const settingTabs = [
-  { key: 'general', label: '通用', icon: '⚙️' },
-  { key: 'account', label: '账号管理', icon: '👤' },
-  { key: 'data', label: '数据管理', icon: '🗄️' },
-  { key: 'about', label: '服务协议', icon: '📄' },
-]
-
-interface ChatRecord { id: number; title: string; pinned?: boolean; model?: string }
 const recentChats = ref<ChatRecord[]>([])
 const chatMenu = reactive({ visible: false, x: 0, y: 0, chatId: 0 })
 
+const msgListRef = ref<InstanceType<typeof ChatMessageList>>()
+
+const isUploading = computed(() => attachedFiles.value.some(f => f.status === 'uploading'))
 const userName = computed(() => userStore.userName)
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
 
-// ============================================================
-function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value }
-function toggleSearch() { }
+// ── UI Actions ────────────────────────────────────────────────
+
+function toggleSearch() { /* placeholder */ }
 function navigateTo(path: string) { router.push(path) }
-function saveSettings() { localStorage.setItem('theme', settings.theme) }
+function onModelChange(model: string) { selectedModel.value = model; localStorage.setItem('selectedModel', model) }
+
+function handleUserAction(action: 'download' | 'settings' | 'help' | 'logout') {
+  switch (action) {
+    case 'settings': showSettings.value = true; break
+    case 'logout': userStore.logout(); router.push('/login'); break
+    case 'download': ElMessage.info('桌面版下载页面开发中'); break
+    case 'help': ElMessage.info('帮助文档开发中'); break
+  }
+}
+
+async function changePwd() {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入新密码', '修改密码', { inputType: 'password' })
+    if (value) ElMessage.success('密码修改成功')
+  } catch { /* cancelled */ }
+}
+
+async function clearData() {
+  try {
+    await ElMessageBox.confirm('确定清除所有对话数据？不可恢复。', '确认', { type: 'warning' })
+    await Promise.all(recentChats.value.map(c => chatApi.deleteSession(c.id).catch(() => {})))
+    recentChats.value = []
+    messages.value = []
+    currentChatId.value = 0
+    ElMessage.success('已清除')
+    showSettings.value = false
+  } catch { /* cancelled */ }
+}
+
+// ── Session Management ────────────────────────────────────────
 
 async function loadSessions() {
   try {
@@ -433,39 +196,54 @@ async function loadSessions() {
 }
 
 async function newChat() {
-  messages.value = []; currentChatId.value = 0; canGenerateReport.value = false
-  lastAnalysis.value = null; inputText.value = ''; attachedFiles.value = []
+  messages.value = []
+  currentChatId.value = 0
+  canGenerateReport.value = false
+  lastAnalysis.value = null
+  inputText.value = ''
+  attachedFiles.value = []
   router.push('/chat')
 }
 
 async function selectChat(id: number) {
   try {
     const { data: msgs } = await chatApi.getMessages(id)
-    messages.value = msgs.map((m: any) => {
-      const msg: any = { id: m.id.toString(), role: m.role, content: m.content, timestamp: new Date(m.created_at).toLocaleTimeString() }
-      // Reconstruct file attachments from user messages
-      if (m.role === 'user') {
-        const match = m.content.match(/\[上传文件:\s*(.+?)\]/)
-        if (match) {
-          msg.files = match[1].split(/,\s*/).map((entry: string) => {
-            const sizeMatch = entry.match(/^(.+?)\s*\((.+?)\)$/)
-            const name = sizeMatch ? sizeMatch[1].trim() : entry.trim()
-            const sizeStr = sizeMatch ? sizeMatch[2] : '0 B'
-            const size = parseFloat(sizeStr) * (sizeStr.includes('KB') ? 1024 : sizeStr.includes('MB') ? 1048576 : 1) || 0
-            return { name, size, type: name.split('.').pop() || 'log' }
-          })
-        }
-      }
-      return msg
-    })
+    messages.value = msgs.map((m: any) => ({
+      id: m.id.toString(),
+      role: m.role,
+      content: m.content,
+      timestamp: new Date(m.created_at).toLocaleTimeString(),
+      files: extractFiles(m),
+    }))
     currentChatId.value = id
     canGenerateReport.value = true
     router.push('/chat')
-    nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight })
-  } catch { ElMessage.error('加载对话失败') }
+    setTimeout(() => msgListRef.value?.scrollToBottom(), 100)
+  } catch {
+    ElMessage.error('加载对话失败')
+  }
 }
 
-function openChatMenu(e: MouseEvent, chat: ChatRecord) { chatMenu.visible = true; chatMenu.x = e.clientX - 8; chatMenu.y = e.clientY + 4; chatMenu.chatId = chat.id }
+function extractFiles(m: any): MsgAttachment[] | undefined {
+  if (m.role !== 'user') return undefined
+  const match = m.content.match(/\[上传文件:\s*(.+?)\]/)
+  if (!match) return undefined
+  return match[1].split(/,\s*/).map((entry: string) => {
+    const sizeMatch = entry.match(/^(.+?)\s*\((.+?)\)$/)
+    const name = sizeMatch ? sizeMatch[1].trim() : entry.trim()
+    const sizeStr = sizeMatch ? sizeMatch[2] : '0 B'
+    const size = parseFloat(sizeStr) * (sizeStr.includes('KB') ? 1024 : sizeStr.includes('MB') ? 1048576 : 1) || 0
+    return { name, size, type: name.split('.').pop() || 'log' }
+  })
+}
+
+function openChatMenu(e: MouseEvent, chat: ChatRecord) {
+  chatMenu.visible = true
+  chatMenu.x = e.clientX - 8
+  chatMenu.y = e.clientY + 4
+  chatMenu.chatId = chat.id
+}
+
 function closeChatMenu() { chatMenu.visible = false }
 
 async function renameChat() {
@@ -477,398 +255,246 @@ async function renameChat() {
       chat.title = value.trim()
       await chatApi.updateSession(chat.id, value.trim())
     }
-  } catch {}
+  } catch { /* cancelled */ }
   closeChatMenu()
 }
 
 function pinChat() {
   const idx = recentChats.value.findIndex(c => c.id === chatMenu.chatId)
-  if (idx > 0) { const [item] = recentChats.value.splice(idx, 1); recentChats.value.unshift(item) }
+  if (idx > 0) {
+    const [item] = recentChats.value.splice(idx, 1)
+    recentChats.value.unshift(item)
+  }
   closeChatMenu()
 }
+
 function analyzeChat() { ElMessage.info('分析功能开发中'); closeChatMenu() }
 
 async function deleteChat() {
   try {
-    await ElMessageBox.confirm('删除后，该对话将不可恢复', '确认删除', { confirmButtonText: '删除该对话', cancelButtonText: '取消', type: 'warning' })
+    await ElMessageBox.confirm('删除后，该对话将不可恢复', '确认删除', {
+      confirmButtonText: '删除该对话', cancelButtonText: '取消', type: 'warning',
+    })
     await chatApi.deleteSession(chatMenu.chatId)
     recentChats.value = recentChats.value.filter(c => c.id !== chatMenu.chatId)
-    if (currentChatId.value === chatMenu.chatId) { messages.value = []; currentChatId.value = 0 }
-  } catch {}
+    if (currentChatId.value === chatMenu.chatId) {
+      messages.value = []
+      currentChatId.value = 0
+    }
+  } catch { /* cancelled */ }
   closeChatMenu()
 }
 
-// 用户
-function downloadApp() { ElMessage.info('桌面版下载页面开发中'); showUserMenu.value = false }
-function openSettings() { showUserMenu.value = false; showSettings.value = true }
-function openHelp() { ElMessage.info('帮助文档开发中'); showUserMenu.value = false }
-function logout() { userStore.logout(); showUserMenu.value = false; router.push('/login') }
-async function changePwd() { try { const { value } = await ElMessageBox.prompt('请输入新密码', '修改密码', { inputType: 'password' }); if (value) ElMessage.success('密码修改成功') } catch { } }
-async function clearData() { try { await ElMessageBox.confirm('确定清除所有对话数据？不可恢复。', '确认', { type: 'warning' }); await Promise.all(recentChats.value.map(c => chatApi.deleteSession(c.id).catch(() => {}))); recentChats.value = []; messages.value = []; currentChatId.value = 0; ElMessage.success('已清除'); showSettings.value = false } catch {} }
+// ── File Handling ─────────────────────────────────────────────
 
-// 消息
 function onFileInput(e: Event) {
   const t = e.target as HTMLInputElement
   if (t.files) {
     for (let i = 0; i < t.files.length; i++) {
       const f = t.files[i]
-      attachedFiles.value.push({ id: Date.now().toString() + i, file: f, name: f.name, progress: 0, status: 'pending' })
+      attachedFiles.value.push({
+        id: Date.now().toString() + i,
+        file: f,
+        name: f.name,
+        progress: 0,
+        status: 'pending',
+      })
     }
   }
-  t.value = '' // reset so same file can be re-selected
+  t.value = ''
 }
-function removeFile(id: string) { attachedFiles.value = attachedFiles.value.filter(f => f.id !== id) }
-function formatFileSize(bytes: number) {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / 1048576).toFixed(1) + ' MB'
+
+function removeFile(id: string) {
+  attachedFiles.value = attachedFiles.value.filter(f => f.id !== id)
 }
-function fileIcon(type: string) {
-  if (/pdf/i.test(type)) return '📄'
-  if (/zip|tar|gz|rar/i.test(type)) return '📦'
-  if (/image/i.test(type)) return '🖼️'
-  return '📋'
-}
+
 const previewVisible = ref(false)
 const previewContent = ref('')
 const previewName = ref('')
+
 async function previewFile(f: MsgAttachment) {
-  previewName.value = f.name; previewContent.value = '加载中...'; previewVisible.value = true
-  // Find the file from attachedFiles or try to read from stored reference
+  previewName.value = f.name
+  previewContent.value = '加载中...'
+  previewVisible.value = true
+
   const found = attachedFiles.value.find(af => af.name === f.name)
   if (found) {
     const reader = new FileReader()
-    reader.onload = (e) => { previewContent.value = (e.target?.result as string) || '无法读取文件内容' }
-    reader.readAsText(found.file.slice(0, 50000)) // limit to 50KB
+    reader.onload = (e) => {
+      previewContent.value = (e.target?.result as string) || '无法读取文件内容'
+    }
+    reader.readAsText(found.file.slice(0, 50000))
   } else {
     previewContent.value = '该附件已不在当前会话中，无法预览。'
   }
 }
-function autoResize() { if (!inputEl.value) return; inputEl.value.style.height = 'auto'; inputEl.value.style.height = Math.min(inputEl.value.scrollHeight, 200) + 'px' }
-interface MsgAttachment { name: string; size: number; type: string }
-function addMessage(role: string, content: string, files?: MsgAttachment[]) {
-  messages.value.push({ id: Date.now().toString(), role: role as any, content, timestamp: new Date().toLocaleTimeString(), files } as any)
-  nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight })
-}
-function renderContent(text: string, hasFiles?: boolean) {
-  // Strip file tag from display (file cards already show it)
-  let display = text
-  if (hasFiles) {
-    display = display.replace(/\n?\[上传文件:.*?\]/g, '')
-  }
-  try { return marked.parse(display) as string } catch { return display.replace(/\n/g, '<br>') }
-}
+
+// ── Chat / Send Message ──────────────────────────────────────
 
 async function sendMessage() {
-  const text = inputText.value.trim(); const files = [...attachedFiles.value]
+  const text = inputText.value.trim()
+  const files = [...attachedFiles.value]
   if (!text) return
-  const isNewChat = !currentChatId.value
-  inputText.value = ''; attachedFiles.value = []; if (inputEl.value) inputEl.value.style.height = 'auto'
 
-  // Auto-create session on first message (no empty sessions)
+  const isNewChat = !currentChatId.value
+  inputText.value = ''
+  attachedFiles.value = []
+
   if (isNewChat) {
     try {
       const { data: s } = await chatApi.createSession(text.slice(0, 30) || '新对话', selectedModel.value)
       currentChatId.value = s.id
       recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model })
-    } catch { /* fallback to local-only */ }
+    } catch { /* fallback */ }
   }
 
-  // Build user message with file attachments (file info always embedded for persistence)
-  const attachments: MsgAttachment[] = files.map(f => ({ name: f.name, size: f.file.size, type: f.file.type || f.name.split('.').pop() || '' }))
-  const fileTag = files.length ? `[上传文件: ${files.map(f => `${f.name} (${formatFileSize(f.file.size)})`).join(', ')}]` : ''
-  const userMsg = text ? (fileTag ? `${text}\n${fileTag}` : text) : fileTag
+  const attachments: MsgAttachment[] = files.map(f => ({
+    name: f.name,
+    size: f.file.size,
+    type: f.file.type || f.name.split('.').pop() || '',
+  }))
+
+  const fileTag = files.length
+    ? `[上传文件: ${files.map(f => `${f.name} (${formatSizeStr(f.file.size)})`).join(', ')}]`
+    : ''
+  const userMsg = fileTag ? `${text}\n${fileTag}` : text
   addMessage('user', userMsg, attachments)
-  // Persist user message to backend (so it survives page navigation)
-  if (currentChatId.value) chatApi.saveMessage(currentChatId.value, 'user', userMsg).catch(() => {})
+
+  if (currentChatId.value) {
+    chatApi.saveMessage(currentChatId.value, 'user', userMsg).catch(() => {})
+  }
   loading.value = true
 
   try {
-    // Upload and analyze each file
     if (files.length > 0) {
-      for (const fa of files) {
-        fa.status = 'uploading'
-        const fd = new FormData(); fd.append('file', fa.file); fd.append('description', text)
-        try {
-          const resp = await client.post('/logs/upload', fd, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-            onUploadProgress: (e) => { if (e.total) fa.progress = Math.round((e.loaded / e.total) * 100) },
-          })
-          fa.progress = 100; fa.status = 'parsing'
-          const logId = resp.data.id
-          // Run analysis
-          addMessage('assistant', `🔍 正在解析并分析 \`${fa.name}\`...`)
-          const processingMsg = messages.value[messages.value.length - 1]
-          try {
-            const analysisRes = await chatApi.runAnalysis(logId, selectedModel.value)
-            if (analysisRes.data?.id) {
-              const detail = (await chatApi.getAnalysisResult(analysisRes.data.id)).data
-              lastAnalysis.value = detail
-              let response = `## 📊 分析结果 — ${fa.name}\n\n**摘要：** ${detail.summary}\n\n**根因分析：** ${detail.root_cause}\n\n**置信度：** ${((detail.confidence || 0) * 100).toFixed(0)}%\n\n**建议措施：**\n`
-              if (detail.next_steps) detail.next_steps.forEach((s: string, i: number) => { response += `${i + 1}. ${s}\n` })
-              processingMsg.content = response
-              canGenerateReport.value = true; fa.status = 'done'
-              await chatApi.saveMessage(currentChatId.value, 'assistant', response).catch(() => {})
-            }
-          } catch (e: any) {
-            processingMsg.content = `❌ 分析 \`${fa.name}\` 失败：${e.response?.data?.detail || e.message}`
-            fa.status = 'error'; fa.error = e.response?.data?.detail || e.message
-          }
-          nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight })
-        } catch (e: any) {
-          fa.status = 'error'; fa.error = e.response?.data?.detail || e.message
-          addMessage('assistant', `❌ 上传 \`${fa.name}\` 失败：${e.response?.data?.detail || e.message}`)
-        }
-      }
+      await processFiles(files, text)
     } else if (text) {
-      // Plain text → AI chat (streaming with diagnostic context)
-      loading.value = false
-      addMessage('assistant', '')
-      const replyMsg = messages.value[messages.value.length - 1]
-      const scrollToBottom = () => { nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight }) }
-
-      await chatApi.sendMessageStream(
-        currentChatId.value,
-        text,
-        selectedModel.value,
-        (token: string) => { replyMsg.content += token; scrollToBottom() },
-        (_model: string) => {
-          const chat = recentChats.value.find(c => c.id === currentChatId.value)
-          if (chat && chat.title === '新对话') chat.title = text.slice(0, 30)
-          scrollToBottom()
-        },
-        (err: string) => { replyMsg.content = '❌ 流式回复失败：' + err },
-        lastAnalysis.value,  // Inject analysis context for informed follow-up
-      )
+      await streamChat(text)
     }
-  } catch (e: any) { addMessage('assistant', `❌ 分析失败：${e.response?.data?.detail || e.message}`) }
-  finally { loading.value = false }
+  } catch (e: any) {
+    addMessage('assistant', `❌ 分析失败：${e.response?.data?.detail || e.message}`)
+  } finally {
+    loading.value = false
+  }
 }
-async function generateDiagnosticReport() { ElMessage.info('报告生成功能开发中') }
+
+async function processFiles(files: FileAttachment[], text: string) {
+  for (const fa of files) {
+    fa.status = 'uploading'
+    const fd = new FormData()
+    fd.append('file', fa.file)
+    fd.append('description', text)
+
+    try {
+      const resp = await client.post('/logs/upload', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (e) => {
+          if (e.total) fa.progress = Math.round((e.loaded / e.total) * 100)
+        },
+      })
+      fa.progress = 100
+      fa.status = 'parsing'
+      const logId = resp.data.id
+
+      addMessage('assistant', `🔍 正在解析并分析 \`${fa.name}\`...`)
+      const processingMsg = messages.value[messages.value.length - 1]
+
+      try {
+        const analysisRes = await chatApi.runAnalysis(logId, selectedModel.value)
+        if (analysisRes.data?.id) {
+          const detail = (await chatApi.getAnalysisResult(analysisRes.data.id)).data
+          lastAnalysis.value = detail
+          let response = [
+            `## 📊 分析结果 — ${fa.name}`,
+            '',
+            `**摘要：** ${detail.summary}`,
+            '',
+            `**根因分析：** ${detail.root_cause}`,
+            '',
+            `**置信度：** ${((detail.confidence || 0) * 100).toFixed(0)}%`,
+            '',
+            '**建议措施：**',
+          ].join('\n')
+          if (detail.next_steps) {
+            detail.next_steps.forEach((s: string, i: number) => { response += `${i + 1}. ${s}\n` })
+          }
+          processingMsg.content = response
+          canGenerateReport.value = true
+          fa.status = 'done'
+          await chatApi.saveMessage(currentChatId.value, 'assistant', response).catch(() => {})
+        }
+      } catch (e: any) {
+        processingMsg.content = `❌ 分析 \`${fa.name}\` 失败：${e.response?.data?.detail || e.message}`
+        fa.status = 'error'
+        fa.error = e.response?.data?.detail || e.message
+      }
+      msgListRef.value?.scrollToBottom()
+    } catch (e: any) {
+      fa.status = 'error'
+      fa.error = e.response?.data?.detail || e.message
+      addMessage('assistant', `❌ 上传 \`${fa.name}\` 失败：${e.response?.data?.detail || e.message}`)
+    }
+  }
+}
+
+async function streamChat(text: string) {
+  loading.value = false
+  addMessage('assistant', '')
+  const replyMsg = messages.value[messages.value.length - 1]
+
+  await chatApi.sendMessageStream(
+    currentChatId.value,
+    text,
+    selectedModel.value,
+    (token: string) => {
+      replyMsg.content += token
+      msgListRef.value?.scrollToBottom()
+    },
+    (_model: string) => {
+      const chat = recentChats.value.find(c => c.id === currentChatId.value)
+      if (chat && chat.title === '新对话') chat.title = text.slice(0, 30)
+      msgListRef.value?.scrollToBottom()
+    },
+    (err: string) => {
+      replyMsg.content = '❌ 流式回复失败：' + err
+    },
+    lastAnalysis.value,
+  )
+}
+
+function addMessage(role: string, content: string, files?: MsgAttachment[]) {
+  messages.value.push({
+    id: Date.now().toString(),
+    role: role as any,
+    content,
+    timestamp: new Date().toLocaleTimeString(),
+    files,
+  } as any)
+  setTimeout(() => msgListRef.value?.scrollToBottom(), 50)
+}
+
+function formatSizeStr(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1048576).toFixed(1) + ' MB'
+}
+
+async function generateDiagnosticReport() {
+  ElMessage.info('报告生成功能开发中')
+}
 
 onMounted(() => {
   selectedModel.value = localStorage.getItem('selectedModel') || 'mock'
   loadSessions()
 })
-function onModelChange(model: string) {
-  selectedModel.value = model
-  localStorage.setItem('selectedModel', model)
-}
 </script>
 
 <style scoped>
-/* ============================================================
-   全局
-   ============================================================ */
 .chat-layout {
   display: flex;
   height: 100vh;
   background: #fff;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-/* ============================================================
-   侧边栏
-   ============================================================ */
-.sidebar {
-  width: 260px;
-  background: #f9fafb;
-  border-right: 1px solid #e5e7eb;
-  flex-shrink: 0;
-  overflow: hidden;
-  transition: width 0.2s ease;
-}
-
-.sidebar.collapsed {
-  width: 0;
-  border-right: none;
-}
-
-.sidebar-inner {
-  width: 260px;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.sidebar-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 14px;
-}
-
-.sidebar-icon-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: none;
-  background: transparent;
-  color: #6b7280;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s;
-  flex-shrink: 0;
-}
-
-.sidebar-icon-btn:hover {
-  background: #e5e7eb;
-  color: #1f2937;
-}
-
-.sidebar-new-chat {
-  padding: 4px 10px;
-}
-
-.new-chat-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-  background: #fff;
-  color: #374151;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background 0.15s;
-}
-
-.new-chat-btn:hover {
-  background: #f3f4f6;
-}
-
-.sidebar-nav {
-  padding: 4px 10px;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-  color: #374151;
-  margin-bottom: 2px;
-  transition: background 0.12s;
-}
-
-.nav-item:hover {
-  background: #e5e7eb;
-}
-
-.sidebar-history {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 10px;
-}
-
-.section-title {
-  font-size: 12px;
-  color: #9ca3af;
-  padding: 8px 12px 4px;
-  letter-spacing: 0.5px;
-}
-
-.history-item {
-  display: flex;
-  align-items: center;
-  padding: 8px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  color: #4b5563;
-  transition: background 0.12s;
-}
-
-.history-item:hover {
-  background: #e5e7eb;
-}
-
-.history-item.active {
-  background: #dbeafe;
-  color: #2563eb;
-}
-
-.history-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.history-more-btn {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: #9ca3af;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.12s;
-}
-
-.history-item:hover .history-more-btn {
-  opacity: 1;
-}
-
-.history-more-btn:hover {
-  background: #d1d5db;
-  color: #374151;
-}
-
-.empty-hint {
-  font-size: 12px;
-  color: #9ca3af;
-  padding: 12px;
-  text-align: center;
-}
-
-.sidebar-user {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  border-top: 1px solid #e5e7eb;
-  cursor: pointer;
-  transition: background 0.12s;
-  margin-top: auto;
-}
-
-.sidebar-user:hover {
-  background: #e5e7eb;
-}
-
-.user-avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: #2563eb;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.user-name {
-  font-size: 13px;
-  color: #374151;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .float-open-btn {
@@ -895,15 +521,13 @@ function onModelChange(model: string) {
   color: #1f2937;
 }
 
-/* 弹出菜单 */
 .menu-overlay {
   position: fixed;
   inset: 0;
   z-index: 99;
 }
 
-.chat-menu-popup,
-.user-menu-popup {
+.chat-menu-popup {
   position: fixed;
   z-index: 100;
   background: #fff;
@@ -916,19 +540,11 @@ function onModelChange(model: string) {
 }
 
 @keyframes menuIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.chat-menu-popup button,
-.user-menu-popup button {
+.chat-menu-popup button {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -943,224 +559,19 @@ function onModelChange(model: string) {
   transition: background 0.1s;
 }
 
-.chat-menu-popup button:hover,
-.user-menu-popup button:hover {
-  background: #f3f4f6;
-}
+.chat-menu-popup button:hover { background: #f3f4f6; }
 
-.chat-menu-popup button.danger:hover,
-.user-menu-popup button.danger:hover {
+.chat-menu-popup button.danger:hover {
   background: #fef2f2;
   color: #ef4444;
 }
 
-.chat-menu-popup hr,
-.user-menu-popup hr {
+.chat-menu-popup hr {
   margin: 4px 0;
   border: none;
   border-top: 1px solid #e5e7eb;
 }
 
-.user-menu-popup {
-  bottom: 60px;
-  left: 14px;
-}
-
-/* 设置弹窗 — 平滑缩放动画 + 左右分栏 */
-.settings-overlay {
-  background: rgba(0, 0, 0, 0.3) !important;
-}
-
-.settings-dialog {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 100;
-  background: #fff;
-  border-radius: 14px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
-  width: 680px;
-  height: 520px;
-  max-height: 80vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Vue transition — 平滑缩放 */
-.settings-modal-enter-active {
-  transition: all 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-
-.settings-modal-leave-active {
-  transition: all 0.15s cubic-bezier(0.55, 0, 1, 0.45);
-}
-
-.settings-modal-enter-from {
-  opacity: 0;
-  transform: translate(-50%, -50%) scale(0.92);
-}
-
-.settings-modal-leave-to {
-  opacity: 0;
-  transform: translate(-50%, -50%) scale(0.92);
-}
-
-.settings-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 24px;
-  border-bottom: 1px solid #f3f4f6;
-  flex-shrink: 0;
-}
-
-.settings-header h3 {
-  font-size: 17px;
-  font-weight: 600;
-  color: #1f2937;
-  margin: 0;
-}
-
-.settings-close {
-  background: none;
-  border: none;
-  font-size: 22px;
-  color: #9ca3af;
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
-  border-radius: 6px;
-  transition: all 0.12s;
-}
-
-.settings-close:hover {
-  color: #374151;
-  background: #f3f4f6;
-}
-
-/* 左右分栏 */
-/* 左右分栏 — 固定高度 */
-.settings-layout {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-  min-height: 0;
-}
-
-.settings-nav {
-  width: 170px;
-  background: #f9fafb;
-  padding: 12px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
-.settings-nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  color: #4b5563;
-  transition: all 0.12s;
-}
-
-.settings-nav-item:hover {
-  background: #e5e7eb;
-}
-
-.settings-nav-item.active {
-  background: #eff6ff;
-  color: #2563eb;
-  font-weight: 500;
-}
-
-/* 右侧内容 — 固定高度 + 内部滚动，切换 tab 不改变弹窗尺寸 */
-.settings-content {
-  flex: 1;
-  padding: 20px 24px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  min-height: 0;
-}
-
-/* 每个 tab 内容区统一最小高度，少内容时有留白而非收缩 */
-.settings-content>div {
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-}
-
-.setting-group {
-  margin-bottom: 20px;
-}
-
-.setting-group h4 {
-  font-size: 14px;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 10px;
-}
-
-.setting-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 0;
-}
-
-.setting-row span {
-  font-size: 14px;
-  color: #374151;
-}
-
-.setting-value {
-  color: #6b7280 !important;
-}
-
-.setting-desc {
-  font-size: 13px;
-  color: #6b7280;
-  line-height: 1.6;
-  margin-bottom: 10px;
-}
-
-.theme-switch {
-  display: flex;
-  gap: 4px;
-}
-
-.theme-switch button {
-  padding: 6px 14px;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
-  background: #fff;
-  font-size: 13px;
-  color: #6b7280;
-  cursor: pointer;
-  transition: all 0.12s;
-}
-
-.theme-switch button.active {
-  background: #eff6ff;
-  border-color: #2563eb;
-  color: #2563eb;
-}
-
-.theme-switch button:hover:not(.active) {
-  background: #f3f4f6;
-}
-
-/* ============================================================
-   对话区 — ChatGPT 风格
-   ============================================================ */
 .chat-main {
   flex: 1;
   display: flex;
@@ -1170,7 +581,6 @@ function onModelChange(model: string) {
   overflow: hidden;
 }
 
-/* 子页面统一宽度 + 居中 */
 .sub-page {
   flex: 1;
   overflow-y: auto;
@@ -1178,308 +588,29 @@ function onModelChange(model: string) {
   justify-content: center;
 }
 
-/* 空状态：flex居中整块内容 */
-.welcome-full {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 0 24px;
-  gap: 24px;
-}
-.welcome-inner { text-align: center; }
-.welcome-icon { margin-bottom: 12px; opacity: 0.5; }
-.welcome-inner h2 { font-size: 22px; font-weight: 500; color: #374151; margin: 0; }
-.welcome-input { width: 100%; max-width: 720px; }
-
-/* 有消息：chat-content 撑满，消息区滚动，输入框固定底部 */
 .chat-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-.chat-messages-wrap {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
 
-.message-row {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 24px;
-  width: 100%;
-  max-width: 768px;
-}
-
-.message-row.user {
-  justify-content: flex-end;
-}
-
-.message-row.assistant {
-  justify-content: flex-start;
-}
-
-.message-avatar {
-  flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.message-body {
-  max-width: 85%;
-}
-
-.message-bubble {
-  padding: 12px 16px;
-  border-radius: 12px;
-  line-height: 1.65;
-  font-size: 14px;
-  color: #1f2937;
-}
-
-.message-row.user .message-bubble {
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  border-bottom-right-radius: 4px;
-}
-
-.message-row.assistant .message-bubble {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-bottom-left-radius: 4px;
-}
-
-.typing {
-  display: flex;
-  gap: 5px;
-  align-items: center;
-  padding: 14px 18px;
-}
-
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #9ca3af;
-  animation: bounce 1.4s infinite ease-in-out both;
-}
-
-.dot:nth-child(1) {
-  animation-delay: -0.32s;
-}
-
-.dot:nth-child(2) {
-  animation-delay: -0.16s;
-}
-
-@keyframes bounce {
-
-  0%,
-  80%,
-  100% {
-    transform: scale(0);
-  }
-
-  40% {
-    transform: scale(1);
-  }
-}
-
-/* 输入框 */
 .input-wrapper {
   display: flex;
   justify-content: center;
   padding: 12px 24px 20px;
 }
 
-.input-container {
-  width: 100%;
-  max-width: 720px;
-}
-
-/* Upload area */
-.upload-area {
-  display: flex; flex-direction: column; gap: 1px;
-  background: #e5e7eb; border: 1px solid #d1d5db; border-bottom: none;
-  border-radius: 10px 10px 0 0; overflow: hidden; max-height: 200px; overflow-y: auto;
-}
-.upload-file-card { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #fff; border-bottom: 1px solid #f3f4f6; }
-.ufc-icon { color: #2563eb; flex-shrink: 0; }
-.ufc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ufc-name { font-size: 13px; color: #1f2937; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ufc-size { font-size: 11px; color: #9ca3af; }
-.ufc-progress-wrap { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.ufc-progress { flex: 1; height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
-.ufc-progress-bar { height: 100%; border-radius: 2px; transition: width 0.3s; background: #2563eb; }
-.ufc-progress-bar.done { background: #22c55e; }
-.ufc-progress-bar.error { background: #ef4444; }
-.ufc-status { font-size: 11px; white-space: nowrap; }
-.ufc-status.uploading, .ufc-status.parsing { color: #2563eb; }
-.ufc-status.done { color: #22c55e; }
-.ufc-status.error { color: #ef4444; }
-.ufc-error { font-size: 11px; color: #ef4444; }
-.ufc-remove { background: none; border: none; font-size: 18px; cursor: pointer; color: #9ca3af; padding: 0 4px; flex-shrink: 0; }
-.ufc-remove:hover { color: #ef4444; }
-.ufc-remove:disabled { opacity: 0.3; cursor: not-allowed; }
-.upload-area + .input-box { border-radius: 0 0 12px 12px; border-top: none; }
-
-.input-box {
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  transition: border-color 0.15s, box-shadow 0.15s;
-  overflow: hidden;
-}
-
-.input-box:focus-within {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.msg-textarea {
-  width: 100%;
-  border: none;
-  outline: none;
-  resize: none;
-  padding: 14px 16px 8px;
-  font-size: 15px;
-  line-height: 1.6;
-  font-family: inherit;
-  color: #1f2937;
-  background: transparent;
-  min-height: 48px;
-}
-
-.msg-textarea::placeholder {
-  color: #9ca3af;
-}
-
-.input-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 12px 10px;
-}
-
-.actions-left,
-.actions-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.model-select {
-  width: 150px;
-}
-
-:deep(.model-select .el-input__wrapper) {
-  border-radius: 20px;
-  box-shadow: none !important;
-  border: 1px solid #e5e7eb;
-  padding: 0 12px;
-  height: 30px;
-  font-size: 13px;
-}
-
-:deep(.model-select .el-input__wrapper:hover) {
-  border-color: #d1d5db;
-}
-
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 20px;
-  border: 1px solid #e5e7eb;
-  background: #fff;
-  color: #6b7280;
-  cursor: pointer;
-  font-size: 13px;
-  transition: all 0.15s;
-}
-
-.action-btn:hover {
-  background: #f3f4f6;
-  color: #374151;
-}
-
-.action-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.attach-btn {
-  width: auto; min-width: 30px;
-  padding: 0 8px;
-  justify-content: center;
-  cursor: pointer;
-  gap: 4px;
-  position: relative;
-}
-/* File cards in chat messages */
-.msg-files { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; align-items: flex-end; }
-.msg-file-card {
-  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
-  cursor: pointer; transition: background 0.15s; max-width: 280px;
-}
-.msg-file-card:hover { background: #dbeafe; }
-.msg-file-icon { font-size: 18px; flex-shrink: 0; }
-.msg-file-name { font-size: 12px; color: #1e40af; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.msg-file-size { font-size: 11px; color: #93c5fd; flex-shrink: 0; }
-
-/* File preview */
 .file-preview-content {
-  max-height: 60vh; overflow: auto; padding: 16px; background: #1e293b; color: #e2e8f0;
-  border-radius: 8px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 16px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
-
-.send-btn {
-  width: 30px;
-  padding: 0;
-  justify-content: center;
-}
-
-.send-btn.active {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
-}
-
-.send-btn.active:hover {
-  background: #1d4ed8;
-}
-
-/* Markdown content */
-.msg-content :deep(h2) { font-size: 17px; font-weight: 600; margin: 12px 0 6px; }
-.msg-content :deep(h3) { font-size: 15px; font-weight: 600; margin: 10px 0 4px; }
-.msg-content :deep(p) { margin: 4px 0; }
-.msg-content :deep(ul), .msg-content :deep(ol) { padding-left: 20px; margin: 4px 0; }
-.msg-content :deep(li) { margin: 2px 0; }
-.msg-content :deep(code) { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
-.msg-content :deep(pre) { background: #1e293b; color: #e2e8f0; padding: 10px 14px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
-.msg-content :deep(pre code) { background: none; padding: 0; color: inherit; }
-.msg-content :deep(blockquote) { border-left: 3px solid #d1d5db; padding-left: 10px; color: #6b7280; margin: 6px 0; }
-.msg-content :deep(table) { border-collapse: collapse; width: 100%; margin: 6px 0; }
-.msg-content :deep(th), .msg-content :deep(td) { border: 1px solid #d1d5db; padding: 6px 10px; font-size: 13px; }
-.msg-content :deep(th) { background: #f3f4f6; font-weight: 600; }
-.msg-content :deep(strong) { font-weight: 600; }
 </style>

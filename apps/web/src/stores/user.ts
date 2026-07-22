@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
+import { getLogger } from '@/logger'
 
 interface UserInfo {
   id: number
@@ -45,6 +46,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function logout() {
+    getLogger().info('User logged out', 'user', { action: 'logout', extra: { username: user.value?.username } })
     token.value = ''
     user.value = null
     store.removeItem('token')

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getLogger } from '@/logger'
 
 let tokenVerified = false
 
@@ -57,7 +58,7 @@ function clearAuth() {
   tokenVerified = false
 }
 
-router.beforeEach(async (to, _from, next) => {
+router.beforeEach(async (to, from, next) => {
   const token = sessionStorage.getItem('token')
   const userStr = sessionStorage.getItem('user')
   let user: { role?: string } | null = null
@@ -68,6 +69,10 @@ router.beforeEach(async (to, _from, next) => {
     const valid = await verifyToken()
     if (!valid) {
       clearAuth()
+      getLogger().warn('Token verification failed on navigation', 'user', {
+        url: to.fullPath,
+        action: 'navigate',
+      })
       return next('/login')
     }
     tokenVerified = true
@@ -80,13 +85,30 @@ router.beforeEach(async (to, _from, next) => {
 
   // 2) Protected route without token → login
   if (to.meta.requiresAuth && !token) {
+    getLogger().warn('Unauthenticated access attempt', 'user', {
+      url: to.fullPath,
+      action: 'navigate',
+    })
     return next('/login')
   }
 
   // 3) Admin route without admin/developer role → redirect to chat
   const adminRoles = ['admin', 'developer']
   if (to.meta.requiresAdmin && !adminRoles.includes(user?.role || '')) {
+    getLogger().warn('Unauthorized admin access attempt', 'user', {
+      url: to.fullPath,
+      action: 'navigate',
+      extra: { role: user?.role || 'none' },
+    })
     return next('/chat')
+  }
+
+  // Log successful navigation (INFO level, dev only)
+  if (from.path !== to.path) {
+    getLogger().info(`Navigation: ${from.path || '(entry)'} → ${to.path}`, 'user', {
+      url: to.fullPath,
+      action: 'navigate',
+    })
   }
 
   next()

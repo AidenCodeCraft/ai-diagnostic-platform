@@ -9,6 +9,18 @@ import App from './App.vue'
 import router from './router'
 import './styles/global.css'
 
+// Logger — initialize early so all startup errors are captured
+import { createLogger } from './logger'
+import { LoggerPlugin } from './plugins/logger-plugin'
+
+const logger = createLogger()
+
+// Reporter — start async batch upload to backend
+import { Reporter } from './logger/reporter'
+const reporter = new Reporter(logger.config)
+logger.setReporter(reporter)
+reporter.start()
+
 // VMdEditor plugins — register once globally to avoid "already in use" errors
 import VMdEditor from '@kangc/v-md-editor'
 import '@kangc/v-md-editor/lib/style/base-editor.css'
@@ -34,9 +46,12 @@ const app = createApp(App)
 app.use(createPinia())
 app.use(router)
 app.use(ElementPlus, { locale: zhCn })
+app.use(LoggerPlugin)
 
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
 }
 
 app.mount('#app')
+
+logger.info('App mounted successfully', 'business', { url: window.location.href })

@@ -14,9 +14,9 @@ docker compose up -d --build
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | Frontend (Nginx) | 80 | Vue3 Web 应用 |
-| Backend (FastAPI) | 8000 | REST API |
+| Backend (FastAPI) | 8000 | REST API + 日志文件 (`logs/app.log`) |
 | PostgreSQL | 5432 | 主数据库 |
-| Redis | 6379 | 缓存 |
+| Redis | 6379 | 缓存（预留，暂未使用） |
 
 ## 验证
 

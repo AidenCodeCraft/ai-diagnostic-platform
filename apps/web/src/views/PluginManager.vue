@@ -23,7 +23,9 @@
 import { ref, onMounted } from 'vue'
 import client from '@/api/client'
 import { ElMessage } from 'element-plus'
+import { useLogger } from '@/logger'
 
+const { warn } = useLogger()
 const plugins = ref<any[]>([])
 const loading = ref(false)
 
@@ -39,7 +41,9 @@ async function fetch() {
       }
     }
     plugins.value = flat
-  } catch { /* 后端未连接 */ }
+  } catch {
+    warn('Failed to fetch plugins', 'api')
+  }
   finally { loading.value = false }
 }
 

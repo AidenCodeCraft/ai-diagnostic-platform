@@ -1,8 +1,10 @@
 """Seed default users if they don't exist (development only)."""
 
+from app.core.logging_config import get_logger
 from app.database import session
-from app.models.user import User
+from app.models import User
 
+logger = get_logger(__name__)
 
 DEFAULT_USERS = [
     {
@@ -28,7 +30,11 @@ def seed_users():
             existing = db.query(User).filter(User.username == u["username"]).first()
             if not existing:
                 db.add(User(**u))
-                print(f"[seed] Created user: {u['username']} (role={u['role']})")
+                logger.info("Seeded user: %s (role=%s)", u["username"], u["role"])
         db.commit()
+        logger.info("Seed complete: %d default users ensured", len(DEFAULT_USERS))
+    except Exception as exc:
+        logger.error("Failed to seed users: %s", exc)
+        db.rollback()
     finally:
         db.close()

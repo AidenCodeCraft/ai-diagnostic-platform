@@ -22,9 +22,11 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { useLogger } from '@/logger'
 
 const router = useRouter()
 const userStore = useUserStore()
+const { info, warn, error: logError } = useLogger()
 const loading = ref(false)
 const loginForm = reactive({ username: '', password: '' })
 
@@ -33,9 +35,11 @@ async function handleLogin() {
   loading.value = true
   try {
     await userStore.login(loginForm.username, loginForm.password)
+    info('Login successful', 'user', { action: 'login', extra: { username: loginForm.username } })
     ElMessage.success('登录成功')
     router.push('/chat')
   } catch (e: any) {
+    warn('Login failed', 'user', { action: 'login', extra: { username: loginForm.username, error: e.response?.data?.detail } })
     ElMessage.error(e.response?.data?.detail || '登录失败')
   } finally { loading.value = false }
 }

@@ -36,6 +36,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { reportApi } from '@/api/reports'
+import { useLogger } from '@/logger'
+
+const { warn } = useLogger()
 import { ElMessage } from 'element-plus'
 
 const items = ref<any[]>([])
@@ -50,7 +53,7 @@ function formatTime(ts: string) { return ts ? new Date(ts).toLocaleString() : ''
 
 async function fetch() {
   loading.value = true
-  try { const { data } = await reportApi.list({ page: page.value, page_size: pageSize }); items.value = data.items; total.value = data.total } catch {}
+  try { const { data } = await reportApi.list({ page: page.value, page_size: pageSize }); items.value = data.items; total.value = data.total } catch { warn('Failed to fetch reports', 'api') }
   finally { loading.value = false }
 }
 
