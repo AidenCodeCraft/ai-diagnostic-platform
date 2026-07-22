@@ -263,130 +263,140 @@ docker compose up -d --build
 
 ---
 
+## 阶段三：核心对话功能完善 🚧
+
+> **归属**: v1.0 企业版  
+> **优先级**: 🔴 最高 — 打通平台核心价值链路  
+> **目标**: 实现真正的多轮 AI 诊断对话，v1.0 所有功能可正常使用  
+
+### 现状诊断
+
+```
+┌─────────────────────────────────────────┐
+│  前端 ChatLayout    ← ChatGPT 风格 UI    │
+│  ✅ 侧栏 / 气泡 / 文件上传               │
+│  ❌ 消息存 localStorage，不调后端 chat    │
+└──────────────┬──────────────────────────┘
+               │ 断开的
+┌──────────────┴──────────────────────────┐
+│  后端 ChatSession CRUD  ← 完整持久化     │
+│  ✅ 会话/消息/级联删除/分页               │
+│  ❌ 没有 sendMessage → LLM 的方法        │
+└──────────────┬──────────────────────────┘
+               │ 断开的
+┌──────────────┴──────────────────────────┐
+│  Agent + LLM Provider  ← 完整引擎        │
+│  ✅ BaseAgent / DeepSeek / OpenAI兼容    │
+│  ❌ 只支持一次性诊断，不支持 chat()       │
+└─────────────────────────────────────────┘
+```
+
+### P0 — 打通基础多轮对话
+
+| 任务 | 层 | 说明 |
+|------|-----|------|
+| `BaseProvider.chat(messages[])` | Provider | 新增多轮对话方法，DeepSeek + OpenAI 兼容 Provider 均实现 |
+| `ChatService.send_message()` | Service | 组装历史消息 → 调用 LLM Provider.chat() → 存储 AI 回复 → 返回 |
+| `POST /chat-sessions/{id}/chat` | API | 新增聊天端点，接收用户消息返回 AI 回复 |
+| `chat.ts` 新增 API 方法 | 前端 API | `createSession()` / `sendMessage()` / `getMessages()` |
+| `ChatLayout.sendMessage()` 改造 | 前端 UI | 从 localStorage 改为调用后端 chat API，对话历史服务端持久化 |
+| 对话历史从 localStorage 迁移 | 数据 | 最近对话列表从服务端加载，支持跨设备同步 |
+
+### P1 — 流式输出
+
+| 任务 | 说明 |
+|------|------|
+| Provider 支持 stream 模式 | 使用 SSE 逐 token 返回 |
+| `POST /chat-sessions/{id}/stream` | SSE 端点 |
+| 前端 EventSource 流式渲染 | 逐字打字效果，替代等待 spinner |
+
+### P2 — 诊断聊天智能化
+
+| 任务 | 说明 |
+|------|------|
+| `DiagnosticChatAgent` | 基于 Agent 框架的多轮诊断对话 Agent |
+| Function Calling / Tool Use | LLM 在对话中触发日志解析/知识库搜索/分析工具 |
+| 上下文自动注入 | 上传日志后分析结果自动注入对话上下文 |
+| 追问与澄清 | Agent 主动追问缺失信息（设备型号、固件版本等） |
+
+### P3 — 体验增强
+
+| 任务 | 说明 |
+|------|------|
+| 对话分支 | 用户可回溯到某条消息重新生成回复 |
+| 消息操作 | 复制 / 重新生成 / 点赞踩 |
+| 上下文窗口管理 | 长对话自动摘要压缩，避免超出 token 限制 |
+| Markdown 渲染 | AI 回复中的表格/代码块正确渲染 |
+
+### 工作量估算
+
+| 阶段 | 后端 | 前端 | 前端 API | 预估 |
+|------|------|------|----------|------|
+| P0 基础对话 | Provider + Service + API | ChatLayout 改造 | chat.ts 重写 | 中 |
+| P1 流式输出 | SSE 端点 | 流式渲染 | EventSource | 小 |
+| P2 智能诊断 | DiagnosticChatAgent | 上下文 UI | — | 大 |
+| P3 体验增强 | — | UI 组件 | — | 中 |
+
+---
+
 ## 未来路线图
 
 ### v1.0 — 企业版
 
-| 优先级 | 模块 | 说明 |
+| 优先级 | 模块 | 状态 |
 |--------|------|------|
-| 🔴 P0 | 多租户架构 | Organization 模型 + 数据隔离 |
-| 🔴 P0 | RBAC 权限 | 管理员/工程师/测试员/只读 |
-| 🟡 P1 | Bug 案例系统 | 历史案例检索 + 解决方案关联 |
-| 🟡 P1 | Chat 多轮对话增强 | 对话上下文管理 + 历史恢复 |
-| 🟢 P2 | 插件市场 | 发布/安装/评分 |
-| 🟢 P2 | 开放 API | API Key + Rate Limit + Webhook |
+| 🔴 P0 | 多租户架构 | ✅ 完成 |
+| 🔴 P0 | RBAC 权限 | ✅ 完成 |
+| 🔴 P0 | 登录与防爆破 | ✅ 完成 |
+| 🔴 P0 | 管理后台 | ✅ 完成 |
+| 🔴 P0 | 知识库管理 | ✅ 完成 |
+| 🟡 P1 | Bug 案例系统 | ✅ 完成 |
+| 🔴 P0 | 核心对话功能（阶段三） | 🚧 进行中 |
+| 🟢 P2 | 插件市场 | ⏳ 计划中 |
+| 🟢 P2 | 开放 API | ✅ 完成 |
 
-### 桌面 & 移动客户端
+### 阶段三 P0：基础多轮对话 — 🚧 进行中
 
-- **Commit 012** — 桌面客户端（Tauri + Rust）
-- **Commit 013** — 移动客户端（Flutter + Dart）
+打通对话闭环，v1.0 所有功能正常可用。
+
+| 任务 | 层 | 说明 |
+|------|-----|------|
+| `BaseProvider.chat(messages[])` | Provider | 新增多轮对话方法，DeepSeek + OpenAI 兼容 Provider 均实现 |
+| `ChatService.send_message()` | Service | 组装历史消息 → 调用 LLM → 存储 AI 回复 |
+| `POST /chat-sessions/{id}/chat` | API | 新增聊天端点，接收用户消息返回 AI 回复 |
+| `chat.ts` 新增 API 方法 | 前端 API | `createSession()` / `sendMessage()` / `getMessages()` |
+| `ChatLayout.sendMessage()` 改造 | 前端 UI | 从 localStorage 改为调用后端 chat API，服务端持久化 |
+
+### 阶段三 P1：流式输出 — ⏳
+
+| 任务 | 说明 |
+|------|------|
+| Provider stream 模式 | SSE 逐 token 返回 |
+| `POST /chat-sessions/{id}/stream` | SSE 端点 |
+| 前端流式渲染 | 逐字打字效果 |
+
+### 阶段三 P2：诊断聊天智能化 — ⏳
+
+| 任务 | 说明 |
+|------|------|
+| `DiagnosticChatAgent` | 多轮诊断对话 Agent |
+| Function Calling | LLM 在对话中触发日志分析/知识库搜索工具 |
+| 上下文自动注入 | 上传日志后分析结果自动注入对话 |
+
+### v2.0 — 未来规划
+
+- 桌面客户端（Tauri + Rust）
+- 移动客户端（Flutter + Dart）
+- 插件市场
+- 多语言国际化
 
 ---
 
-## v1.0 完成后下一步工作分析
+## 一键启动
 
-### 阶段一：用户端界面完善
-
-主对话界面（ChatLayout + ChatView）、设置弹窗已完成。剩余待搭建的前端页面：
-
-| 页面 | 后端 API | 前端组件 |
-|------|----------|----------|
-| 知识库管理 | `GET/POST/PUT/DELETE /knowledge` + `/knowledge/search` + `/knowledge/upload` + `/knowledge/categories` | KnowledgeBase.vue（已有基础版） |
-| 插件管理 | `GET /plugins` + `/plugins/models` + `/plugins/stats` + `/plugins/toggle` | PluginManager.vue（已有基础版） |
-| 诊断报告 | `GET/POST/DELETE /reports` + `/reports/{id}/markdown` | ReportList.vue（已有基础版） |
-
-### 阶段二：管理后台界面（新增）
-
-#### 总体架构
-
-```
-ChatLayout（侧栏 — admin 角色显示管理入口）
-  ├── /chat              → 对话界面（所有用户）
-  ├── /knowledge         → 知识库（所有用户）
-  ├── /plugins           → 插件管理（所有用户）
-  ├── /reports           → 诊断报告（所有用户）
-  └── /admin/*           → 管理后台（仅 admin）
-       ├── /admin/overview    → 系统概览
-       ├── /admin/users       → 用户与角色管理
-       ├── /admin/audit       → 审核与日志监控
-       └── /admin/settings    → 系统配置
+```bash
+cd deploy
+docker compose up -d --build
 ```
 
-**权限控制**：路由守卫检查 `user.role === 'admin'`，非管理员重定向到对话页。
-
-#### 1. 系统概览（`/admin/overview`）
-
-| 功能 | 数据来源 | 说明 |
-|------|----------|------|
-| 关键指标卡片 | `GET /plugins/stats` + 各模块 list API | 用户总数、组织数、今日分析量、活跃插件数 |
-| 分析趋势图 | `GET /analyses?status=completed` | 近 7/30 天分析量折线图 |
-| 存储用量 | `GET /logs` 统计 size 字段 | 日志存储总量 + 文档数 |
-| 系统健康状态 | `GET /health` + `GET /plugins/models` | 后端/DB/Redis/LLM Provider 状态指示灯 |
-
-#### 2. 用户与角色管理（`/admin/users`）
-
-| 功能 | 数据交互 | 说明 |
-|------|----------|------|
-| 用户列表 | `GET /users`（需新增） | 表格：用户名/邮箱/角色/组织/状态 |
-| 角色修改 | `PUT /users/{id}`（需新增） | 下拉切换 admin/engineer/viewer |
-| 启用/禁用 | `PUT /users/{id}` 修改 is_active | 开关按钮 + 确认弹窗 |
-| 组织分配 | `PUT /users/{id}` 修改 organization_id | 下拉选择已注册组织 |
-| 组织管理 | `GET/POST /organizations` | 创建组织 + 成员管理 |
-| API Key 管理 | `GET/POST/DELETE /api-keys` | 每个用户可生成多个 Key |
-
-#### 3. 审核与日志监控（`/admin/audit`）
-
-| 功能 | 数据来源 | 说明 |
-|------|----------|------|
-| 分析任务监控 | `GET /analyses?status=failed` | 失败任务列表 + 错误信息 + 重试 |
-| 插件状态 | `GET /plugins` + `POST /plugins/toggle/{name}` | 插件启停管理 |
-| 规则管理 | `GET/POST/DELETE /rules` | 规则列表 + 新增/删除 |
-| Bug 案例审核 | `GET /bug-cases` | 审核 Bug 案例信息完整性 |
-| 知识文档审核 | `GET /knowledge?status=all` | 审核新增/修改的知识文档 |
-
-#### 4. 系统配置（`/admin/settings`）
-
-| 功能 | 数据交互 | 说明 |
-|------|----------|------|
-| LLM 配置 | 环境变量 / 数据库配置表 | Provider 选择 + API Key + Base URL |
-| 系统参数 | `GET/PUT /system/config`（需新增） | 最大上传大小、超时、日志保留天数 |
-| 数据清理 | `DELETE /logs` + `DELETE /analyses` | 按日期范围批量清理 |
-| 关于系统 | 静态信息 | 版本号、构建时间、许可协议 |
-
-#### 需要新增的后端端点
-
-| 端点 | 用途 | 优先级 |
-|------|------|--------|
-| `GET /users` | 用户列表（含分页+角色筛选） | 🔴 必须 |
-| `PUT /users/{id}` | 修改用户角色/状态/组织 | 🔴 必须 |
-| `GET /system/config` | 获取系统配置 | 🟡 建议 |
-| `PUT /system/config` | 更新系统配置 | 🟡 建议 |
-| `GET /admin/stats` | 聚合统计数据 | 🟡 建议 |
-
-#### 工作量估算
-
-| 模块 | 前端页面 | 后端端点 | 预估 |
-|------|----------|----------|------|
-| 系统概览 | 1 页 | 1 新增 | 小 |
-| 用户管理 | 1 页 | 2 新增 | 中 |
-| 审核监控 | 1 页（5 标签） | 0 新增 | 小 |
-| 系统配置 | 1 页（4 标签） | 2 新增 | 中 |
-
-### 界面开发前置条件
-
-| 条件 | 状态 |
-|------|------|
-| 后端 API 全部可用 | ✅ 172 测试通过 |
-| API 响应格式确定 | ✅ Pydantic Schema 已定义 |
-| 前端 API 客户端就绪 | ✅ chat.ts / knowledge.ts / reports.ts |
-| 布局框架就绪 | ✅ ChatLayout + 路由系统 |
-| Docker 环境可用 | ✅ 一键部署 |
-
-### 开发建议顺序
-
-| 顺序 | 阶段 | 内容 |
-|------|------|------|
-| 1 | 后端补充 | 新增 `GET/PUT /users`、`GET/PUT /system/config`、`GET /admin/stats` 端点 |
-| 2 | 用户端界面 | 知识库管理 → 诊断报告 → 插件管理 |
-| 3 | 管理后台 | 系统概览 → 用户管理 → 审核监控 → 系统配置 |
-| 4 | 全局状态 | Pinia 用户登录态 + 权限判断 + 组织上下文 |
+启动后浏览器访问 **http://localhost** 即可使用。

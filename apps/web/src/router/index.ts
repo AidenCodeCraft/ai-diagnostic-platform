@@ -1,16 +1,16 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+let tokenVerified = false
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    // 登录页 — 独立布局，不需要 ChatLayout
     {
       path: '/login',
       name: 'Login',
       component: () => import('@/views/LoginView.vue'),
       meta: { title: '登录', guest: true },
     },
-    // 主应用布局
     {
       path: '/',
       component: () => import('@/layouts/ChatLayout.vue'),
@@ -23,7 +23,6 @@ const router = createRouter({
         { path: '/reports', name: 'Reports', component: () => import('@/views/ReportList.vue'), meta: { title: '诊断报告' } },
       ],
     },
-    // 管理后台 — 独立布局，需要 admin 角色
     {
       path: '/admin',
       component: () => import('@/layouts/AdminLayout.vue'),
@@ -39,26 +38,52 @@ const router = createRouter({
   ],
 })
 
-// ============================================================
-// 全局路由守卫
-// ============================================================
-router.beforeEach((to, _from, next) => {
+async function verifyToken(): Promise<boolean> {
+  const token = localStorage.getItem('token')
+  if (!token) return false
+  try {
+    const resp = await fetch('/api/v1/auth/verify', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    return resp.ok
+  } catch {
+    return false
+  }
+}
+
+function clearAuth() {
+  localStorage.removeItem('token')
+  localStorage.removeItem('user')
+  tokenVerified = false
+}
+
+router.beforeEach(async (to, _from, next) => {
   const token = localStorage.getItem('token')
   const userStr = localStorage.getItem('user')
   let user: { role?: string } | null = null
   try { user = userStr ? JSON.parse(userStr) : null } catch { /* ignore */ }
 
-  // 1) 已登录用户访问登录页 → 重定向到对话页
+  // 0) Verify token on first navigation (prevents auth bypass on browser restart)
+  if (!tokenVerified && token && !to.meta.guest) {
+    const valid = await verifyToken()
+    if (!valid) {
+      clearAuth()
+      return next('/login')
+    }
+    tokenVerified = true
+  }
+
+  // 1) Logged-in users visiting login page → redirect to chat
   if (to.meta.guest && token) {
     return next('/chat')
   }
 
-  // 2) 需要认证但未登录 → 跳转登录页
+  // 2) Protected route without token → login
   if (to.meta.requiresAuth && !token) {
     return next('/login')
   }
 
-  // 3) 需要管理权限（admin/developer）但无权限 → 重定向到对话页
+  // 3) Admin route without admin/developer role → redirect to chat
   const adminRoles = ['admin', 'developer']
   if (to.meta.requiresAdmin && !adminRoles.includes(user?.role || '')) {
     return next('/chat')

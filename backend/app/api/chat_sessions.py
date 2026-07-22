@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import session as session_module
@@ -69,3 +70,56 @@ def add_message(session_id: int, body: Dict[str, Any], db: Session = Depends(get
 @router.get("/{session_id}/messages")
 def get_messages(session_id: int, db: Session = Depends(get_db_session)):
     return ChatService(db).get_messages(session_id)
+
+
+# AI Chat
+@router.post("/{session_id}/chat")
+def chat(
+    session_id: int,
+    body: Dict[str, Any],
+    db: Session = Depends(get_db_session),
+):
+    """Send a message and get an AI reply (non-streaming).
+
+    Optional body fields:
+        log_analysis: dict with summary/root_cause/confidence/next_steps from log analysis
+    """
+    try:
+        return ChatService(db).send_message(
+            session_id=session_id,
+            content=body["content"],
+            model=body.get("model"),
+            log_analysis=body.get("log_analysis"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{session_id}/stream")
+def chat_stream(
+    session_id: int,
+    body: Dict[str, Any],
+    db: Session = Depends(get_db_session),
+):
+    """Stream AI reply via SSE with diagnostic context injection."""
+    try:
+
+        def generate():
+            yield from ChatService(db).send_message_stream(
+                session_id=session_id,
+                content=body["content"],
+                model=body.get("model"),
+                log_analysis=body.get("log_analysis"),
+            )
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

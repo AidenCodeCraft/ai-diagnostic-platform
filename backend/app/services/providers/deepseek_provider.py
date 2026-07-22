@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, Generator, List
 
 import httpx
 
@@ -93,12 +93,89 @@ class DeepSeekProvider(BaseProvider):
 
         return self._fallback_response(events, error_count, "Unexpected fallback.", 0.3)
 
+    def chat(self, messages: List[Dict[str, str]]) -> str:
+        """Multi-turn chat via DeepSeek API."""
+        if not self.api_key:
+            return "[DeepSeek API key not configured]"
+        try:
+            return self._call_api_messages(messages)
+        except Exception:
+            return "[DeepSeek API unavailable]"
+
+    def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
+        """Stream chat via DeepSeek SSE."""
+        if not self.api_key:
+            yield "[DeepSeek API key not configured]"
+            return
+        try:
+            yield from self._call_api_stream(messages)
+        except Exception:
+            yield "[DeepSeek API unavailable]"
+
     def health_check(self) -> bool:
         return bool(self.api_key)
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _call_api_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
+        """Stream tokens from DeepSeek API."""
+        with httpx.Client(timeout=60.0) as client:
+            with client.stream(
+                "POST",
+                self.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "max_tokens": 2048,
+                    "stream": True,
+                },
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if line.startswith("data: "):
+                        data = line[6:]
+                        if data == "[DONE]":
+                            return
+                        try:
+                            chunk = json.loads(data)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                yield content
+                        except json.JSONDecodeError:
+                            pass
+
+    def _call_api_messages(self, messages: List[Dict[str, str]]) -> str:
+        """Send arbitrary messages to DeepSeek and return the raw response content."""
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.post(
+                self.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "max_tokens": 2048,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            content = (
+                payload.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            return content.strip()
 
     def _call_api(self, prompt: str) -> str:
         """Send request to DeepSeek and return the raw response content."""

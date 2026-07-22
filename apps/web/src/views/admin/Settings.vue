@@ -26,7 +26,7 @@
             <label class="config-label">默认模型</label>
             <el-input v-model="llmConfig.model" style="width:240px" placeholder="deepseek-chat" />
           </div>
-          <el-button type="primary" style="margin-top:12px">保存配置</el-button>
+          <el-button type="primary" style="margin-top:12px" :loading="saving" @click="saveLLMConfig">保存配置</el-button>
         </div>
       </el-tab-pane>
 
@@ -45,7 +45,7 @@
             <label class="config-label">日志保留天数</label>
             <el-input-number v-model="sysConfig.log_retention_days" :min="7" :max="365" style="width:160px" />
           </div>
-          <el-button type="primary" style="margin-top:12px">保存配置</el-button>
+          <el-button type="primary" style="margin-top:12px" @click="saveSysConfig">保存配置</el-button>
         </div>
       </el-tab-pane>
 
@@ -96,9 +96,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import client from '@/api/client'
 
 const activeTab = ref('llm')
+const saving = ref(false)
 
 const llmConfig = ref({
   provider: 'deepseek',
@@ -115,6 +118,29 @@ const sysConfig = ref({
 
 const cleanupDate = ref('')
 const cleanupLogDate = ref('')
+
+async function loadLLMConfig() {
+  try {
+    const { data } = await client.get('/admin/config/llm')
+    if (data) llmConfig.value = data
+  } catch { /* use defaults */ }
+}
+
+async function saveLLMConfig() {
+  saving.value = true
+  try {
+    await client.put('/admin/config/llm', llmConfig.value)
+    ElMessage.success('LLM 配置已保存，即时生效')
+  } catch { ElMessage.error('保存失败') }
+  finally { saving.value = false }
+}
+
+function saveSysConfig() {
+  localStorage.setItem('sys_config', JSON.stringify(sysConfig.value))
+  ElMessage.success('系统参数已保存')
+}
+
+onMounted(loadLLMConfig)
 </script>
 
 <style scoped>

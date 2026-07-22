@@ -1,4 +1,4 @@
-"""Authentication API — login with MAC-based brute-force protection."""
+"""Authentication API — login, verify, with MAC-based brute-force protection."""
 
 from __future__ import annotations
 
@@ -22,24 +22,31 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _get_client_mac(request: Request) -> str:
-    """Extract client MAC address from request headers or fallback to IP.
-
-    Priority:
-    1. X-Client-MAC header (set by local network proxy/gateway)
-    2. X-Forwarded-For first IP as MAC substitute (for environments without MAC)
-    3. request.client.host as fallback
-    """
-    # Try explicit MAC header first
     mac = request.headers.get("X-Client-MAC", "").strip()
     if mac:
         return mac
-
-    # Fallback: use IP as identifier (Docker/reverse-proxy can't get real MAC)
     forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
     if forwarded:
         return forwarded
-
     return request.client.host if request.client else "unknown"
+
+
+@router.get("/verify")
+def verify_token(
+    request: Request,
+    db: Session = Depends(get_db_session),
+):
+    """Verify JWT token validity. Returns 401 if invalid or expired."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing token")
+
+    token = auth[7:]
+    user_id = AuthService(db).verify_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    return {"valid": True, "user_id": user_id}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -48,12 +55,7 @@ def login(
     request: Request,
     db: Session = Depends(get_db_session),
 ):
-    """Login and receive a JWT access token.
-
-    Login is protected by MAC-based brute-force protection:
-    - First 5 failed attempts → 20 min lock
-    - After unlock, 1 attempt → fail → 1 hour lock (cycles indefinitely)
-    """
+    """Login and receive a JWT access token."""
     mac = _get_client_mac(request)
     try:
         return AuthService(db).login(

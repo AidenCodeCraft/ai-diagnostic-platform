@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 import httpx
 
@@ -78,12 +78,62 @@ class OpenAICompatibleProvider(BaseProvider):
                     return self._fallback(events, error_count, f"{self._provider_name} unreachable", 0.35)
         return self._fallback(events, error_count, "Unexpected", 0.3)
 
+    def chat(self, messages: List[Dict[str, str]]) -> str:
+        """Multi-turn chat via OpenAI-compatible API."""
+        if not self.api_key:
+            return f"[{self._provider_name} API key not configured]"
+        try:
+            return self._call_api_messages(messages)
+        except Exception:
+            return f"[{self._provider_name} API unavailable]"
+
+    def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
+        """Stream chat via OpenAI-compatible API."""
+        if not self.api_key:
+            yield f"[{self._provider_name} API key not configured]"
+            return
+        try:
+            yield from self._call_api_stream(messages)
+        except Exception:
+            yield f"[{self._provider_name} API unavailable]"
+
     def health_check(self) -> bool:
         return bool(self.api_key)
 
     # ------------------------------------------------------------------
-    # Internals (same as DeepSeekProvider pattern)
+    # Internals
     # ------------------------------------------------------------------
+
+    def _call_api_messages(self, messages: List[Dict[str, str]]) -> str:
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(
+                self.base_url,
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json={"model": self.model, "messages": messages, "temperature": 0.7, "max_tokens": 2048},
+            )
+            resp.raise_for_status()
+            return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+
+    def _call_api_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
+        with httpx.Client(timeout=60.0) as client:
+            with client.stream(
+                "POST", self.base_url,
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json={"model": self.model, "messages": messages, "temperature": 0.7, "max_tokens": 2048, "stream": True},
+            ) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if line.startswith("data: "):
+                        data = line[6:]
+                        if data == "[DONE]":
+                            return
+                        try:
+                            chunk = json.loads(data)
+                            content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            if content:
+                                yield content
+                        except (json.JSONDecodeError, KeyError):
+                            pass
 
     def _call_api(self, prompt: str) -> str:
         with httpx.Client(timeout=self.timeout) as client:

@@ -239,7 +239,7 @@
                 @keydown.enter.exact.prevent="sendMessage" @input="autoResize"></textarea>
               <div class="input-actions">
                 <div class="actions-left">
-                  <el-select v-model="selectedModel" size="small" class="model-select"><el-option label="Mock (开发模式)"
+                  <el-select v-model="selectedModel" size="small" class="model-select" @change="onModelChange"><el-option label="Mock (开发模式)"
                       value="mock" /><el-option label="DeepSeek" value="deepseek" /></el-select>
                   <button class="action-btn report-btn" :disabled="!canGenerateReport" title="生成诊断报告"
                     @click="generateDiagnosticReport"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -306,7 +306,7 @@
                 @keydown.enter.exact.prevent="sendMessage" @input="autoResize"></textarea>
               <div class="input-actions">
                 <div class="actions-left">
-                  <el-select v-model="selectedModel" size="small" class="model-select"><el-option label="Mock (开发模式)"
+                  <el-select v-model="selectedModel" size="small" class="model-select" @change="onModelChange"><el-option label="Mock (开发模式)"
                       value="mock" /><el-option label="DeepSeek" value="deepseek" /></el-select>
                   <button class="action-btn report-btn" :disabled="!canGenerateReport" title="生成诊断报告"
                     @click="generateDiagnosticReport"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -347,15 +347,16 @@ import { useUserStore } from '@/stores/user'
 const router = useRouter()
 const userStore = useUserStore()
 const sidebarCollapsed = ref(false)
-const selectedModel = ref('mock')
+const selectedModel = ref(localStorage.getItem('selectedModel') || 'mock')
 const inputText = ref('')
 const loading = ref(false)
 const attachedFile = ref<File | null>(null)
 const inputEl = ref<HTMLTextAreaElement>()
 const msgContainer = ref<HTMLElement>()
 const messages = ref<ChatMessage[]>([])
-const currentChatId = ref('')
+const currentChatId = ref(0)
 const canGenerateReport = ref(false)
+const lastAnalysis = ref<any>(null)  // Store latest analysis for context injection
 const showUserMenu = ref(false)
 const showSettings = ref(false)
 
@@ -368,9 +369,9 @@ const settingTabs = [
   { key: 'about', label: '服务协议', icon: '📄' },
 ]
 
-interface ChatRecord { id: string; title: string; pinned?: boolean; messages?: ChatMessage[] }
+interface ChatRecord { id: number; title: string; pinned?: boolean; model?: string }
 const recentChats = ref<ChatRecord[]>([])
-const chatMenu = reactive({ visible: false, x: 0, y: 0, chatId: '' })
+const chatMenu = reactive({ visible: false, x: 0, y: 0, chatId: 0 })
 
 const userName = computed(() => userStore.userName)
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
@@ -381,25 +382,67 @@ function toggleSearch() { }
 function navigateTo(path: string) { router.push(path) }
 function saveSettings() { localStorage.setItem('theme', settings.theme) }
 
-function newChat() { messages.value = []; currentChatId.value = ''; canGenerateReport.value = false; inputText.value = ''; attachedFile.value = null; router.push('/chat') }
-function selectChat(id: string) { const chat = recentChats.value.find(c => c.id === id); if (chat?.messages) { currentChatId.value = id; messages.value = [...chat.messages]; canGenerateReport.value = true; router.push('/chat'); nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight }) } }
-function saveCurrentChat() { if (!currentChatId.value || messages.value.length === 0) return; const chat = recentChats.value.find(c => c.id === currentChatId.value); if (chat) { chat.messages = [...messages.value]; saveChats() } }
+async function loadSessions() {
+  try {
+    const { data } = await chatApi.listSessions()
+    recentChats.value = data.items.map((s: any) => ({ id: s.id, title: s.title || '新对话', model: s.model }))
+  } catch { /* ignore */ }
+}
+
+async function newChat() {
+  messages.value = []; currentChatId.value = 0; canGenerateReport.value = false
+  lastAnalysis.value = null; inputText.value = ''; attachedFile.value = null
+  try {
+    const { data } = await chatApi.createSession(undefined, selectedModel.value)
+    currentChatId.value = data.id
+    recentChats.value.unshift({ id: data.id, title: '新对话', model: data.model })
+  } catch { /* fallback */ }
+  router.push('/chat')
+}
+
+async function selectChat(id: number) {
+  try {
+    const { data: msgs } = await chatApi.getMessages(id)
+    messages.value = msgs.map((m: any) => ({ id: m.id.toString(), role: m.role, content: m.content, timestamp: new Date(m.created_at).toLocaleTimeString() }))
+    currentChatId.value = id
+    canGenerateReport.value = true
+    router.push('/chat')
+    nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight })
+  } catch { ElMessage.error('加载对话失败') }
+}
+
 function openChatMenu(e: MouseEvent, chat: ChatRecord) { chatMenu.visible = true; chatMenu.x = e.clientX - 8; chatMenu.y = e.clientY + 4; chatMenu.chatId = chat.id }
 function closeChatMenu() { chatMenu.visible = false }
-async function renameChat() { const chat = recentChats.value.find(c => c.id === chatMenu.chatId); if (!chat) return; try { const { value } = await ElMessageBox.prompt('新标题', '重命名', { inputValue: chat.title }); if (value?.trim()) { chat.title = value.trim(); saveChats() } } catch { }; closeChatMenu() }
-function pinChat() { const idx = recentChats.value.findIndex(c => c.id === chatMenu.chatId); if (idx > 0) { const [item] = recentChats.value.splice(idx, 1); recentChats.value.unshift(item); saveChats() }; closeChatMenu() }
-function analyzeChat() { ElMessage.info('分析功能开发中'); closeChatMenu() }
-async function deleteChat() {
+
+async function renameChat() {
+  const chat = recentChats.value.find(c => c.id === chatMenu.chatId)
+  if (!chat) return
   try {
-    await ElMessageBox.confirm('删除后，该对话将不可恢复', '确认删除', { confirmButtonText: '删除该对话', cancelButtonText: '取消', type: 'warning' })
-    recentChats.value = recentChats.value.filter(c => c.id !== chatMenu.chatId)
-    saveChats()
+    const { value } = await ElMessageBox.prompt('新标题', '重命名', { inputValue: chat.title })
+    if (value?.trim()) {
+      chat.title = value.trim()
+      await chatApi.updateSession(chat.id, value.trim())
+    }
   } catch {}
   closeChatMenu()
 }
-function autoTitle(text: string, file?: File | null): string { if (file) return file.name.length > 24 ? file.name.slice(0, 24) + '…' : file.name; const cleaned = text.replace(/[🎯📊🔍❌📚]/g, '').trim(); return cleaned.length > 28 ? cleaned.slice(0, 28) + '…' : cleaned }
-function addChatToHistory(title: string) { const id = Date.now().toString(); recentChats.value.unshift({ id, title, messages: [...messages.value] }); currentChatId.value = id; saveChats() }
-function saveChats() { localStorage.setItem('recent-chats', JSON.stringify(recentChats.value.map(({ id, title, pinned, messages: m }) => ({ id, title, pinned, messages: m })))) }
+
+function pinChat() {
+  const idx = recentChats.value.findIndex(c => c.id === chatMenu.chatId)
+  if (idx > 0) { const [item] = recentChats.value.splice(idx, 1); recentChats.value.unshift(item) }
+  closeChatMenu()
+}
+function analyzeChat() { ElMessage.info('分析功能开发中'); closeChatMenu() }
+
+async function deleteChat() {
+  try {
+    await ElMessageBox.confirm('删除后，该对话将不可恢复', '确认删除', { confirmButtonText: '删除该对话', cancelButtonText: '取消', type: 'warning' })
+    await chatApi.deleteSession(chatMenu.chatId)
+    recentChats.value = recentChats.value.filter(c => c.id !== chatMenu.chatId)
+    if (currentChatId.value === chatMenu.chatId) { messages.value = []; currentChatId.value = 0 }
+  } catch {}
+  closeChatMenu()
+}
 
 // 用户
 function downloadApp() { ElMessage.info('桌面版下载页面开发中'); showUserMenu.value = false }
@@ -407,47 +450,83 @@ function openSettings() { showUserMenu.value = false; showSettings.value = true 
 function openHelp() { ElMessage.info('帮助文档开发中'); showUserMenu.value = false }
 function logout() { userStore.logout(); showUserMenu.value = false; router.push('/login') }
 async function changePwd() { try { const { value } = await ElMessageBox.prompt('请输入新密码', '修改密码', { inputType: 'password' }); if (value) ElMessage.success('密码修改成功') } catch { } }
-async function clearData() { try { await ElMessageBox.confirm('确定清除所有对话数据？不可恢复。', '确认', { type: 'warning' }); localStorage.removeItem('recent-chats'); recentChats.value = []; ElMessage.success('已清除'); showSettings.value = false } catch { } }
+async function clearData() { try { await ElMessageBox.confirm('确定清除所有对话数据？不可恢复。', '确认', { type: 'warning' }); await Promise.all(recentChats.value.map(c => chatApi.deleteSession(c.id).catch(() => {}))); recentChats.value = []; messages.value = []; currentChatId.value = 0; ElMessage.success('已清除'); showSettings.value = false } catch {} }
 
 // 消息
 function onFileInput(e: Event) { const t = e.target as HTMLInputElement; if (t.files?.[0]) attachedFile.value = t.files[0] }
 function autoResize() { if (!inputEl.value) return; inputEl.value.style.height = 'auto'; inputEl.value.style.height = Math.min(inputEl.value.scrollHeight, 200) + 'px' }
-function addMessage(role: 'user' | 'assistant', content: string) { messages.value.push({ id: Date.now().toString(), role, content, timestamp: new Date().toLocaleTimeString() }); nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight }) }
+function addMessage(role: string, content: string) { messages.value.push({ id: Date.now().toString(), role: role as any, content, timestamp: new Date().toLocaleTimeString() } as any); nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight }) }
 function renderContent(text: string) { return text.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }
 
 async function sendMessage() {
   const text = inputText.value.trim(); const file = attachedFile.value
   if (!text && !file) return
   addMessage('user', text || `[上传文件: ${file?.name}]`)
-  const isNew = messages.value.length <= 2
+  const isNewChat = !currentChatId.value
   inputText.value = ''; attachedFile.value = null; if (inputEl.value) inputEl.value.style.height = 'auto'
   loading.value = true
+
   try {
+    // Auto-create session if new chat
+    if (isNewChat) {
+      const { data: s } = await chatApi.createSession(text.slice(0, 30) || '新对话', selectedModel.value)
+      currentChatId.value = s.id
+      recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model })
+    }
+
     let logId: number | null = null
-    if (file) { const fd = new FormData(); fd.append('file', file); fd.append('description', text); logId = (await chatApi.uploadLog(fd)).data.id }
+    // File upload → log analysis flow
+    if (file) {
+      const fd = new FormData(); fd.append('file', file); fd.append('description', text)
+      logId = (await chatApi.uploadLog(fd)).data.id
+    }
+
     if (logId) {
       addMessage('assistant', '🔍 正在解析日志并运行分析...')
       const analysisRes = await chatApi.runAnalysis(logId)
       if (analysisRes.data.id) {
         const detail = (await chatApi.getAnalysisResult(analysisRes.data.id)).data
+        lastAnalysis.value = detail  // Store for context
         let response = `## 📊 分析结果\n\n**摘要：** ${detail.summary}\n\n**根因分析：** ${detail.root_cause}\n\n**置信度：** ${((detail.confidence || 0) * 100).toFixed(0)}%\n\n**建议措施：**\n`
         if (detail.next_steps) detail.next_steps.forEach((s: string, i: number) => { response += `${i + 1}. ${s}\n` })
         canGenerateReport.value = true; addMessage('assistant', response)
-        if (isNew) addChatToHistory(autoTitle(text, file))
+        // Persist analysis result to chat history
+        await chatApi.sendMessage(currentChatId.value, response, selectedModel.value).catch(() => {})
       }
     } else if (text) {
-      const items = (await chatApi.searchKnowledge(text)).data.items || []
-      if (items.length > 0) { let response = `## 📚 知识库搜索结果\n\n找到 ${items.length} 条相关知识：\n\n`; items.slice(0, 3).forEach((item: any, i: number) => { response += `**${i + 1}. ${item.title}** (${item.doc_type})\n${item.snippet}\n\n` }); addMessage('assistant', response) }
-      else addMessage('assistant', '未找到相关知识。请上传日志文件进行详细分析，或尝试其他关键词。')
-      if (isNew) addChatToHistory(autoTitle(text))
+      // Plain text → AI chat (streaming with diagnostic context)
+      loading.value = false
+      addMessage('assistant', '')
+      const replyMsg = messages.value[messages.value.length - 1]
+      const scrollToBottom = () => { nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight }) }
+
+      await chatApi.sendMessageStream(
+        currentChatId.value,
+        text,
+        selectedModel.value,
+        (token: string) => { replyMsg.content += token; scrollToBottom() },
+        (_model: string) => {
+          const chat = recentChats.value.find(c => c.id === currentChatId.value)
+          if (chat && chat.title === '新对话') chat.title = text.slice(0, 30)
+          scrollToBottom()
+        },
+        (err: string) => { replyMsg.content = '❌ 流式回复失败：' + err },
+        lastAnalysis.value,  // Inject analysis context for informed follow-up
+      )
     }
-    saveCurrentChat()
   } catch (e: any) { addMessage('assistant', `❌ 分析失败：${e.response?.data?.detail || e.message}`) }
   finally { loading.value = false }
 }
 async function generateDiagnosticReport() { ElMessage.info('报告生成功能开发中') }
 
-onMounted(() => { recentChats.value = JSON.parse(localStorage.getItem('recent-chats') || '[]') })
+onMounted(() => {
+  selectedModel.value = localStorage.getItem('selectedModel') || 'mock'
+  loadSessions()
+})
+function onModelChange(model: string) {
+  selectedModel.value = model
+  localStorage.setItem('selectedModel', model)
+}
 </script>
 
 <style scoped>

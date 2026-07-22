@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -27,6 +29,23 @@ def get_db_session():
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw", "system_config.json")
+
+
+def _load_config() -> Dict[str, Any]:
+    try:
+        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+        with open(CONFIG_FILE, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_config(config: Dict[str, Any]):
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(config, f, indent=2)
+
 
 @router.get("/stats")
 def get_stats(
@@ -41,11 +60,9 @@ def get_stats(
     total_analyses = db.query(func.count(Analysis.id)).scalar() or 0
     total_knowledge = db.query(func.count(KnowledgeDocument.id)).scalar() or 0
 
-    # Analysis success rate
     completed = db.query(func.count(Analysis.id)).filter(Analysis.status == "completed").scalar() or 0
     failed = db.query(func.count(Analysis.id)).filter(Analysis.status == "failed").scalar() or 0
 
-    # Recent 7 days analysis trend
     seven_days_ago = now - timedelta(days=7)
     recent = (
         db.query(func.date(Analysis.created_at), func.count(Analysis.id))
@@ -56,12 +73,7 @@ def get_stats(
     )
     analysis_trend = [{"date": str(d), "count": c} for d, c in recent]
 
-    # Log storage
     total_log_size = db.query(func.sum(Log.size)).scalar() or 0
-
-    # Active plugins count (placeholder — plugins are in-memory)
-    from app.api.plugins import router as plugins_router
-    active_plugins = 0  # Will be populated from plugin manager
 
     return {
         "total_users": total_users,
@@ -73,5 +85,31 @@ def get_stats(
         "analysis_failed": failed,
         "analysis_trend": analysis_trend,
         "total_log_size_bytes": total_log_size,
-        "active_plugins": active_plugins,
+        "active_plugins": 0,
     }
+
+
+@router.get("/config/llm")
+def get_llm_config():
+    """Get saved LLM configuration."""
+    config = _load_config()
+    return config.get("llm", {
+        "provider": "deepseek",
+        "api_key": "",
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-chat",
+    })
+
+
+@router.put("/config/llm")
+def save_llm_config(body: Dict[str, Any]):
+    """Save LLM configuration."""
+    config = _load_config()
+    config["llm"] = {
+        "provider": body.get("provider", "deepseek"),
+        "api_key": body.get("api_key", ""),
+        "base_url": body.get("base_url", "https://api.deepseek.com"),
+        "model": body.get("model", "deepseek-chat"),
+    }
+    _save_config(config)
+    return {"ok": True, "message": "LLM 配置已保存"}

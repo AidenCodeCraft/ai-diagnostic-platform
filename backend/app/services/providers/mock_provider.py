@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+import time
+from typing import Any, Dict, Generator, List
 
 from app.services.providers.base import BaseProvider
 
@@ -28,3 +29,30 @@ class MockProvider(BaseProvider):
             "event_count": len(events),
             "error_count": len(error_events),
         }
+
+    def chat(self, messages: List[Dict[str, str]]) -> str:
+        """Return a mock conversational reply."""
+        last_user = ""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                last_user = m.get("content", "")
+                break
+
+        if not last_user.strip():
+            return "你好！我是 AI 诊断助手。请上传日志文件或描述你遇到的问题，我会帮你分析。"
+
+        if "日志" in last_user or "log" in last_user.lower():
+            return "我注意到你提到了日志。你可以通过对话输入框上方的附件按钮上传日志文件（支持 .txt/.log/.tar.gz 格式），我会自动解析并分析其中的错误信息。"
+        if "错误" in last_user or "error" in last_user.lower() or "故障" in last_user:
+            return "根据你的描述，可能是设备通信故障或超时导致的。建议：\n1. 检查设备接口连接是否稳定\n2. 上传相关日志文件进行详细分析\n3. 确认驱动版本是否匹配"
+        return f"收到你的消息。作为 AI 诊断助手，我可以帮你：\n- 分析设备日志中的错误\n- 定位故障根因\n- 提供修复建议\n\n请上传日志文件或详细描述遇到的问题。"
+
+    def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
+        """Simulate streaming by yielding the reply word-by-word with small delays."""
+        full = self.chat(messages)
+        words = full.split(" ")
+        for i, word in enumerate(words):
+            suffix = " " if i < len(words) - 1 else ""
+            yield word + suffix
+            time.sleep(0.04)  # simulate token latency
+
