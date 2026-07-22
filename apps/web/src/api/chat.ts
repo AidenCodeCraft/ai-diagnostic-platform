@@ -60,7 +60,7 @@ export const chatApi = {
     onError?: (err: string) => void,
     logAnalysis?: Record<string, any>,
   ) {
-    const token = localStorage.getItem('token')
+    const token = sessionStorage.getItem('token')
     const resp = await fetch(`/api/v1/chat-sessions/${sessionId}/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },

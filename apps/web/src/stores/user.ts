@@ -11,14 +11,17 @@ interface UserInfo {
   organization?: string | null
 }
 
+// Use sessionStorage → auth cleared when browser closes
+const store = sessionStorage
+
 function loadUserFromStorage(): UserInfo | null {
-  const u = localStorage.getItem('user')
+  const u = store.getItem('user')
   if (!u) return null
   try { return JSON.parse(u) } catch { return null }
 }
 
 export const useUserStore = defineStore('user', () => {
-  const token = ref(localStorage.getItem('token') || '')
+  const token = ref(store.getItem('token') || '')
   const user = ref<UserInfo | null>(loadUserFromStorage())
 
   const isLoggedIn = computed(() => !!token.value)
@@ -31,8 +34,8 @@ export const useUserStore = defineStore('user', () => {
   function setAuth(t: string, u: UserInfo) {
     token.value = t
     user.value = u
-    localStorage.setItem('token', t)
-    localStorage.setItem('user', JSON.stringify(u))
+    store.setItem('token', t)
+    store.setItem('user', JSON.stringify(u))
   }
 
   async function login(username: string, password: string) {
@@ -44,8 +47,8 @@ export const useUserStore = defineStore('user', () => {
   function logout() {
     token.value = ''
     user.value = null
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
+    store.removeItem('token')
+    store.removeItem('user')
   }
 
   return { token, user, isLoggedIn, isAdmin, userName, setAuth, login, logout }

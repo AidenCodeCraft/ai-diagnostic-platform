@@ -39,7 +39,7 @@ const router = createRouter({
 })
 
 async function verifyToken(): Promise<boolean> {
-  const token = localStorage.getItem('token')
+  const token = sessionStorage.getItem('token')
   if (!token) return false
   try {
     const resp = await fetch('/api/v1/auth/verify', {
@@ -52,14 +52,14 @@ async function verifyToken(): Promise<boolean> {
 }
 
 function clearAuth() {
-  localStorage.removeItem('token')
-  localStorage.removeItem('user')
+  sessionStorage.removeItem('token')
+  sessionStorage.removeItem('user')
   tokenVerified = false
 }
 
 router.beforeEach(async (to, _from, next) => {
-  const token = localStorage.getItem('token')
-  const userStr = localStorage.getItem('user')
+  const token = sessionStorage.getItem('token')
+  const userStr = sessionStorage.getItem('user')
   let user: { role?: string } | null = null
   try { user = userStr ? JSON.parse(userStr) : null } catch { /* ignore */ }
 

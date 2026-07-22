@@ -34,13 +34,17 @@ class ProviderRegistry:
         selected = provider_name or settings.LLM_PROVIDER
         provider_cls = self.providers.get(selected, MockProvider)
 
-        # Check admin-saved config for API key override
+        # Check admin-saved config for overrides
         cfg = _load_admin_llm_config()
         kwargs: Dict[str, Any] = {}
         if cfg.get("api_key"):
             kwargs["api_key"] = cfg["api_key"]
         if cfg.get("base_url"):
-            kwargs["base_url"] = cfg["base_url"]
+            url = cfg["base_url"]
+            # Auto-append /v1/chat/completions if missing
+            if "/chat/completions" not in url:
+                url = url.rstrip("/") + "/v1/chat/completions"
+            kwargs["base_url"] = url
         if cfg.get("model"):
             kwargs["model"] = cfg["model"]
 
