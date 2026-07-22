@@ -56,7 +56,7 @@ class DeepSeekProvider(BaseProvider):
         if not self.api_key:
             return self._fallback_response(
                 events, error_count,
-                "DeepSeek API key not configured — using local analysis.",
+                "DeepSeek API Key 未配置，请在管理后台填写后重试。",
                 0.4,
             )
 
@@ -72,7 +72,7 @@ class DeepSeekProvider(BaseProvider):
                 if attempt == self.max_retries:
                     return self._fallback_response(
                         events, error_count,
-                        f"DeepSeek API timeout after {self.max_retries} retries.",
+                        f"DeepSeek API 超时（已重试 {self.max_retries} 次），请检查网络连接。",
                         0.35,
                     )
             except httpx.HTTPStatusError as exc:
@@ -80,18 +80,18 @@ class DeepSeekProvider(BaseProvider):
                     continue
                 return self._fallback_response(
                     events, error_count,
-                    f"DeepSeek API error: HTTP {exc.response.status_code}",
+                    f"DeepSeek API 错误（HTTP {exc.response.status_code}）",
                     0.3,
                 )
             except Exception:
                 if attempt == self.max_retries:
                     return self._fallback_response(
                         events, error_count,
-                        "DeepSeek API unreachable — using local analysis.",
+                        "DeepSeek API 无法连接，请检查 Base URL 和网络。",
                         0.35,
                     )
 
-        return self._fallback_response(events, error_count, "Unexpected fallback.", 0.3)
+        return self._fallback_response(events, error_count, "未知错误，分析异常终止。", 0.3)
 
     def chat(self, messages: List[Dict[str, str]]) -> str:
         """Multi-turn chat via DeepSeek API."""
@@ -133,7 +133,7 @@ class DeepSeekProvider(BaseProvider):
                     "model": self.model,
                     "messages": messages,
                     "temperature": 0.7,
-                    "max_tokens": 2048,
+                    "max_tokens": 4096,
                     "stream": True,
                 },
             ) as response:
@@ -165,7 +165,7 @@ class DeepSeekProvider(BaseProvider):
                     "model": self.model,
                     "messages": messages,
                     "temperature": 0.7,
-                    "max_tokens": 2048,
+                    "max_tokens": 4096,
                 },
             )
             response.raise_for_status()
@@ -196,7 +196,7 @@ class DeepSeekProvider(BaseProvider):
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.2,
-                    "max_tokens": 2048,
+                    "max_tokens": 4096,
                 },
             )
             response.raise_for_status()
@@ -269,11 +269,11 @@ class DeepSeekProvider(BaseProvider):
             "model": "deepseek",
             "summary": message,
             "confidence": confidence,
-            "root_cause": "Unable to perform remote analysis.",
+            "root_cause": "远程分析服务不可用，无法完成自动诊断。",
             "next_steps": [
-                "Review error events manually for patterns.",
-                "Check device hardware state and driver logs.",
-                "Verify API key configuration for cloud-based analysis.",
+                "手动检查日志中的错误事件规律",
+                "检查设备硬件状态和驱动日志",
+                f"当前日志共检测到 {error_count} 个错误事件",
             ],
             "event_count": len(events),
             "error_count": error_count,

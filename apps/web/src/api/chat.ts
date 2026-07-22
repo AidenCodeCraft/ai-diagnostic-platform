@@ -50,6 +50,10 @@ export const chatApi = {
   sendMessage(sessionId: number, content: string, model?: string) {
     return client.post<ChatReply>(`/chat-sessions/${sessionId}/chat`, { content, model })
   },
+  /** Store a message directly (without LLM call) — for persisting analysis results */
+  saveMessage(sessionId: number, role: string, content: string) {
+    return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, { role, content })
+  },
   /** SSE stream with optional diagnostic context */
   async sendMessageStream(
     sessionId: number,

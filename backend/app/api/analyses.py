@@ -50,6 +50,10 @@ def run_analysis(
         return AnalysisTaskService(db).run_analysis(log_id, model=model)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=f"日志文件不存在: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(exc)[:200]}") from exc
 
 
 # ------------------------------------------------------------------

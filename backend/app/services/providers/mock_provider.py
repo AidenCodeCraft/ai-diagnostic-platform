@@ -12,20 +12,24 @@ class MockProvider(BaseProvider):
     def generate_summary(self, log_content: str, events: list[Dict[str, Any]]) -> Dict[str, Any]:
         error_events = [event for event in events if event.get("is_error")]
         module_names = [str(event.get("module", "system")).lower() for event in error_events if event.get("module")]
-        module_hint = module_names[0] if module_names else "device"
+        module_hint = module_names[0] if module_names else "设备"
         log_content_lower = (log_content or "").lower()
-        log_hint = "usb" if "usb" in log_content_lower else module_hint
+        log_hint = "USB" if "usb" in log_content_lower else module_hint.capitalize()
         if error_events:
-            summary = f"Detected {len(error_events)} error events in {log_hint}. The most likely issue is a device-side timeout or communication fault."
+            summary = f"在 {log_hint} 模块中检测到 {len(error_events)} 个错误事件，很可能是设备端通信超时或故障导致。"
         else:
-            summary = "No significant error patterns detected in the log."
+            summary = "日志中未检测到明显的错误模式，设备运行状态正常。"
 
         return {
             "model": self.name,
             "summary": summary,
             "confidence": 0.7,
-            "root_cause": "Likely device-side communication fault or timeout." if error_events else "No clear root cause detected from the available log data.",
-            "next_steps": ["Inspect the affected device interface and timing behavior.", "Verify cable, driver, and peripheral state."],
+            "root_cause": "设备端通信故障或超时。" if error_events else "当前日志数据中未发现明确的根因。",
+            "next_steps": [
+                "检查受影响的设备接口及时序行为",
+                "确认线缆、驱动及外设状态",
+                "如有条件，请上传更详细的日志进行深度分析"
+            ],
             "event_count": len(events),
             "error_count": len(error_events),
         }

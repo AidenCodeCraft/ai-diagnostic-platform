@@ -226,13 +226,24 @@
         <!-- 输入框也在居中区域内 -->
         <div class="welcome-input">
           <div class="input-container">
-            <div v-if="attachedFile" class="attached-file">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path
-                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-              </svg>
-              <span>{{ attachedFile.name }}</span>
-              <button class="remove-file" @click="attachedFile = null">&times;</button>
+            <div v-if="attachedFiles.length > 0" class="upload-area">
+              <div v-for="fa in attachedFiles" :key="fa.id" class="upload-file-card">
+                <div class="ufc-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                </div>
+                <div class="ufc-info">
+                  <span class="ufc-name">{{ fa.name }}</span>
+                  <span class="ufc-size">{{ formatFileSize(fa.file.size) }}</span>
+                  <div class="ufc-progress-wrap" v-if="fa.status !== 'pending'">
+                    <div class="ufc-progress"><div class="ufc-progress-bar" :class="fa.status" :style="{width:fa.progress+'%'}"></div></div>
+                    <span class="ufc-status" :class="fa.status">
+                      {{ fa.status === 'uploading' ? `上传中 ${fa.progress}%` : fa.status === 'parsing' ? '解析中...' : fa.status === 'done' ? '✓ 完成' : '✕ 失败' }}
+                    </span>
+                  </div>
+                  <span v-if="fa.error" class="ufc-error">{{ fa.error }}</span>
+                </div>
+                <button class="ufc-remove" @click="removeFile(fa.id)" :disabled="fa.status === 'uploading'">&times;</button>
+              </div>
             </div>
             <div class="input-box">
               <textarea ref="inputEl" v-model="inputText" placeholder="输入问题或拖拽日志文件..." class="msg-textarea" :rows="1"
@@ -253,9 +264,9 @@
                       fill="none" stroke="currentColor" stroke-width="2">
                       <path
                         d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                    </svg><input type="file" accept=".log,.txt,.zip" @change="onFileInput" hidden /></label>
-                  <button class="action-btn send-btn" :disabled="!inputText.trim() && !attachedFile"
-                    :class="{ active: inputText.trim() || attachedFile }" @click="sendMessage"><svg width="16"
+                    </svg><input type="file" accept=".log,.txt,.zip" @change="onFileInput" hidden multiple /></label>
+                  <button class="action-btn send-btn" :disabled="(!inputText.trim() && attachedFiles.length === 0) || isUploading"
+                    :class="{ active: (inputText.trim() || attachedFiles.length > 0) && !isUploading }" @click="sendMessage"><svg width="16"
                       height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
                       <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
                     </svg></button>
@@ -320,9 +331,9 @@
                       fill="none" stroke="currentColor" stroke-width="2">
                       <path
                         d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                    </svg><input type="file" accept=".log,.txt,.zip" @change="onFileInput" hidden /></label>
-                  <button class="action-btn send-btn" :disabled="!inputText.trim() && !attachedFile"
-                    :class="{ active: inputText.trim() || attachedFile }" @click="sendMessage"><svg width="16"
+                    </svg><input type="file" accept=".log,.txt,.zip" @change="onFileInput" hidden multiple /></label>
+                  <button class="action-btn send-btn" :disabled="(!inputText.trim() && attachedFiles.length === 0) || isUploading"
+                    :class="{ active: (inputText.trim() || attachedFiles.length > 0) && !isUploading }" @click="sendMessage"><svg width="16"
                       height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
                       <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
                     </svg></button>
@@ -341,6 +352,8 @@
 import { ref, nextTick, onMounted, reactive, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { marked } from 'marked'
+import client from '@/api/client'
 import { chatApi, type ChatMessage } from '@/api/chat'
 import { useUserStore } from '@/stores/user'
 
@@ -356,7 +369,15 @@ const msgContainer = ref<HTMLElement>()
 const messages = ref<ChatMessage[]>([])
 const currentChatId = ref(0)
 const canGenerateReport = ref(false)
-const lastAnalysis = ref<any>(null)  // Store latest analysis for context injection
+const lastAnalysis = ref<any>(null)
+const isUploading = computed(() => attachedFiles.value.some(f => f.status === 'uploading'))
+
+// Multi-file attachment
+interface FileAttachment {
+  id: string; file: File; name: string; progress: number
+  status: 'pending' | 'uploading' | 'parsing' | 'done' | 'error'; error?: string
+}
+const attachedFiles = ref<FileAttachment[]>([])
 const showUserMenu = ref(false)
 const showSettings = ref(false)
 
@@ -391,12 +412,7 @@ async function loadSessions() {
 
 async function newChat() {
   messages.value = []; currentChatId.value = 0; canGenerateReport.value = false
-  lastAnalysis.value = null; inputText.value = ''; attachedFile.value = null
-  try {
-    const { data } = await chatApi.createSession(undefined, selectedModel.value)
-    currentChatId.value = data.id
-    recentChats.value.unshift({ id: data.id, title: '新对话', model: data.model })
-  } catch { /* fallback */ }
+  lastAnalysis.value = null; inputText.value = ''; attachedFiles.value = []
   router.push('/chat')
 }
 
@@ -453,45 +469,85 @@ async function changePwd() { try { const { value } = await ElMessageBox.prompt('
 async function clearData() { try { await ElMessageBox.confirm('确定清除所有对话数据？不可恢复。', '确认', { type: 'warning' }); await Promise.all(recentChats.value.map(c => chatApi.deleteSession(c.id).catch(() => {}))); recentChats.value = []; messages.value = []; currentChatId.value = 0; ElMessage.success('已清除'); showSettings.value = false } catch {} }
 
 // 消息
-function onFileInput(e: Event) { const t = e.target as HTMLInputElement; if (t.files?.[0]) attachedFile.value = t.files[0] }
+function onFileInput(e: Event) {
+  const t = e.target as HTMLInputElement
+  if (t.files) {
+    for (let i = 0; i < t.files.length; i++) {
+      const f = t.files[i]
+      attachedFiles.value.push({ id: Date.now().toString() + i, file: f, name: f.name, progress: 0, status: 'pending' })
+    }
+  }
+  t.value = '' // reset so same file can be re-selected
+}
+function removeFile(id: string) { attachedFiles.value = attachedFiles.value.filter(f => f.id !== id) }
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1048576).toFixed(1) + ' MB'
+}
 function autoResize() { if (!inputEl.value) return; inputEl.value.style.height = 'auto'; inputEl.value.style.height = Math.min(inputEl.value.scrollHeight, 200) + 'px' }
 function addMessage(role: string, content: string) { messages.value.push({ id: Date.now().toString(), role: role as any, content, timestamp: new Date().toLocaleTimeString() } as any); nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight }) }
-function renderContent(text: string) { return text.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }
+function renderContent(text: string) {
+  try { return marked.parse(text) as string } catch { return text.replace(/\n/g, '<br>') }
+}
 
 async function sendMessage() {
-  const text = inputText.value.trim(); const file = attachedFile.value
-  if (!text && !file) return
-  addMessage('user', text || `[上传文件: ${file?.name}]`)
+  const text = inputText.value.trim(); const files = [...attachedFiles.value]
+  if (!text && files.length === 0) return
   const isNewChat = !currentChatId.value
-  inputText.value = ''; attachedFile.value = null; if (inputEl.value) inputEl.value.style.height = 'auto'
-  loading.value = true
+  inputText.value = ''; attachedFiles.value = []; if (inputEl.value) inputEl.value.style.height = 'auto'
 
-  try {
-    // Auto-create session if new chat
-    if (isNewChat) {
+  // Auto-create session on first message (no empty sessions)
+  if (isNewChat) {
+    try {
       const { data: s } = await chatApi.createSession(text.slice(0, 30) || '新对话', selectedModel.value)
       currentChatId.value = s.id
       recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model })
-    }
+    } catch { /* fallback to local-only */ }
+  }
 
-    let logId: number | null = null
-    // File upload → log analysis flow
-    if (file) {
-      const fd = new FormData(); fd.append('file', file); fd.append('description', text)
-      logId = (await chatApi.uploadLog(fd)).data.id
-    }
+  // Build user message with file names
+  const fileNames = files.map(f => f.name).join(', ')
+  const userMsg = text || (files.length ? `[上传文件: ${fileNames}]` : '')
+  addMessage('user', userMsg)
+  loading.value = true
 
-    if (logId) {
-      addMessage('assistant', '🔍 正在解析日志并运行分析...')
-      const analysisRes = await chatApi.runAnalysis(logId)
-      if (analysisRes.data.id) {
-        const detail = (await chatApi.getAnalysisResult(analysisRes.data.id)).data
-        lastAnalysis.value = detail  // Store for context
-        let response = `## 📊 分析结果\n\n**摘要：** ${detail.summary}\n\n**根因分析：** ${detail.root_cause}\n\n**置信度：** ${((detail.confidence || 0) * 100).toFixed(0)}%\n\n**建议措施：**\n`
-        if (detail.next_steps) detail.next_steps.forEach((s: string, i: number) => { response += `${i + 1}. ${s}\n` })
-        canGenerateReport.value = true; addMessage('assistant', response)
-        // Persist analysis result to chat history
-        await chatApi.sendMessage(currentChatId.value, response, selectedModel.value).catch(() => {})
+  try {
+    // Upload and analyze each file
+    if (files.length > 0) {
+      for (const fa of files) {
+        fa.status = 'uploading'
+        const fd = new FormData(); fd.append('file', fa.file); fd.append('description', text)
+        try {
+          const resp = await client.post('/logs/upload', fd, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            onUploadProgress: (e) => { if (e.total) fa.progress = Math.round((e.loaded / e.total) * 100) },
+          })
+          fa.progress = 100; fa.status = 'parsing'
+          const logId = resp.data.id
+          // Run analysis
+          addMessage('assistant', `🔍 正在解析并分析 \`${fa.name}\`...`)
+          const processingMsg = messages.value[messages.value.length - 1]
+          try {
+            const analysisRes = await chatApi.runAnalysis(logId)
+            if (analysisRes.data?.id) {
+              const detail = (await chatApi.getAnalysisResult(analysisRes.data.id)).data
+              lastAnalysis.value = detail
+              let response = `## 📊 分析结果 — ${fa.name}\n\n**摘要：** ${detail.summary}\n\n**根因分析：** ${detail.root_cause}\n\n**置信度：** ${((detail.confidence || 0) * 100).toFixed(0)}%\n\n**建议措施：**\n`
+              if (detail.next_steps) detail.next_steps.forEach((s: string, i: number) => { response += `${i + 1}. ${s}\n` })
+              processingMsg.content = response
+              canGenerateReport.value = true; fa.status = 'done'
+              await chatApi.saveMessage(currentChatId.value, 'assistant', response).catch(() => {})
+            }
+          } catch (e: any) {
+            processingMsg.content = `❌ 分析 \`${fa.name}\` 失败：${e.response?.data?.detail || e.message}`
+            fa.status = 'error'; fa.error = e.response?.data?.detail || e.message
+          }
+          nextTick(() => { if (msgContainer.value) msgContainer.value.scrollTop = msgContainer.value.scrollHeight })
+        } catch (e: any) {
+          fa.status = 'error'; fa.error = e.response?.data?.detail || e.message
+          addMessage('assistant', `❌ 上传 \`${fa.name}\` 失败：${e.response?.data?.detail || e.message}`)
+        }
       }
     } else if (text) {
       // Plain text → AI chat (streaming with diagnostic context)
@@ -1185,30 +1241,31 @@ function onModelChange(model: string) {
   max-width: 720px;
 }
 
-.attached-file {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px 8px 0 0;
-  font-size: 13px;
-  color: #4b5563;
+/* Upload area */
+.upload-area {
+  display: flex; flex-direction: column; gap: 1px;
+  background: #e5e7eb; border: 1px solid #d1d5db; border-bottom: none;
+  border-radius: 10px 10px 0 0; overflow: hidden; max-height: 200px; overflow-y: auto;
 }
-
-.remove-file {
-  margin-left: auto;
-  background: none;
-  border: none;
-  font-size: 18px;
-  cursor: pointer;
-  color: #9ca3af;
-}
-
-.remove-file:hover {
-  color: #ef4444;
-}
+.upload-file-card { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #fff; border-bottom: 1px solid #f3f4f6; }
+.ufc-icon { color: #2563eb; flex-shrink: 0; }
+.ufc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ufc-name { font-size: 13px; color: #1f2937; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ufc-size { font-size: 11px; color: #9ca3af; }
+.ufc-progress-wrap { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.ufc-progress { flex: 1; height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+.ufc-progress-bar { height: 100%; border-radius: 2px; transition: width 0.3s; background: #2563eb; }
+.ufc-progress-bar.done { background: #22c55e; }
+.ufc-progress-bar.error { background: #ef4444; }
+.ufc-status { font-size: 11px; white-space: nowrap; }
+.ufc-status.uploading, .ufc-status.parsing { color: #2563eb; }
+.ufc-status.done { color: #22c55e; }
+.ufc-status.error { color: #ef4444; }
+.ufc-error { font-size: 11px; color: #ef4444; }
+.ufc-remove { background: none; border: none; font-size: 18px; cursor: pointer; color: #9ca3af; padding: 0 4px; flex-shrink: 0; }
+.ufc-remove:hover { color: #ef4444; }
+.ufc-remove:disabled { opacity: 0.3; cursor: not-allowed; }
+.upload-area + .input-box { border-radius: 0 0 12px 12px; border-top: none; }
 
 .input-box {
   border: 1px solid #d1d5db;
@@ -1222,11 +1279,6 @@ function onModelChange(model: string) {
 .input-box:focus-within {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.attached-file+.input-box {
-  border-radius: 0 0 12px 12px;
-  border-top: none;
 }
 
 .msg-textarea {
@@ -1325,4 +1377,19 @@ function onModelChange(model: string) {
 .send-btn.active:hover {
   background: #1d4ed8;
 }
+
+/* Markdown content */
+.msg-content :deep(h2) { font-size: 17px; font-weight: 600; margin: 12px 0 6px; }
+.msg-content :deep(h3) { font-size: 15px; font-weight: 600; margin: 10px 0 4px; }
+.msg-content :deep(p) { margin: 4px 0; }
+.msg-content :deep(ul), .msg-content :deep(ol) { padding-left: 20px; margin: 4px 0; }
+.msg-content :deep(li) { margin: 2px 0; }
+.msg-content :deep(code) { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+.msg-content :deep(pre) { background: #1e293b; color: #e2e8f0; padding: 10px 14px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
+.msg-content :deep(pre code) { background: none; padding: 0; color: inherit; }
+.msg-content :deep(blockquote) { border-left: 3px solid #d1d5db; padding-left: 10px; color: #6b7280; margin: 6px 0; }
+.msg-content :deep(table) { border-collapse: collapse; width: 100%; margin: 6px 0; }
+.msg-content :deep(th), .msg-content :deep(td) { border: 1px solid #d1d5db; padding: 6px 10px; font-size: 13px; }
+.msg-content :deep(th) { background: #f3f4f6; font-weight: 600; }
+.msg-content :deep(strong) { font-weight: 600; }
 </style>

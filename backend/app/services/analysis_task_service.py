@@ -72,17 +72,27 @@ class AnalysisTaskService:
             raise
 
     def _execute_analysis(self, analysis: Analysis) -> Dict[str, Any]:
-        """Core analysis logic: parse + LLM + persist."""
+        """Core analysis logic: verify → parse → LLM → persist."""
         log = self._get_log(analysis.log_id)
+
+        # Verify file exists
+        from pathlib import Path
+        file_path = Path(log.file_path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"Log file not found: {log.file_path}")
+
+        # Auto-update log status to analyzing
+        if log.status in ("uploaded", "parsing", "parsed"):
+            log.status = "analyzing"
+            self.db.commit()
 
         # Parse log
         parser = LogParserService()
-        raw_events = parser.parse_structured(log.file_path)
+        raw_events = parser.parse_structured(str(file_path))
         events = [e.to_dict() for e in raw_events]
 
         # Run LLM
-        with open(log.file_path, "r", encoding="utf-8", errors="ignore") as handle:
-            log_content = handle.read()
+        log_content = file_path.read_text(encoding="utf-8", errors="ignore")
 
         llm_result = LLMService(model=analysis.model).generate_summary(log_content, events)
         payload = self._normalize_payload(llm_result)
