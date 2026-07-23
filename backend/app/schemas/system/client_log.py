@@ -8,7 +8,7 @@ class ClientLogEntrySchema(BaseModel):
     """Schema for a single frontend client log entry."""
 
     id: str = Field(..., max_length=64)
-    timestamp: datetime
+    timestamp: datetime                      # 前后端统一使用 ISO 8601
     level: int = Field(..., ge=0, le=5)
     category: str = Field(..., max_length=32)
     message: str = Field(..., max_length=10000)

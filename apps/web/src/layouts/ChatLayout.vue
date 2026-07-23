@@ -1,20 +1,10 @@
 <template>
   <div class="chat-layout">
     <!-- 左侧边栏 -->
-    <ChatSidebar
-      v-model:collapsed="sidebarCollapsed"
-      :chats="recentChats"
-      :activeChatId="currentChatId"
-      :userName="userName"
-      :userInitial="userInitial"
-      :isAdmin="userStore.isAdmin"
-      @toggleSearch="toggleSearch"
-      @newChat="newChat"
-      @navigate="navigateTo"
-      @selectChat="selectChat"
-      @chatMenu="openChatMenu"
-      @toggleUserMenu="showUserMenu = !showUserMenu"
-    />
+    <ChatSidebar v-model:collapsed="sidebarCollapsed" :chats="recentChats" :activeChatId="currentChatId"
+      :userName="userName" :userInitial="userInitial" :isAdmin="userStore.isAdmin" @toggleSearch="toggleSearch"
+      @newChat="newChat" @navigate="navigateTo" @selectChat="selectChat" @chatMenu="openChatMenu"
+      @toggleUserMenu="showUserMenu = !showUserMenu" />
 
     <button v-if="sidebarCollapsed" class="float-open-btn" @click="sidebarCollapsed = false" title="展开侧栏">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -24,11 +14,7 @@
     </button>
 
     <!-- 用户菜单 -->
-    <UserMenu
-      :visible="showUserMenu"
-      @close="showUserMenu = false"
-      @action="handleUserAction"
-    />
+    <UserMenu :visible="showUserMenu" @close="showUserMenu = false" @action="handleUserAction" />
 
     <!-- 对话菜单 -->
     <teleport to="body">
@@ -61,46 +47,31 @@
     </teleport>
 
     <!-- 设置弹窗 -->
-    <SettingsDialog
-      :visible="showSettings"
-      :userName="userName"
-      @close="showSettings = false"
-      @changePassword="changePwd"
-      @clearData="clearData"
-    />
+    <SettingsDialog :visible="showSettings" :userName="userName" @close="showSettings = false"
+      @changePassword="changePwd" @clearData="clearData" />
 
     <!-- ============================================================ -->
     <!-- 对话主区域                                                    -->
     <!-- ============================================================ -->
     <main class="chat-main">
-      <!-- 非对话路由：显示子页面 -->
-      <div v-show="$route.path !== '/chat' && $route.path !== '/'" class="sub-page">
-        <router-view />
-      </div>
-      <!-- 对话内容 -->
-      <div v-show="$route.path === '/chat' || $route.path === '/'" class="chat-content">
-        <ChatMessageList
-          ref="msgListRef"
-          :messages="displayMessages"
-          :loading="loading"
-          @previewFile="previewFile"
-        />
-        <div class="input-wrapper">
-          <ChatInputArea
-            v-model="inputText"
-            :files="attachedFiles"
-            :selectedModel="selectedModel"
-            :isUploading="isUploading"
-            :canReport="canGenerateReport"
-            :hasMessages="messages.length > 0"
-            @send="sendMessage"
-            @fileInput="onFileInput"
-            @removeFile="removeFile"
-            @modelChange="onModelChange"
-            @generateReport="generateDiagnosticReport"
-          />
+      <template v-if="$route.path === '/chat' || $route.path === '/'">
+        <div class="chat-content" :class="{ 'chat-empty': displayMessages.length === 0 }">
+          <ChatMessageList ref="msgListRef" :key="'cl-' + currentChatId + '-' + displayMessages.length"
+            :messages="displayMessages" :loading="loading" :isEmpty="displayMessages.length === 0"
+            @previewFile="previewFile" />
+          <div class="input-wrapper">
+            <ChatInputArea v-model="inputText" :files="attachedFiles" :selectedModel="selectedModel"
+              :isUploading="isUploading" :canReport="canGenerateReport" :hasMessages="messages.length > 0"
+              @send="sendMessage" @fileInput="onFileInput" @removeFile="removeFile" @modelChange="onModelChange"
+              @generateReport="generateDiagnosticReport" />
+          </div>
         </div>
-      </div>
+      </template>
+      <template v-else>
+        <div class="sub-page">
+          <router-view />
+        </div>
+      </template>
     </main>
 
     <!-- 文件预览弹窗 -->
@@ -111,8 +82,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch, onMounted, reactive } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '@/api/client'
 import { chatApi } from '@/api/chat'
@@ -128,7 +99,19 @@ import type { ChatRecord, FileAttachment, MsgAttachment } from '@/components/cha
 // ── State ──────────────────────────────────────────────────────
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
+
+// 诊断：路由变化时打印消息状态
+watch(
+  () => route.path,
+  (path) => {
+    console.log(
+      `[route→${path}] messages=${messages.value.length} display=${displayMessages.value.length}`,
+      messages.value.map((m: any) => `${m.role}:${(m.content || '').slice(0, 20)}`),
+    )
+  },
+)
 
 const sidebarCollapsed = ref(false)
 const selectedModel = ref(localStorage.getItem('selectedModel') || 'mock')
@@ -139,7 +122,7 @@ const currentChatId = ref(0)
 const canGenerateReport = ref(false)
 const lastAnalysis = ref<any>(null)
 
-// ★ 最终渲染防线：去重 + 按 createdAt 升序。无论原始 messages 里有什么，显示绝不重复。
+// 去重 + 按 createdAt 升序，保证界面始终只渲染一份无重复的消息列表
 const displayMessages = computed(() => {
   const seen = new Set<string>()
   return [...messages.value]
@@ -151,7 +134,7 @@ const displayMessages = computed(() => {
     })
     .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
 })
-const messageIds = new Set<string>()  // ★ 去重：记录已渲染的消息 ID
+const messageIds = new Set<string>()
 
 const attachedFiles = ref<FileAttachment[]>([])
 const showUserMenu = ref(false)
@@ -191,7 +174,7 @@ async function changePwd() {
 async function clearData() {
   try {
     await ElMessageBox.confirm('确定清除所有对话数据？不可恢复。', '确认', { type: 'warning' })
-    await Promise.all(recentChats.value.map(c => chatApi.deleteSession(c.id).catch(() => {})))
+    await Promise.all(recentChats.value.map(c => chatApi.deleteSession(c.id).catch(() => { })))
     recentChats.value = []
     messages.value = []
     currentChatId.value = 0
@@ -213,7 +196,7 @@ async function newChat() {
   messages.value = []
   messageIds.clear()
   currentChatId.value = 0
-  sessionStorage.removeItem('activeChatId')  // ★ 清除记忆
+  sessionStorage.removeItem('activeChatId')
   canGenerateReport.value = false
   lastAnalysis.value = null
   inputText.value = ''
@@ -222,6 +205,9 @@ async function newChat() {
 }
 
 async function selectChat(id: number) {
+  // 同一会话且已有本地消息时，不覆盖（防止从后端加载时丢失刚发送但未入库的消息）
+  if (id === currentChatId.value && messages.value.length > 0) return
+
   try {
     const { data: msgs } = await chatApi.getMessages(id)
     messageIds.clear()
@@ -234,7 +220,7 @@ async function selectChat(id: number) {
     }))
     messages.value.forEach((m: any) => messageIds.add(m.id))
     currentChatId.value = id
-    sessionStorage.setItem('activeChatId', String(id))  // ★ 记住当前会话
+    sessionStorage.setItem('activeChatId', String(id))
     canGenerateReport.value = true
     router.push('/chat')
     setTimeout(() => msgListRef.value?.scrollToBottom(), 100)
@@ -381,16 +367,17 @@ async function sendMessage() {
   const userMsg = fileTag ? `${text}\n${fileTag}` : text
   addMessage('user', userMsg, attachments)
 
+  // 用户消息统一由前端持久化到 DB，确保 selectChat 能恢复完整历史（含文件标签）
   if (currentChatId.value) {
-    chatApi.saveMessage(currentChatId.value, 'user', userMsg).catch(() => {})
+    chatApi.saveMessage(currentChatId.value, 'user', userMsg).catch(() => { })
   }
   loading.value = true
 
   try {
     if (files.length > 0) {
-      await processFiles(files, text)
-    } else if (text) {
-      await streamChat(text)
+      await processFiles(files, userMsg)
+    } else if (userMsg) {
+      await streamChat(userMsg)
     }
   } catch (e: any) {
     addMessage('assistant', `❌ 分析失败：${e.response?.data?.detail || e.message}`)
@@ -417,7 +404,10 @@ async function processFiles(files: FileAttachment[], text: string) {
       fa.status = 'parsing'
       const logId = resp.data.id
 
-      addMessage('assistant', `🔍 正在解析并分析 \`${fa.name}\`...`)
+      // 直接 push，绕过 addMessage 去重，确保 processingMsg 指向正确的 assistant 消息
+      const pId = Date.now().toString()
+      messageIds.add(pId)
+      messages.value.push({ id: pId, role: 'assistant', content: `🔍 正在解析并分析 \`${fa.name}\`...`, createdAt: Date.now() })
       const processingMsg = messages.value[messages.value.length - 1]
 
       try {
@@ -442,7 +432,7 @@ async function processFiles(files: FileAttachment[], text: string) {
           processingMsg.content = response
           canGenerateReport.value = true
           fa.status = 'done'
-          await chatApi.saveMessage(currentChatId.value, 'assistant', response).catch(() => {})
+          await chatApi.saveMessage(currentChatId.value, 'assistant', response).catch(() => { })
         }
       } catch (e: any) {
         processingMsg.content = `❌ 分析 \`${fa.name}\` 失败：${e.response?.data?.detail || e.message}`
@@ -460,7 +450,10 @@ async function processFiles(files: FileAttachment[], text: string) {
 
 async function streamChat(text: string) {
   loading.value = false
-  addMessage('assistant', '')
+  // 直接 push 空 assistant 消息，绕过 addMessage 的去重逻辑
+  const aId = Date.now().toString()
+  messageIds.add(aId)
+  messages.value.push({ id: aId, role: 'assistant', content: '', createdAt: Date.now() })
   const replyMsg = messages.value[messages.value.length - 1]
 
   await chatApi.sendMessageStream(
@@ -484,7 +477,6 @@ async function streamChat(text: string) {
 }
 
 function addMessage(role: string, content: string, files?: MsgAttachment[]) {
-  // ★ 防重复：基于 role+content 前 100 字符做快速去重
   const duplicate = messages.value.find(
     m => m.role === role && m.content && m.content.slice(0, 100) === content.slice(0, 100)
   )
@@ -498,7 +490,7 @@ function addMessage(role: string, content: string, files?: MsgAttachment[]) {
     id,
     role: role as any,
     content,
-    createdAt: Date.now(),  // ★ 数字纪元，仅用于排序，不显示
+    createdAt: Date.now(),
     files,
   } as any)
   setTimeout(() => msgListRef.value?.scrollToBottom(), 50)
@@ -516,16 +508,14 @@ async function generateDiagnosticReport() {
 
 onMounted(() => {
   selectedModel.value = localStorage.getItem('selectedModel') || 'mock'
-  // ★ 重载后自动恢复上次会话
   const savedChatId = sessionStorage.getItem('activeChatId')
   if (savedChatId) {
     const id = parseInt(savedChatId, 10)
     if (!isNaN(id) && id > 0) {
       selectChat(id).catch(() => { currentChatId.value = 0 })
-      return
     }
   }
-  loadSessions()
+  loadSessions()  // 始终加载侧边栏列表，不与自动恢复互斥
 })
 </script>
 
@@ -580,8 +570,15 @@ onMounted(() => {
 }
 
 @keyframes menuIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .chat-menu-popup button {
@@ -599,7 +596,9 @@ onMounted(() => {
   transition: background 0.1s;
 }
 
-.chat-menu-popup button:hover { background: #f3f4f6; }
+.chat-menu-popup button:hover {
+  background: #f3f4f6;
+}
 
 .chat-menu-popup button.danger:hover {
   background: #fef2f2;
@@ -635,10 +634,19 @@ onMounted(() => {
   min-height: 0;
 }
 
+/* 无对话时，提示语 + 输入框居中 */
+.chat-content.chat-empty {
+  justify-content: center;
+  align-items: center;
+}
+
 .input-wrapper {
   display: flex;
   justify-content: center;
   padding: 12px 24px 20px;
+  width: 100%;
+  max-width: 768px;
+  margin: 0 auto;
 }
 
 .file-preview-content {

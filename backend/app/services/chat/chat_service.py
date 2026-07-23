@@ -129,7 +129,7 @@ class ChatService:
         """Stream AI reply with diagnostic context injection."""
         session = self.get_session(session_id)
         provider_name = model or session.model or "mock"
-        self.add_message(session_id, "user", content)
+        # 用户消息由前端 saveMessage 统一持久化，后端不再重复保存
         messages = self._build_messages(session_id)
 
         # Enrich with diagnostic context (knowledge search + analysis)

@@ -71,7 +71,7 @@ export class RemoteTransport implements Transport {
 
     const payload = reportable.map((entry) => ({
       id: entry.id,
-      timestamp: entry.timestamp,
+      timestamp: new Date(entry.timestamp).toISOString(),  // 统一为 ISO 8601
       level: entry.level,
       category: entry.category,
       message: sanitize(entry.message) as string,
@@ -79,7 +79,7 @@ export class RemoteTransport implements Transport {
       tags: entry.tags,
     }))
 
-    const body = JSON.stringify(payload)
+    const body = JSON.stringify({ entries: payload })
 
     try {
       const token = sessionStorage.getItem('token')

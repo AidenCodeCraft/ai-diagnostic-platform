@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-messages" ref="container">
+  <div class="chat-messages" :class="{ 'is-empty': isEmpty }" ref="container">
     <div v-if="messages.length === 0" class="welcome-full">
       <div class="welcome-inner">
         <div class="welcome-icon">
@@ -24,13 +24,8 @@
         </div>
         <div class="message-body">
           <div v-if="msg.files && msg.files.length > 0" class="msg-files">
-            <div
-              v-for="(f, i) in msg.files"
-              :key="i"
-              class="msg-file-card"
-              @click="$emit('previewFile', f)"
-              :title="'点击预览 ' + f.name"
-            >
+            <div v-for="(f, i) in msg.files" :key="i" class="msg-file-card" @click="$emit('previewFile', f)"
+              :title="'点击预览 ' + f.name">
               <span class="msg-file-icon">{{ fileIconEmoji(f.type) }}</span>
               <span class="msg-file-name">{{ f.name }}</span>
               <span class="msg-file-size">{{ formatSize(f.size) }}</span>
@@ -39,6 +34,12 @@
           <div class="message-bubble">
             <div class="msg-content" v-html="renderContent(msg.content, msg.files && msg.files.length > 0)"></div>
           </div>
+        </div>
+        <div class="message-avatar" v-if="msg.role === 'user'">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5">
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 20c0-4 4-7 8-7s8 3 8 7" />
+          </svg>
         </div>
       </div>
       <div v-if="loading" class="message-row assistant">
@@ -68,13 +69,14 @@ const { formatFileSize, fileIcon } = useFormat()
 const props = defineProps<{
   messages: any[]
   loading: boolean
+  isEmpty?: boolean
 }>()
 
 defineEmits<{
   (e: 'previewFile', file: { name: string; size: number; type: string }): void
 }>()
 
-// ★ 按 createdAt 升序排列（去重已在父组件 displayMessages 完成）
+// 按 createdAt 升序排列
 const sorted = computed(() => {
   return [...props.messages].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
 })
@@ -133,6 +135,16 @@ function scrollToBottom() {
   align-items: center;
 }
 
+/* 无对话时不自撑满高度，让输入框紧贴提示语下方 */
+.chat-messages.is-empty {
+  flex: none;
+  overflow: visible;
+}
+
+.chat-messages.is-empty .welcome-full {
+  flex: none;
+}
+
 .welcome-full {
   flex: 1;
   display: flex;
@@ -141,6 +153,9 @@ function scrollToBottom() {
   justify-content: center;
   padding: 0 24px;
   gap: 24px;
+  width: 100%;
+  max-width: 768px;
+  margin: 0 auto;
 }
 
 .welcome-inner {
@@ -223,12 +238,25 @@ function scrollToBottom() {
   animation: bounce 1.4s infinite ease-in-out both;
 }
 
-.dot:nth-child(1) { animation-delay: -0.32s; }
-.dot:nth-child(2) { animation-delay: -0.16s; }
+.dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
 
 @keyframes bounce {
-  0%, 80%, 100% { transform: scale(0); }
-  40% { transform: scale(1); }
+
+  0%,
+  80%,
+  100% {
+    transform: scale(0);
+  }
+
+  40% {
+    transform: scale(1);
+  }
 }
 
 .msg-files {
@@ -276,17 +304,80 @@ function scrollToBottom() {
   flex-shrink: 0;
 }
 
-.msg-content :deep(h2) { font-size: 17px; font-weight: 600; margin: 12px 0 6px; }
-.msg-content :deep(h3) { font-size: 15px; font-weight: 600; margin: 10px 0 4px; }
-.msg-content :deep(p) { margin: 4px 0; }
-.msg-content :deep(ul), .msg-content :deep(ol) { padding-left: 20px; margin: 4px 0; }
-.msg-content :deep(li) { margin: 2px 0; }
-.msg-content :deep(code) { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
-.msg-content :deep(pre) { background: #1e293b; color: #e2e8f0; padding: 10px 14px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
-.msg-content :deep(pre code) { background: none; padding: 0; color: inherit; }
-.msg-content :deep(blockquote) { border-left: 3px solid #d1d5db; padding-left: 10px; color: #6b7280; margin: 6px 0; }
-.msg-content :deep(table) { border-collapse: collapse; width: 100%; margin: 6px 0; }
-.msg-content :deep(th), .msg-content :deep(td) { border: 1px solid #d1d5db; padding: 6px 10px; font-size: 13px; }
-.msg-content :deep(th) { background: #f3f4f6; font-weight: 600; }
-.msg-content :deep(strong) { font-weight: 600; }
+.msg-content :deep(h2) {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 12px 0 6px;
+}
+
+.msg-content :deep(h3) {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 10px 0 4px;
+}
+
+.msg-content :deep(p) {
+  margin: 4px 0;
+}
+
+.msg-content :deep(ul),
+.msg-content :deep(ol) {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+
+.msg-content :deep(li) {
+  margin: 2px 0;
+}
+
+.msg-content :deep(code) {
+  background: #f3f4f6;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+.msg-content :deep(pre) {
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 10px 14px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.msg-content :deep(pre code) {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+.msg-content :deep(blockquote) {
+  border-left: 3px solid #d1d5db;
+  padding-left: 10px;
+  color: #6b7280;
+  margin: 6px 0;
+}
+
+.msg-content :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 6px 0;
+}
+
+.msg-content :deep(th),
+.msg-content :deep(td) {
+  border: 1px solid #d1d5db;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.msg-content :deep(th) {
+  background: #f3f4f6;
+  font-weight: 600;
+}
+
+.msg-content :deep(strong) {
+  font-weight: 600;
+}
 </style>

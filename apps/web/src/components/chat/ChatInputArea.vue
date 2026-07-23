@@ -39,7 +39,7 @@
       ></textarea>
       <div class="input-actions">
         <div class="actions-left">
-          <el-select v-model="selectedModel" size="small" class="model-select" @change="emit('update:modelValue', model); emit('modelChange', selectedModel)">
+          <el-select :model-value="selectedModel" size="small" class="model-select" @update:model-value="emit('modelChange', $event as string)">
             <el-option label="Mock (开发模式)" value="mock" />
             <el-option label="DeepSeek" value="deepseek" />
           </el-select>
@@ -130,7 +130,7 @@ function statusText(fa: FileAttachment): string {
 <style scoped>
 .input-container {
   width: 100%;
-  max-width: 720px;
+  max-width: 768px;
 }
 
 .upload-area {
