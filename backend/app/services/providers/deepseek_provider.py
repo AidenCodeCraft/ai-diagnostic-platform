@@ -122,7 +122,7 @@ class DeepSeekProvider(BaseProvider):
         except Exception:
             return "[DeepSeek API unavailable]"
 
-    def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
+    def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[str | Dict[str, str], None, None]:
         """Stream chat via DeepSeek SSE."""
         if not self.api_key:
             yield (
@@ -184,6 +184,13 @@ class DeepSeekProvider(BaseProvider):
                         try:
                             chunk = json.loads(data)
                             delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            # Reasoning-capable DeepSeek models return their
+                            # thinking separately from the answer.  Preserve
+                            # that boundary so callers never display the
+                            # answer itself as a fabricated "thought process".
+                            reasoning = delta.get("reasoning_content", "")
+                            if reasoning:
+                                yield {"reasoning": reasoning}
                             content = delta.get("content", "")
                             if content:
                                 yield content

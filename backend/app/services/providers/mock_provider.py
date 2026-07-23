@@ -39,7 +39,7 @@ class MockProvider(BaseProvider):
         }
 
     def chat(self, messages: List[Dict[str, str]]) -> str:
-        """Return a mock conversational reply."""
+        """Return a mock conversational reply with thinking chain."""
         last_user = ""
         for m in reversed(messages):
             if m.get("role") == "user":
@@ -47,20 +47,58 @@ class MockProvider(BaseProvider):
                 break
 
         if not last_user.strip():
-            return "你好！我是 AI 诊断助手。请上传日志文件或描述你遇到的问题，我会帮你分析。"
+            return self._greeting()
 
         if "日志" in last_user or "log" in last_user.lower():
-            return "我注意到你提到了日志。你可以通过对话输入框上方的附件按钮上传日志文件（支持 .txt/.log/.tar.gz 格式），我会自动解析并分析其中的错误信息。"
+            return (
+                "我注意到你提到了日志。\n\n"
+                "你可以通过输入框左侧的 📎 按钮上传日志文件（支持 .txt / .log / .zip 格式），"
+                "我会自动完成以下分析流程：\n\n"
+                "1. **日志解析** → 提取结构化事件和时间线\n"
+                "2. **规则匹配** → 检测已知错误模式\n"
+                "3. **知识检索** → 搜索历史相似案例\n"
+                "4. **AI 综合分析** → 生成诊断报告\n\n"
+                "请上传你的日志文件一起分析。"
+            )
         if "错误" in last_user or "error" in last_user.lower() or "故障" in last_user:
-            return "根据你的描述，可能是设备通信故障或超时导致的。建议：\n1. 检查设备接口连接是否稳定\n2. 上传相关日志文件进行详细分析\n3. 确认驱动版本是否匹配"
-        return f"收到你的消息。作为 AI 诊断助手，我可以帮你：\n- 分析设备日志中的错误\n- 定位故障根因\n- 提供修复建议\n\n请上传日志文件或详细描述遇到的问题。"
+            return (
+                "根据你的描述，可能的故障原因如下：\n\n"
+                "**初步分析：**\n"
+                "- 🔍 设备通信故障或超时\n"
+                "- 🔍 驱动模块加载异常\n\n"
+                "**建议：**\n"
+                "1. 检查设备接口连接是否稳定\n"
+                "2. 上传相关日志文件进行详细分析\n"
+                "3. 确认驱动版本与固件是否匹配\n\n"
+                "如需更精确的诊断，请上传日志文件。"
+            )
+        return (
+            "收到你的消息。作为 AI 设备日志诊断助手，我可以帮你：\n\n"
+            "- 📋 解析设备日志中的错误事件\n"
+            "- 🎯 定位故障根因并给出置信度\n"
+            "- 📝 提供修复建议和操作步骤\n"
+            "- 📚 检索历史案例和知识库\n\n"
+            "请上传日志文件或详细描述遇到的问题。"
+        )
+
+    @staticmethod
+    def _greeting() -> str:
+        return (
+            "你好！我是 AI 设备日志诊断助手。\n\n"
+            "我可以帮你分析和诊断设备故障，具体流程包括：\n\n"
+            "1. **日志解析** → 提取错误事件和时间线\n"
+            "2. **规则匹配** → 检测已知故障模式\n"
+            "3. **知识检索** → 搜索历史案例\n"
+            "4. **AI 综合分析** → 生成诊断报告\n\n"
+            "请上传日志文件或描述你遇到的问题，我会立即开始分析。"
+        )
 
     def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
-        """Simulate streaming by yielding the reply word-by-word with small delays."""
+        """Simulate streaming with thinking chain — word-by-word with delays."""
         full = self.chat(messages)
         words = full.split(" ")
         for i, word in enumerate(words):
             suffix = " " if i < len(words) - 1 else ""
             yield word + suffix
-            time.sleep(0.04)  # simulate token latency
+            time.sleep(0.03)  # simulate token latency
 

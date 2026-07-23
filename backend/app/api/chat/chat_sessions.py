@@ -64,7 +64,9 @@ def delete_session(session_id: int, db: Session = Depends(get_db_session)):
 # Messages
 @router.post("/{session_id}/messages", status_code=201)
 def add_message(session_id: int, body: Dict[str, Any], db: Session = Depends(get_db_session)):
-    return ChatService(db).add_message(session_id, role=body["role"], content=body["content"])
+    return ChatService(db).add_message(
+        session_id, role=body["role"], content=body["content"], sources=body.get("sources"),
+    )
 
 
 @router.get("/{session_id}/messages")

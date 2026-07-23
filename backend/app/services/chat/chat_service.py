@@ -59,8 +59,11 @@ class ChatService:
     # Messages
     # ------------------------------------------------------------------
 
-    def add_message(self, session_id: int, role: str, content: str) -> ChatMessage:
-        msg = ChatMessage(session_id=session_id, role=role, content=content)
+    def add_message(
+        self, session_id: int, role: str, content: str,
+        sources: Optional[List[Dict[str, Any]]] = None,
+    ) -> ChatMessage:
+        msg = ChatMessage(session_id=session_id, role=role, content=content, sources=sources)
         self.db.add(msg)
         self.db.commit()
         self.db.refresh(msg)
@@ -135,18 +138,25 @@ class ChatService:
         # Enrich with diagnostic context (knowledge search + analysis)
         agent = DiagnosticChatAgent(self.db, provider_name)
         messages = agent.enrich_messages(session_id, content, messages, log_analysis)
+        if agent.references:
+            yield f"data: {json.dumps({'sources': agent.references}, ensure_ascii=False)}\n\n"
 
         full_reply = ""
         try:
             provider = self._get_provider(provider_name)
-            for token in provider.chat_stream(messages):
-                full_reply += token
-                yield f"data: {json.dumps({'token': token})}\n\n"
+            for chunk in provider.chat_stream(messages):
+                if isinstance(chunk, dict):
+                    reasoning = chunk.get("reasoning", "")
+                    if reasoning:
+                        yield f"data: {json.dumps({'reasoning': reasoning}, ensure_ascii=False)}\n\n"
+                    continue
+                full_reply += chunk
+                yield f"data: {json.dumps({'token': chunk}, ensure_ascii=False)}\n\n"
         except Exception as e:
             full_reply = f"[AI 服务暂时不可用: {e}]"
             yield f"data: {json.dumps({'token': full_reply})}\n\n"
 
-        self.add_message(session_id, "assistant", full_reply)
+        self.add_message(session_id, "assistant", full_reply, sources=agent.references or None)
         self._auto_title(session_id, content)
         yield f"data: {json.dumps({'done': True, 'model': provider_name})}\n\n"
 

@@ -41,6 +41,8 @@ class DiagnosticChatAgent:
         self.db = db
         self.provider_name = provider_name
         self.knowledge = KnowledgeService(db)
+        # Metadata for the UI; never inject this raw object into the model.
+        self.references: List[Dict[str, Any]] = []
 
     @staticmethod
     def needs_guiding(user_message: str) -> bool:
@@ -117,12 +119,19 @@ class DiagnosticChatAgent:
                 return ""
 
             lines = []
+            self.references = []
             for i, item in enumerate(items):
                 title = item.get("title", "Untitled")
                 snippet = item.get("snippet", "")[:300]
                 score = item.get("relevance_score", 0)
                 if score > 0.1:  # Only include reasonably relevant results
                     lines.append(f"{i + 1}. **{title}** (相关度: {score:.0%})\n   {snippet}")
+                    self.references.append({
+                        "id": item.get("id"),
+                        "title": title,
+                        "source": item.get("source") or "知识库",
+                        "excerpt": snippet,
+                    })
 
             return "\n\n".join(lines) if lines else ""
         except Exception:

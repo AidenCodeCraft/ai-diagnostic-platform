@@ -23,6 +23,18 @@
           </svg>
         </div>
         <div class="message-body">
+          <!-- AI 思考过程 -->
+          <div v-if="msg.role === 'assistant' && msg.thinking" class="think-block">
+            <div class="think-header">
+              <button class="think-toggle" @click="toggleThink(msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                <span>{{ msg.thinking.active ? '正在思考' : `已思考（用时 ${msg.thinking.elapsed || 1} 秒）` }}</span>
+                <span class="think-action">{{ msg._thinkOpen ? '收起' : '展开' }}</span>
+                <svg class="think-arrow" :class="{ open: msg._thinkOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+            </div>
+            <div v-show="msg._thinkOpen" class="think-body">{{ msg.thinking.text || '正在准备回答…' }}</div>
+          </div>
           <div v-if="msg.files && msg.files.length > 0" class="msg-files">
             <div v-for="(f, i) in msg.files" :key="i" class="msg-file-card" @click="$emit('previewFile', f)"
               :title="'点击预览 ' + f.name">
@@ -33,6 +45,20 @@
           </div>
           <div class="message-bubble">
             <div class="msg-content" v-html="renderContent(msg.content, msg.files && msg.files.length > 0)"></div>
+          </div>
+          <div v-if="msg.role === 'assistant' && msg.sources?.length" class="source-list">
+            <div class="source-title">引用来源</div>
+            <button v-for="(source, index) in msg.sources" :key="`${source.id || source.title}-${index}`" class="source-card" @click="$emit('openKnowledge', source)">
+              <span class="source-index">{{ index + 1 }}</span>
+              <span class="source-detail"><strong>{{ source.title }}</strong><small>{{ source.source }}<template v-if="source.excerpt"> · {{ source.excerpt }}</template></small></span>
+              <span class="source-open">查看</span>
+            </button>
+          </div>
+          <div v-if="msg.role === 'assistant' && msg.content" class="message-actions">
+            <button class="copy-button" :class="{ copied: copiedId === msg.id }" @click="copyMessage(msg)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              {{ copiedId === msg.id ? '已复制' : '复制' }}
+            </button>
           </div>
         </div>
         <div class="message-avatar" v-if="msg.role === 'user'">
@@ -74,6 +100,7 @@ const props = defineProps<{
 
 defineEmits<{
   (e: 'previewFile', file: { name: string; size: number; type: string }): void
+  (e: 'openKnowledge', source: { id?: number; title: string }): void
 }>()
 
 // 按 createdAt 升序排列
@@ -114,6 +141,29 @@ watch(
     })
   },
 )
+
+// 展开/折叠思考区块
+function toggleThink(msg: any) {
+  msg._thinkOpen = !msg._thinkOpen
+}
+
+const copiedId = ref<string | number | null>(null)
+async function copyMessage(msg: any) {
+  try {
+    await navigator.clipboard.writeText(msg.content)
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = msg.content
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    textarea.remove()
+  }
+  copiedId.value = msg.id
+  window.setTimeout(() => { if (copiedId.value === msg.id) copiedId.value = null }, 1600)
+}
 
 defineExpose({ scrollToBottom })
 function scrollToBottom() {
@@ -380,4 +430,59 @@ function scrollToBottom() {
 .msg-content :deep(strong) {
   font-weight: 600;
 }
+
+/* 思考区块 */
+.think-block {
+  margin-bottom: 6px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f9fafb;
+}
+.think-header {
+  padding: 0;
+}
+.think-toggle {
+  width: 100%;
+  border: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  color: #6b7280;
+  user-select: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.think-toggle:hover { background: #f3f4f6; }
+.think-action { margin-left: auto; color: #2563eb; }
+.think-arrow { transition: transform 0.2s; }
+.think-arrow.open { transform: rotate(180deg); }
+.think-body {
+  padding: 8px 12px 10px;
+  font-size: 12px;
+  color: #9ca3af;
+  line-height: 1.5;
+  border-top: 1px solid #e5e7eb;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.source-list { margin-top: 10px; border: 1px solid #dbeafe; border-radius: 8px; overflow: hidden; }
+.source-title { padding: 7px 10px; color: #1d4ed8; background: #eff6ff; font-size: 12px; font-weight: 600; }
+.source-card { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 0; border-top: 1px solid #dbeafe; background: #fff; cursor: pointer; text-align: left; color: #374151; }
+.source-card:hover { background: #f8fbff; }
+.source-index { display: grid; place-items: center; flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%; color: #fff; background: #3b82f6; font-size: 11px; }
+.source-detail { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.source-detail strong, .source-detail small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-detail strong { font-size: 12px; font-weight: 600; }
+.source-detail small { font-size: 11px; color: #6b7280; }
+.source-open { margin-left: auto; color: #2563eb; font-size: 12px; }
+.message-actions { display: flex; margin-top: 6px; }
+.copy-button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; color: #6b7280; background: transparent; border: 0; border-radius: 5px; font-size: 12px; cursor: pointer; }
+.copy-button:hover { background: #f3f4f6; color: #374151; }
+.copy-button.copied { color: #16a34a; }
 </style>

@@ -120,7 +120,7 @@ class KnowledgeService:
                 if doc:
                     results.append({
                         "id": doc.id, "title": doc.title,
-                        "category": doc.category, "doc_type": doc.doc_type,
+                        "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
                         "relevance_score": round(vr.get("score", 0), 2),
                         "snippet": self._extract_snippet(doc.content, query_text),
                     })
@@ -142,7 +142,7 @@ class KnowledgeService:
             score = self._relevance_score(doc, query_text)
             results.append({
                 "id": doc.id, "title": doc.title,
-                "category": doc.category, "doc_type": doc.doc_type,
+                "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
                 "relevance_score": round(score, 2),
                 "snippet": self._extract_snippet(doc.content, query_text),
             })

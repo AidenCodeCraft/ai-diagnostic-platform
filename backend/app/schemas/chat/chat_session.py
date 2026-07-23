@@ -1,7 +1,7 @@
 """Schema definitions for chat session and message management."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,6 +34,7 @@ class ChatSessionListResponse(BaseModel):
 class ChatMessageCreate(BaseModel):
     role: str = Field(..., max_length=20)  # user / assistant
     content: str
+    sources: Optional[List[Dict[str, Any]]] = None
 
 
 class ChatMessageResponse(BaseModel):
@@ -43,4 +44,5 @@ class ChatMessageResponse(BaseModel):
     session_id: int
     role: str
     content: str
+    sources: Optional[List[Dict[str, Any]]] = None
     created_at: Optional[datetime] = None

@@ -87,7 +87,7 @@ class OpenAICompatibleProvider(BaseProvider):
         except Exception:
             return f"[{self._provider_name} API unavailable]"
 
-    def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
+    def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[str | Dict[str, str], None, None]:
         """Stream chat via OpenAI-compatible API."""
         if not self.api_key:
             yield f"[{self._provider_name} API key not configured]"
@@ -129,7 +129,11 @@ class OpenAICompatibleProvider(BaseProvider):
                             return
                         try:
                             chunk = json.loads(data)
-                            content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            reasoning = delta.get("reasoning_content", "")
+                            if reasoning:
+                                yield {"reasoning": reasoning}
+                            content = delta.get("content", "")
                             if content:
                                 yield content
                         except (json.JSONDecodeError, KeyError):

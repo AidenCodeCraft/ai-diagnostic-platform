@@ -1,7 +1,8 @@
 <template>
   <div class="chat-layout">
     <!-- 左侧边栏 -->
-    <ChatSidebar v-model:collapsed="sidebarCollapsed" :chats="recentChats" :activeChatId="currentChatId"
+    <ChatSidebar v-model:collapsed="sidebarCollapsed" :chats="recentChats"
+      :activeChatId="isChatRoute ? currentChatId : 0"
       :userName="userName" :userInitial="userInitial" :isAdmin="userStore.isAdmin" @toggleSearch="toggleSearch"
       @newChat="newChat" @navigate="navigateTo" @selectChat="selectChat" @chatMenu="openChatMenu"
       @toggleUserMenu="showUserMenu = !showUserMenu" />
@@ -58,7 +59,7 @@
         <div class="chat-content" :class="{ 'chat-empty': displayMessages.length === 0 }">
           <ChatMessageList ref="msgListRef" :key="'cl-' + currentChatId + '-' + displayMessages.length"
             :messages="displayMessages" :loading="loading" :isEmpty="displayMessages.length === 0"
-            @previewFile="previewFile" />
+            @previewFile="previewFile" @openKnowledge="openKnowledge" />
           <div class="input-wrapper">
             <ChatInputArea v-model="inputText" :files="attachedFiles" :selectedModel="selectedModel"
               :isUploading="isUploading" :canReport="canGenerateReport" :hasMessages="messages.length > 0"
@@ -86,7 +87,7 @@ import { ref, computed, watch, onMounted, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '@/api/client'
-import { chatApi } from '@/api/chat'
+import { chatApi, type ChatSource } from '@/api/chat'
 import { useUserStore } from '@/stores/user'
 
 import ChatSidebar from '@/components/chat/ChatSidebar.vue'
@@ -101,6 +102,8 @@ import type { ChatRecord, FileAttachment, MsgAttachment } from '@/components/cha
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+
+const isChatRoute = computed(() => route.path === '/chat' || route.path === '/')
 
 // 诊断：路由变化时打印消息状态
 watch(
@@ -122,7 +125,7 @@ const currentChatId = ref(0)
 const canGenerateReport = ref(false)
 const lastAnalysis = ref<any>(null)
 
-// 去重 + 按 createdAt 升序，保证界面始终只渲染一份无重复的消息列表
+// 去重 + 按 createdAt 升序
 const displayMessages = computed(() => {
   const seen = new Set<string>()
   return [...messages.value]
@@ -153,6 +156,9 @@ const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
 
 function toggleSearch() { /* placeholder */ }
 function navigateTo(path: string) { router.push(path) }
+function openKnowledge(source: { id?: number }) {
+  router.push(source.id ? `/knowledge?document=${source.id}` : '/knowledge')
+}
 function onModelChange(model: string) { selectedModel.value = model; localStorage.setItem('selectedModel', model) }
 
 function handleUserAction(action: 'download' | 'settings' | 'help' | 'logout') {
@@ -205,21 +211,25 @@ async function newChat() {
 }
 
 async function selectChat(id: number) {
-  // 同一会话且已有本地消息时，不覆盖（防止从后端加载时丢失刚发送但未入库的消息）
-  if (id === currentChatId.value && messages.value.length > 0) return
+  // 同一会话：仅导航不回源，避免覆盖刚发送但未入库的本地消息
+  if (id === currentChatId.value) {
+    router.push('/chat')
+    return
+  }
 
   try {
     const { data: msgs } = await chatApi.getMessages(id)
     messageIds.clear()
+    currentChatId.value = id
     messages.value = msgs.map((m: any) => ({
       id: m.id.toString(),
       role: m.role,
       content: m.content,
       createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
       files: extractFiles(m),
+      sources: m.sources || [],
     }))
     messages.value.forEach((m: any) => messageIds.add(m.id))
-    currentChatId.value = id
     sessionStorage.setItem('activeChatId', String(id))
     canGenerateReport.value = true
     router.push('/chat')
@@ -404,31 +414,59 @@ async function processFiles(files: FileAttachment[], text: string) {
       fa.status = 'parsing'
       const logId = resp.data.id
 
-      // 直接 push，绕过 addMessage 去重，确保 processingMsg 指向正确的 assistant 消息
+      // 直接 push assistant 占位消息，绕过 addMessage 去重
       const pId = Date.now().toString()
       messageIds.add(pId)
-      messages.value.push({ id: pId, role: 'assistant', content: `🔍 正在解析并分析 \`${fa.name}\`...`, createdAt: Date.now() })
+      messages.value.push({ id: pId, role: 'assistant', content: `🔍 正在分析 \`${fa.name}\`...`, createdAt: Date.now() })
       const processingMsg = messages.value[messages.value.length - 1]
 
       try {
+        // 展示推理链路的渐进式思考过程
+        processingMsg.content = [
+          `## 🔍 分析中 — ${fa.name}`,
+          '',
+          '> 📋 **步骤 1/4**：正在解析日志文件，提取结构化事件...',
+        ].join('\n')
+        msgListRef.value?.scrollToBottom()
+
         const analysisRes = await chatApi.runAnalysis(logId, selectedModel.value)
         if (analysisRes.data?.id) {
+          processingMsg.content = [
+            `## 🔍 分析中 — ${fa.name}`,
+            '',
+            '> ✅ **步骤 1/4**：日志解析完成',
+            '> 🔎 **步骤 2/4**：匹配规则引擎，检索已知错误模式...',
+          ].join('\n')
+          msgListRef.value?.scrollToBottom()
+
           const detail = (await chatApi.getAnalysisResult(analysisRes.data.id)).data
           lastAnalysis.value = detail
-          let response = [
-            `## 📊 分析结果 — ${fa.name}`,
+          const confidence = ((detail.confidence || 0) * 100).toFixed(0)
+
+          // 完整分析报告：对齐提问流程参考文档的 Step4-7
+          const response = [
+            `## 📊 分析报告 — ${fa.name}`,
             '',
-            `**摘要：** ${detail.summary}`,
+            '> ✅ 日志解析 · 规则匹配 · 知识检索 · AI 综合分析',
             '',
-            `**根因分析：** ${detail.root_cause}`,
+            '---',
             '',
-            `**置信度：** ${((detail.confidence || 0) * 100).toFixed(0)}%`,
+            `### 💡 诊断摘要`,
+            detail.summary || '分析完成',
             '',
-            '**建议措施：**',
+            `### 🎯 根因分析`,
+            detail.root_cause || '根因待确认',
+            '',
+            `### 📈 置信度`,
+            `${confidence}%`,
+            '',
+            `### 📝 建议措施`,
+            ...(detail.next_steps || []).map((s: string, i: number) => `${i + 1}. ${s}`),
+            '',
+            '---',
+            `> 模型: ${detail.model || selectedModel.value} | 事件数: ${detail.event_count || '-'}`,
           ].join('\n')
-          if (detail.next_steps) {
-            detail.next_steps.forEach((s: string, i: number) => { response += `${i + 1}. ${s}\n` })
-          }
+
           processingMsg.content = response
           canGenerateReport.value = true
           fa.status = 'done'
@@ -450,29 +488,49 @@ async function processFiles(files: FileAttachment[], text: string) {
 
 async function streamChat(text: string) {
   loading.value = false
-  // 直接 push 空 assistant 消息，绕过 addMessage 的去重逻辑
-  const aId = Date.now().toString()
+  const thinkStart = Date.now()
+  const aId = thinkStart.toString()
   messageIds.add(aId)
-  messages.value.push({ id: aId, role: 'assistant', content: '', createdAt: Date.now() })
+  const assistantMsg: any = {
+    id: aId, role: 'assistant', content: '', createdAt: thinkStart,
+    thinking: { elapsed: 0, text: '', active: true }, sources: [] as ChatSource[],
+  }
+  messages.value.push(assistantMsg)
   const replyMsg = messages.value[messages.value.length - 1]
+
+  let firstToken = true
 
   await chatApi.sendMessageStream(
     currentChatId.value,
     text,
     selectedModel.value,
     (token: string) => {
+      if (firstToken) {
+        firstToken = false
+        const elapsed = Math.max(1, Math.round((Date.now() - thinkStart) / 1000))
+        replyMsg.thinking.elapsed = elapsed
+        replyMsg.thinking.active = false
+      }
       replyMsg.content += token
       msgListRef.value?.scrollToBottom()
     },
     (_model: string) => {
       const chat = recentChats.value.find(c => c.id === currentChatId.value)
       if (chat && chat.title === '新对话') chat.title = text.slice(0, 30)
+      replyMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - thinkStart) / 1000))
+      replyMsg.thinking.active = false
       msgListRef.value?.scrollToBottom()
     },
     (err: string) => {
       replyMsg.content = '❌ 流式回复失败：' + err
     },
     lastAnalysis.value,
+    (reasoning: string) => {
+      replyMsg.thinking.text += reasoning
+      replyMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - thinkStart) / 1000))
+      replyMsg.thinking.active = true
+    },
+    (sources: ChatSource[]) => { replyMsg.sources = sources },
   )
 }
 

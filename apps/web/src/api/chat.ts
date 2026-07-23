@@ -5,6 +5,7 @@ export interface ChatMessage {
   session_id: number
   role: 'user' | 'assistant' | 'system'
   content: string
+  sources?: ChatSource[]
   created_at: string
 }
 
@@ -51,8 +52,8 @@ export const chatApi = {
     return client.post<ChatReply>(`/chat-sessions/${sessionId}/chat`, { content, model })
   },
   /** Store a message directly (without LLM call) — for persisting analysis results */
-  saveMessage(sessionId: number, role: string, content: string) {
-    return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, { role, content })
+  saveMessage(sessionId: number, role: string, content: string, sources?: ChatSource[]) {
+    return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, { role, content, sources })
   },
   /** SSE stream with optional diagnostic context */
   async sendMessageStream(
@@ -63,6 +64,8 @@ export const chatApi = {
     onDone?: (model: string) => void,
     onError?: (err: string) => void,
     logAnalysis?: Record<string, any>,
+    onReasoning?: (reasoning: string) => void,
+    onSources?: (sources: ChatSource[]) => void,
   ) {
     const token = sessionStorage.getItem('token')
     const resp = await fetch(`/api/v1/chat-sessions/${sessionId}/stream`, {
@@ -77,19 +80,26 @@ export const chatApi = {
     const reader = resp.body?.getReader()
     if (!reader) { onError('No response body'); return }
     const decoder = new TextDecoder()
+    let pending = ''
+    const handleEvent = (line: string) => {
+      if (!line.startsWith('data: ')) return
+      try {
+        const data = JSON.parse(line.slice(6))
+        if (data.token) onToken(data.token)
+        if (data.reasoning) onReasoning?.(data.reasoning)
+        if (data.sources) onSources?.(data.sources)
+        if (data.done) onDone(data.model)
+      } catch { /* ignore incomplete or invalid SSE payloads */ }
+    }
     while (true) {
       const { done, value } = await reader.read()
-      if (done) break
-      const text = decoder.decode(value, { stream: true })
-      for (const line of text.split('\n')) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            if (data.token) onToken(data.token)
-            if (data.done) onDone(data.model)
-          } catch { /* ignore parse errors */ }
-        }
+      pending += decoder.decode(value, { stream: !done })
+      const events = pending.split('\n\n')
+      pending = done ? '' : events.pop() || ''
+      for (const event of events) {
+        for (const line of event.split('\n')) handleEvent(line)
       }
+      if (done) break
     }
   },
 
@@ -113,4 +123,11 @@ export const chatApi = {
   generateReport(logId: number) {
     return client.post(`/reports/${logId}`)
   },
+}
+
+export interface ChatSource {
+  id?: number
+  title: string
+  source: string
+  excerpt: string
 }
