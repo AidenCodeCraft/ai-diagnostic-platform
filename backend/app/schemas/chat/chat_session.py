@@ -34,7 +34,6 @@ class ChatSessionListResponse(BaseModel):
 class ChatMessageCreate(BaseModel):
     role: str = Field(..., max_length=20)  # user / assistant
     content: str
-    sources: Optional[List[Dict[str, Any]]] = None
 
 
 class ChatMessageResponse(BaseModel):
@@ -45,4 +44,5 @@ class ChatMessageResponse(BaseModel):
     role: str
     content: str
     sources: Optional[List[Dict[str, Any]]] = None
+    thinking: Optional[Dict[str, Any]] = None
     created_at: Optional[datetime] = None

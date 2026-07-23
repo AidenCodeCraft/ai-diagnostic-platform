@@ -6,6 +6,10 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   sources?: ChatSource[]
+  thinking?: {
+    text: string
+    elapsed: number
+  }
   created_at: string
 }
 
@@ -52,8 +56,8 @@ export const chatApi = {
     return client.post<ChatReply>(`/chat-sessions/${sessionId}/chat`, { content, model })
   },
   /** Store a message directly (without LLM call) — for persisting analysis results */
-  saveMessage(sessionId: number, role: string, content: string, sources?: ChatSource[]) {
-    return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, { role, content, sources })
+  saveMessage(sessionId: number, role: string, content: string, sources?: ChatSource[], thinking?: { text: string, elapsed: number }) {
+    return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, { role, content, sources, thinking })
   },
   /** SSE stream with optional diagnostic context */
   async sendMessageStream(
@@ -106,16 +110,17 @@ export const chatApi = {
   // Log analysis (kept for file upload support)
   uploadLog(formData: FormData) {
     return client.post('/logs/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000, // 大文件上传需要更长超时
     })
   },
   runAnalysis(logId: number, model?: string) {
     const params: any = { log_id: logId }
     if (model) params.model = model
-    return client.post('/analyses/run', null, { params })
+    // 诊断流水线（解析+RAG+LLM）可能需要 60-120s，给足超时
+    return client.post('/analyses/run', null, { params, timeout: 180000 })
   },
   getAnalysisResult(analysisId: number) {
-    return client.get(`/analyses/${analysisId}/result`)
+    return client.get(`/analyses/${analysisId}/result`, { timeout: 30000 })
   },
   searchKnowledge(q: string) {
     return client.get('/knowledge/search', { params: { q } })

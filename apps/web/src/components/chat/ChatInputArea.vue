@@ -5,8 +5,8 @@
       <div v-for="fa in files" :key="fa.id" class="upload-file-card">
         <div class="ufc-icon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
           </svg>
         </div>
         <div class="ufc-info">
@@ -22,32 +22,20 @@
           </div>
           <span v-if="fa.error" class="ufc-error">{{ fa.error }}</span>
         </div>
-        <button class="ufc-remove" @click="$emit('removeFile', fa.id)" :disabled="fa.status === 'uploading'">&times;</button>
+        <button class="ufc-remove" @click="$emit('removeFile', fa.id)"
+          :disabled="fa.status === 'uploading'">&times;</button>
       </div>
     </div>
 
     <!-- 输入框 -->
     <div class="input-box" :class="{ 'has-uploads': files.length > 0 }">
-      <textarea
-        ref="textareaRef"
-        v-model="model"
-        placeholder="输入问题或拖拽日志文件..."
-        class="msg-textarea"
-        :rows="1"
-        @keydown.enter.exact.prevent="$emit('send')"
-        @input="autoResize"
-      ></textarea>
+      <textarea ref="textareaRef" v-model="model" placeholder="输入问题..." class="msg-textarea" :rows="1"
+        @keydown.enter.exact.prevent="$emit('send')" @input="autoResize"></textarea>
       <div class="input-actions">
         <div class="actions-left">
-          <el-select
-            :model-value="selectedModel"
-            size="small"
-            class="model-select"
-            popper-class="model-select-popper"
-            @update:model-value="emit('modelChange', $event as string)"
-          >
-            <el-option label="Mock (开发模式)" value="mock" />
-            <el-option label="DeepSeek" value="deepseek" />
+          <el-select :model-value="selectedModel" size="small" class="model-select" popper-class="model-select-popper"
+            @update:model-value="emit('modelChange', $event as string)">
+            <el-option v-for="m in availableModels" :key="m.value" :label="m.label" :value="m.value" />
           </el-select>
           <button class="action-btn report-btn" :disabled="!canReport" title="生成诊断报告" @click="$emit('generateReport')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -60,16 +48,13 @@
         <div class="actions-right">
           <label class="action-btn attach-btn" title="上传文件 (最大 200MB)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              <path
+                d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
             </svg>
             <input type="file" accept=".log,.txt,.zip" @change="$emit('fileInput', $event)" hidden multiple />
           </label>
-          <button
-            class="action-btn send-btn"
-            :disabled="!model.trim() || isUploading"
-            :class="{ active: model.trim() && !isUploading }"
-            @click="$emit('send')"
-          >
+          <button class="action-btn send-btn" :disabled="!model.trim() || isUploading"
+            :class="{ active: model.trim() && !isUploading }" @click="$emit('send')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
               <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
             </svg>
@@ -81,8 +66,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useFormat } from '@/composables/useFormat'
+import { adminApi, type ModelOption } from '@/api/admin'
 import type { FileAttachment } from './types'
 
 const { formatFileSize } = useFormat()
@@ -111,6 +97,35 @@ const model = computed({
 })
 
 const textareaRef = ref<HTMLTextAreaElement>()
+const availableModels = ref<ModelOption[]>([
+  { label: 'DeepSeek V4 Flash', value: 'deepseek-v4-flash', isDefault: true },
+  { label: 'DeepSeek V4 Pro', value: 'deepseek-v4-pro', isDefault: false }
+])
+
+async function loadAvailableModels() {
+  try {
+    const { data } = await adminApi.getAvailableModels()
+    if (data && data.models && data.models.length > 0) {
+      availableModels.value = data.models
+    }
+  } catch (err) {
+    console.error('[ChatInputArea] Failed to load models:', err)
+    // 使用默认模型列表
+  }
+}
+
+function handleConfigUpdate() {
+  loadAvailableModels()
+}
+
+onMounted(() => {
+  loadAvailableModels()
+  window.addEventListener('llm-config-updated', handleConfigUpdate)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('llm-config-updated', handleConfigUpdate)
+})
 
 function autoResize() {
   if (!textareaRef.value) return
@@ -162,27 +177,105 @@ function statusText(fa: FileAttachment): string {
   border-bottom: 1px solid var(--chat-upload-card-border);
 }
 
-.ufc-icon { color: var(--chat-upload-icon); flex-shrink: 0; }
-.ufc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ufc-name { font-size: 13px; color: var(--chat-upload-name); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ufc-size { font-size: 11px; color: var(--chat-upload-size); }
-.ufc-progress-wrap { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.ufc-progress { flex: 1; height: 4px; background: var(--chat-upload-progress-bg); border-radius: 2px; overflow: hidden; }
-.ufc-progress-bar { height: 100%; border-radius: 2px; transition: width 0.3s; background: var(--chat-upload-progress-bar); }
-.ufc-progress-bar.done { background: #22c55e; }
-.ufc-progress-bar.error { background: #ef4444; }
-.ufc-status { font-size: 11px; white-space: nowrap; }
-.ufc-status.uploading, .ufc-status.parsing { color: #2563eb; }
-.ufc-status.done { color: #22c55e; }
-.ufc-status.error { color: #ef4444; }
-.ufc-error { font-size: 11px; color: #ef4444; }
-.ufc-remove {
-  background: none; border: none; font-size: 18px; cursor: pointer; color: #9ca3af; padding: 0 4px; flex-shrink: 0;
+.ufc-icon {
+  color: var(--chat-upload-icon);
+  flex-shrink: 0;
 }
-.ufc-remove:hover { color: #ef4444; }
-.ufc-remove:disabled { opacity: 0.3; cursor: not-allowed; }
 
-.upload-area + .input-box {
+.ufc-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ufc-name {
+  font-size: 13px;
+  color: var(--chat-upload-name);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ufc-size {
+  font-size: 11px;
+  color: var(--chat-upload-size);
+}
+
+.ufc-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ufc-progress {
+  flex: 1;
+  height: 4px;
+  background: var(--chat-upload-progress-bg);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.ufc-progress-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s;
+  background: var(--chat-upload-progress-bar);
+}
+
+.ufc-progress-bar.done {
+  background: #22c55e;
+}
+
+.ufc-progress-bar.error {
+  background: #ef4444;
+}
+
+.ufc-status {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ufc-status.uploading,
+.ufc-status.parsing {
+  color: #2563eb;
+}
+
+.ufc-status.done {
+  color: #22c55e;
+}
+
+.ufc-status.error {
+  color: #ef4444;
+}
+
+.ufc-error {
+  font-size: 11px;
+  color: #ef4444;
+}
+
+.ufc-remove {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #9ca3af;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.ufc-remove:hover {
+  color: #ef4444;
+}
+
+.ufc-remove:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.upload-area+.input-box {
   border-radius: 0 0 12px 12px;
   border-top: none;
 }
@@ -215,7 +308,9 @@ function statusText(fa: FileAttachment): string {
   min-height: 48px;
 }
 
-.msg-textarea::placeholder { color: var(--chat-input-placeholder); }
+.msg-textarea::placeholder {
+  color: var(--chat-input-placeholder);
+}
 
 .input-actions {
   display: flex;
@@ -224,13 +319,16 @@ function statusText(fa: FileAttachment): string {
   padding: 4px 12px 10px;
 }
 
-.actions-left, .actions-right {
+.actions-left,
+.actions-right {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.model-select { width: 150px; }
+.model-select {
+  width: 150px;
+}
 
 :deep(.model-select .el-input__wrapper) {
   border-radius: 20px;
@@ -265,11 +363,19 @@ function statusText(fa: FileAttachment): string {
   transition: all 0.15s;
 }
 
-.action-btn:hover { background: var(--chat-input-action-hover-bg); color: var(--chat-input-action-hover-text); }
-.action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.action-btn:hover {
+  background: var(--chat-input-action-hover-bg);
+  color: var(--chat-input-action-hover-text);
+}
+
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 .attach-btn {
-  width: auto; min-width: 30px;
+  width: auto;
+  min-width: 30px;
   padding: 0 8px;
   justify-content: center;
   cursor: pointer;
@@ -281,7 +387,11 @@ function statusText(fa: FileAttachment): string {
   display: none;
 }
 
-.send-btn { width: 30px; padding: 0; justify-content: center; }
+.send-btn {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+}
 
 .send-btn.active {
   background: var(--chat-input-send-active-bg);
@@ -289,5 +399,7 @@ function statusText(fa: FileAttachment): string {
   color: #fff;
 }
 
-.send-btn.active:hover { filter: brightness(1.08); }
+.send-btn.active:hover {
+  filter: brightness(1.08);
+}
 </style>

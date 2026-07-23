@@ -35,8 +35,8 @@ function handleAction(action: 'download' | 'settings' | 'help' | 'logout') {
 .user-menu-popup {
   position: fixed;
   z-index: 100;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--chat-popup-bg);
+  border: 1px solid var(--chat-popup-border);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   padding: 4px;
@@ -60,24 +60,24 @@ function handleAction(action: 'download' | 'settings' | 'help' | 'logout') {
   border: none;
   background: transparent;
   font-size: 13px;
-  color: #374151;
+  color: var(--chat-popup-text);
   cursor: pointer;
   border-radius: 6px;
   transition: background 0.1s;
 }
 
 .user-menu-popup button:hover {
-  background: #f3f4f6;
+  background: var(--chat-popup-hover);
 }
 
 .user-menu-popup button.danger:hover {
-  background: #fef2f2;
-  color: #ef4444;
+  background: var(--chat-popup-danger-hover-bg);
+  color: var(--chat-popup-danger-hover-text);
 }
 
 .user-menu-popup hr {
   margin: 4px 0;
   border: none;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--chat-popup-border);
 }
 </style>

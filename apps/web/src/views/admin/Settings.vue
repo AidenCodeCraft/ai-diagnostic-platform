@@ -5,28 +5,78 @@
     <el-tabs v-model="activeTab" class="settings-tabs">
       <!-- LLM 配置 -->
       <el-tab-pane label="LLM 配置" name="llm">
-        <div class="config-section">
-          <div class="config-item">
-            <label class="config-label">默认 Provider</label>
-            <el-select v-model="llmConfig.provider" style="width:240px">
-              <el-option label="DeepSeek" value="deepseek" />
-              <el-option label="OpenAI Compatible" value="openai_compatible" />
-              <el-option label="Mock" value="mock" />
-            </el-select>
+        <div class="llm-config-section">
+          <div class="llm-header">
+            <h3>模型配置</h3>
+            <el-button type="primary" size="small" @click="addModel">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              添加模型
+            </el-button>
           </div>
-          <div class="config-item">
-            <label class="config-label">API Key</label>
-            <el-input v-model="llmConfig.api_key" type="password" show-password style="width:360px" placeholder="sk-..." />
+
+          <div class="models-list">
+            <div v-for="(model, index) in llmModels" :key="index" class="model-card" :class="{ default: model.isDefault }">
+              <div class="model-header">
+                <div class="model-title-row">
+                  <el-input v-model="model.name" placeholder="模型名称" style="width:200px" size="small" />
+                  <el-tag v-if="model.isDefault" type="success" size="small">默认</el-tag>
+                  <el-button v-else text type="primary" size="small" @click="setDefault(index)">设为默认</el-button>
+                </div>
+                <el-button text type="danger" size="small" :disabled="llmModels.length === 1" @click="removeModel(index)">删除</el-button>
+              </div>
+
+              <div class="model-config-grid">
+                <div class="config-field">
+                  <label>Provider</label>
+                  <el-select v-model="model.provider" size="small" style="width:100%">
+                    <el-option label="DeepSeek" value="deepseek" />
+                    <el-option label="OpenAI Compatible" value="openai_compatible" />
+                  </el-select>
+                </div>
+
+                <div class="config-field">
+                  <label>模型标识</label>
+                  <el-select v-model="model.model" size="small" style="width:100%" :placeholder="model.provider === 'deepseek' ? '选择模型' : '输入模型名称'" allow-create filterable>
+                    <template v-if="model.provider === 'deepseek'">
+                      <el-option label="deepseek-v4-flash (推荐)" value="deepseek-v4-flash">
+                        <span>deepseek-v4-flash</span>
+                        <el-tag size="small" type="success" style="margin-left:8px">推荐</el-tag>
+                      </el-option>
+                      <el-option label="deepseek-v4-pro" value="deepseek-v4-pro" />
+                    </template>
+                  </el-select>
+                </div>
+
+                <div class="config-field full-width">
+                  <label>Base URL</label>
+                  <el-input v-model="model.base_url" size="small" :placeholder="model.provider === 'deepseek' ? 'https://api.deepseek.com' : 'https://api.openai.com/v1'" />
+                </div>
+
+                <div class="config-field full-width">
+                  <label>API Key</label>
+                  <el-input v-model="model.api_key" type="password" show-password size="small" placeholder="sk-..." />
+                </div>
+
+                <div class="config-field">
+                  <label>Temperature</label>
+                  <el-input-number v-model="model.temperature" :min="0" :max="2" :step="0.1" :precision="1" size="small" style="width:100%" />
+                </div>
+
+                <div class="config-field">
+                  <label>Max Tokens</label>
+                  <el-input-number v-model="model.max_tokens" :min="100" :max="32000" :step="100" size="small" style="width:100%" />
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="config-item">
-            <label class="config-label">Base URL</label>
-            <el-input v-model="llmConfig.base_url" style="width:360px" placeholder="https://api.deepseek.com" />
+
+          <div class="config-actions">
+            <el-button type="primary" :loading="saving" @click="saveLLMConfig">保存全部配置</el-button>
+            <el-button @click="loadLLMConfig">重置</el-button>
           </div>
-          <div class="config-item">
-            <label class="config-label">默认模型</label>
-            <el-input v-model="llmConfig.model" style="width:240px" placeholder="deepseek-chat" />
-          </div>
-          <el-button type="primary" style="margin-top:12px" :loading="saving" @click="saveLLMConfig">保存配置</el-button>
         </div>
       </el-tab-pane>
 
@@ -97,18 +147,35 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import client from '@/api/client'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { adminApi } from '@/api/admin'
+
+interface LLMModel {
+  name: string
+  provider: string
+  model: string
+  api_key: string
+  base_url: string
+  temperature: number
+  max_tokens: number
+  isDefault: boolean
+}
 
 const activeTab = ref('llm')
 const saving = ref(false)
 
-const llmConfig = ref({
-  provider: 'deepseek',
-  api_key: '',
-  base_url: 'https://api.deepseek.com',
-  model: 'deepseek-chat',
-})
+const llmModels = ref<LLMModel[]>([
+  {
+    name: 'DeepSeek V4 Flash',
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+    api_key: '',
+    base_url: 'https://api.deepseek.com',
+    temperature: 1.0,
+    max_tokens: 8000,
+    isDefault: true
+  }
+])
 
 const sysConfig = ref({
   max_upload_mb: 100,
@@ -119,20 +186,94 @@ const sysConfig = ref({
 const cleanupDate = ref('')
 const cleanupLogDate = ref('')
 
+function addModel() {
+  llmModels.value.push({
+    name: '新模型',
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+    api_key: '',
+    base_url: 'https://api.deepseek.com',
+    temperature: 1.0,
+    max_tokens: 8000,
+    isDefault: false
+  })
+}
+
+async function removeModel(index: number) {
+  if (llmModels.value.length === 1) {
+    ElMessage.warning('至少需要保留一个模型配置')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm('确定删除此模型配置？', '确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    const wasDefault = llmModels.value[index].isDefault
+    llmModels.value.splice(index, 1)
+    
+    if (wasDefault && llmModels.value.length > 0) {
+      llmModels.value[0].isDefault = true
+    }
+  } catch {
+    // 取消删除
+  }
+}
+
+function setDefault(index: number) {
+  llmModels.value.forEach((m, i) => {
+    m.isDefault = i === index
+  })
+}
+
 async function loadLLMConfig() {
   try {
-    const { data } = await client.get('/admin/config/llm')
-    if (data) llmConfig.value = data
-  } catch { /* use defaults */ }
+    const { data } = await adminApi.getLLMConfig()
+    if (data && Array.isArray(data.models) && data.models.length > 0) {
+      llmModels.value = data.models
+    }
+  } catch (err) {
+    console.error('[Settings] Failed to load LLM config:', err)
+    // 使用默认配置
+  }
 }
 
 async function saveLLMConfig() {
+  // 验证必填字段
+  const hasEmptyKey = llmModels.value.some(m => !m.api_key.trim())
+  if (hasEmptyKey) {
+    ElMessage.warning('请填写所有模型的 API Key')
+    return
+  }
+
+  const hasEmptyName = llmModels.value.some(m => !m.name.trim())
+  if (hasEmptyName) {
+    ElMessage.warning('请填写所有模型的名称')
+    return
+  }
+
+  const hasEmptyModel = llmModels.value.some(m => !m.model.trim())
+  if (hasEmptyModel) {
+    ElMessage.warning('请选择或填写所有模型的标识')
+    return
+  }
+
   saving.value = true
   try {
-    await client.put('/admin/config/llm', llmConfig.value)
+    await adminApi.saveLLMConfig({ models: llmModels.value })
     ElMessage.success('LLM 配置已保存，即时生效')
-  } catch { ElMessage.error('保存失败') }
-  finally { saving.value = false }
+    
+    // 触发全局事件通知其他组件更新模型列表
+    window.dispatchEvent(new CustomEvent('llm-config-updated'))
+  } catch (err: any) {
+    console.error('[Settings] Failed to save LLM config:', err)
+    ElMessage.error('保存失败: ' + (err.response?.data?.detail || err.message))
+  } finally {
+    saving.value = false
+  }
 }
 
 function saveSysConfig() {
@@ -150,6 +291,25 @@ onMounted(loadLLMConfig)
 .config-item { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
 .config-label { width: 130px; font-size: 14px; color: #374151; text-align: right; flex-shrink: 0; }
 
+.llm-config-section { padding-top: 16px; }
+.llm-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.llm-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: #1f2937; }
+
+.models-list { display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px; }
+.model-card { padding: 20px; border: 2px solid #e5e7eb; border-radius: 12px; background: #f9fafb; transition: all 0.2s; }
+.model-card.default { border-color: #10b981; background: #f0fdf4; }
+.model-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+
+.model-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.model-title-row { display: flex; align-items: center; gap: 12px; }
+
+.model-config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.config-field { display: flex; flex-direction: column; gap: 6px; }
+.config-field.full-width { grid-column: 1 / -1; }
+.config-field label { font-size: 13px; font-weight: 500; color: #6b7280; }
+
+.config-actions { display: flex; gap: 12px; padding-top: 8px; border-top: 1px solid #e5e7eb; }
+
 .cleanup-card { display: flex; align-items: center; justify-content: space-between; padding: 16px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; }
 .cleanup-info h4 { margin: 0 0 4px; font-size: 14px; color: #1f2937; }
 .cleanup-info p { margin: 0; font-size: 12px; color: #6b7280; }
@@ -165,5 +325,7 @@ onMounted(loadLLMConfig)
   .config-item { flex-direction: column; align-items: flex-start; gap: 6px; }
   .config-label { text-align: left; }
   .cleanup-card { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .model-config-grid { grid-template-columns: 1fr; }
+  .config-field.full-width { grid-column: 1; }
 }
 </style>

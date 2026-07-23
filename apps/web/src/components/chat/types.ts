@@ -21,3 +21,9 @@ export interface MsgAttachment {
   size: number
   type: string
 }
+
+export interface ThinkingData {
+  text: string
+  elapsed: number
+  active: boolean
+}

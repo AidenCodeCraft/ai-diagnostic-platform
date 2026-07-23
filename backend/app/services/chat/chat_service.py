@@ -41,10 +41,14 @@ class ChatService:
         items = query.order_by(ChatSession.updated_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
         return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-    def update_session(self, session_id: int, title: Optional[str] = None) -> ChatSession:
+    def update_session(self, session_id: int, title: Optional[str] = None, context: Optional[Dict[str, Any]] = None) -> ChatSession:
         s = self.get_session(session_id)
         if title is not None:
             s.title = title
+        if context is not None:
+            existing = s.context or {}
+            existing.update(context)
+            s.context = existing
         self.db.commit()
         self.db.refresh(s)
         return s
@@ -62,8 +66,12 @@ class ChatService:
     def add_message(
         self, session_id: int, role: str, content: str,
         sources: Optional[List[Dict[str, Any]]] = None,
+        thinking: Optional[Dict[str, Any]] = None,
     ) -> ChatMessage:
-        msg = ChatMessage(session_id=session_id, role=role, content=content, sources=sources)
+        msg = ChatMessage(
+            session_id=session_id, role=role, content=content,
+            sources=sources, thinking=thinking,
+        )
         self.db.add(msg)
         self.db.commit()
         self.db.refresh(msg)
@@ -77,6 +85,16 @@ class ChatService:
     # ------------------------------------------------------------------
     # AI Chat
     # ------------------------------------------------------------------
+
+    def _resolve_log_analysis(
+        self, session_id: int, log_analysis: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve log_analysis: use passed-in value, else fall back to session context."""
+        if log_analysis:
+            return log_analysis
+        session = self.get_session(session_id)
+        ctx = session.context or {}
+        return ctx.get("last_analysis")
 
     def _build_messages(self, session_id: int) -> List[Dict[str, str]]:
         history = self.get_messages(session_id)
@@ -109,9 +127,15 @@ class ChatService:
         self.add_message(session_id, "user", content)
         messages = self._build_messages(session_id)
 
+        # Resolve log_analysis from session context if not explicitly provided
+        resolved_analysis = self._resolve_log_analysis(session_id, log_analysis)
+        # Persist to session context for multi-turn inheritance
+        if log_analysis:
+            self.update_session(session_id, context={"last_analysis": log_analysis})
+
         # Enrich with diagnostic context
         agent = DiagnosticChatAgent(self.db, provider_name)
-        messages = agent.enrich_messages(session_id, content, messages, log_analysis)
+        messages = agent.enrich_messages(session_id, content, messages, resolved_analysis)
 
         try:
             reply = self._get_provider(provider_name).chat(messages)
@@ -129,15 +153,25 @@ class ChatService:
         model: Optional[str] = None,
         log_analysis: Optional[Dict[str, Any]] = None,
     ):
-        """Stream AI reply with diagnostic context injection."""
+        """Stream AI reply with diagnostic context injection.
+
+        log_analysis: if provided, persists to session context for multi-turn inheritance.
+        Subsequent messages in the same session will auto-inherit via session.context.last_analysis.
+        """
         session = self.get_session(session_id)
         provider_name = model or session.model or "mock"
         # 用户消息由前端 saveMessage 统一持久化，后端不再重复保存
         messages = self._build_messages(session_id)
 
+        # Resolve log_analysis: passed-in value takes priority, else fall back to session context
+        resolved_analysis = self._resolve_log_analysis(session_id, log_analysis)
+        # Persist to session context so subsequent messages auto-inherit
+        if log_analysis:
+            self.update_session(session_id, context={"last_analysis": log_analysis})
+
         # Enrich with diagnostic context (knowledge search + analysis)
         agent = DiagnosticChatAgent(self.db, provider_name)
-        messages = agent.enrich_messages(session_id, content, messages, log_analysis)
+        messages = agent.enrich_messages(session_id, content, messages, resolved_analysis)
         if agent.references:
             yield f"data: {json.dumps({'sources': agent.references}, ensure_ascii=False)}\n\n"
 
@@ -156,8 +190,9 @@ class ChatService:
             full_reply = f"[AI 服务暂时不可用: {e}]"
             yield f"data: {json.dumps({'token': full_reply})}\n\n"
 
-        self.add_message(session_id, "assistant", full_reply, sources=agent.references or None)
         self._auto_title(session_id, content)
+        # 注意：assistant 消息由前端 saveMessage 统一持久化（含 thinking/sources），
+        # 后端不再重复保存，避免 message 重复。
         yield f"data: {json.dumps({'done': True, 'model': provider_name})}\n\n"
 
     # ------------------------------------------------------------------

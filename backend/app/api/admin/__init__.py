@@ -87,31 +87,79 @@ def get_stats(
 
 @router.get("/config/llm")
 def get_llm_config():
-    """Get saved LLM configuration (merged with environment variables)."""
+    """Get saved LLM configuration (supports multiple models)."""
     import os
     config = _load_config()
-    llm = config.get("llm", {
+    
+    # 新格式：支持多模型配置
+    if "llm" in config and "models" in config["llm"]:
+        models = config["llm"]["models"]
+        # 环境变量优先级高于文件配置
+        env_key = os.getenv("DEEPSEEK_API_KEY", "")
+        if env_key:
+            for model in models:
+                if model.get("provider") == "deepseek" and not model.get("api_key"):
+                    model["api_key"] = env_key
+        return {"models": models}
+    
+    # 兼容旧格式或提供默认配置
+    default_model = {
+        "name": "DeepSeek V4 Flash",
         "provider": "deepseek",
-        "api_key": "",
+        "model": "deepseek-v4-flash",
+        "api_key": os.getenv("DEEPSEEK_API_KEY", ""),
         "base_url": "https://api.deepseek.com",
-        "model": "deepseek-chat",
-    })
-    # 环境变量优先级高于文件配置（Docker Compose 直接注入）
-    env_key = os.getenv("DEEPSEEK_API_KEY", "")
-    if env_key:
-        llm["api_key"] = env_key
-    return llm
+        "temperature": 1.0,
+        "max_tokens": 8000,
+        "isDefault": True
+    }
+    
+    return {"models": [default_model]}
 
 
 @router.put("/config/llm")
 def save_llm_config(body: Dict[str, Any]):
-    """Save LLM configuration."""
+    """Save LLM configuration (supports multiple models)."""
     config = _load_config()
-    config["llm"] = {
-        "provider": body.get("provider", "deepseek"),
-        "api_key": body.get("api_key", ""),
-        "base_url": body.get("base_url", "https://api.deepseek.com"),
-        "model": body.get("model", "deepseek-chat"),
-    }
+    
+    # 新格式：保存多模型配置
+    if "models" in body:
+        config["llm"] = {"models": body["models"]}
+    else:
+        # 兼容旧格式（单模型）
+        config["llm"] = {
+            "provider": body.get("provider", "deepseek"),
+            "api_key": body.get("api_key", ""),
+            "base_url": body.get("base_url", "https://api.deepseek.com"),
+            "model": body.get("model", "deepseek-v4-flash"),
+        }
+    
     _save_config(config)
     return {"ok": True, "message": "LLM 配置已保存"}
+
+
+@router.get("/config/llm/models")
+def get_available_models():
+    """Get list of configured models for selection in chat interface."""
+    config = _load_config()
+    
+    if "llm" in config and "models" in config["llm"]:
+        models = config["llm"]["models"]
+        return {
+            "models": [
+                {
+                    "label": m.get("name", m.get("model", "Unknown")),
+                    "value": m.get("model"),
+                    "isDefault": m.get("isDefault", False)
+                }
+                for m in models
+            ]
+        }
+    
+    # 默认返回
+    return {
+        "models": [
+            {"label": "DeepSeek V4 Flash", "value": "deepseek-v4-flash", "isDefault": True},
+            {"label": "DeepSeek V4 Pro", "value": "deepseek-v4-pro", "isDefault": False}
+        ]
+    }

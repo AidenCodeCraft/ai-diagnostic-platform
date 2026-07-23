@@ -22,14 +22,14 @@
   --chat-sidebar-section: #9ca3af;
   --chat-sidebar-history-text: #374151;
   --chat-sidebar-history-hover: #f3f4f6;
-  --chat-sidebar-history-active-bg: #eff6ff;
+  --chat-sidebar-history-active-bg: #edf3fe;
   --chat-sidebar-history-active-text: #2563eb;
   --chat-sidebar-user-border: #e5e7eb;
   --chat-sidebar-user-text: #374151;
 
   --chat-welcome-text: #374151;
   --chat-msg-text: #1f2937;
-  --chat-msg-user-bg: #eff6ff;
+  --chat-msg-user-bg: #edf3fe;
   --chat-msg-user-border: #bfdbfe;
   --chat-msg-code-bg: #f3f4f6;
   --chat-msg-pre-bg: #1e293b;
@@ -49,13 +49,13 @@
   --chat-source-border: #e5e7eb;
   --chat-source-text: #374151;
   --chat-source-muted: #6b7280;
-  --chat-source-index-bg: #eff6ff;
+  --chat-source-index-bg: #edf3fe;
   --chat-source-index-text: #2563eb;
   --chat-source-link: #2563eb;
   --chat-copy-text: #9ca3af;
   --chat-copy-hover-bg: #f3f4f6;
   --chat-copy-hover-text: #374151;
-  --chat-citation-bg: #eff6ff;
+  --chat-citation-bg: #edf3fe;
   --chat-citation-text: #2563eb;
   --chat-citation-hover-bg: #dbeafe;
   --chat-citation-hover-text: #1d4ed8;

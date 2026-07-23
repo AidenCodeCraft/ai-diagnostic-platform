@@ -123,7 +123,7 @@ onMounted(async () => {
   background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
 }
 .stat-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
-.stat-icon.users { background: #eff6ff; } .stat-icon.projects { background: #fef3c7; }
+.stat-icon.users { background: #edf3fe; } .stat-icon.projects { background: #fef3c7; }
 .stat-icon.logs { background: #f3e8ff; } .stat-icon.analyses { background: #dcfce7; }
 .stat-icon.knowledge { background: #fce7f3; }
 .stat-info { display: flex; flex-direction: column; }

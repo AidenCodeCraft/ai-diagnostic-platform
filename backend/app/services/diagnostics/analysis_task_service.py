@@ -158,16 +158,39 @@ class AnalysisTaskService:
         }
 
     def get_result(self, analysis_id: int) -> Dict[str, Any]:
-        """Return structured analysis result."""
+        """Return structured analysis result, including pre-formatted Markdown."""
         analysis = self.get_analysis(analysis_id)
+        confidence_pct = ((analysis.confidence or 0) * 100)
+        confidence_str = f"{confidence_pct:.0f}%"
+        summary = analysis.summary or ""
+        root_cause = analysis.root_cause or ""
+        next_steps = self._normalize_next_steps(analysis.next_steps)
+
+        # Pre-compute the Markdown representation on backend
+        diagnosis_markdown = "\n".join([
+            f"## 诊断结果",
+            "",
+            "### 诊断摘要",
+            summary or "分析完成",
+            "",
+            "### 根因分析",
+            root_cause or "根因待确认",
+            "",
+            f"诊断置信度：**{confidence_str}**",
+            "",
+            "### 建议措施",
+            *[f"{i + 1}. {s}" for i, s in enumerate(next_steps)],
+        ]) if summary or root_cause else ""
+
         return {
             "id": analysis.id,
             "log_id": analysis.log_id,
             "status": analysis.status,
-            "summary": analysis.summary or "",
-            "root_cause": analysis.root_cause or "",
+            "summary": summary,
+            "root_cause": root_cause,
             "confidence": analysis.confidence or 0.0,
-            "next_steps": self._normalize_next_steps(analysis.next_steps),
+            "next_steps": next_steps,
+            "diagnosis_markdown": diagnosis_markdown,
             "model": analysis.model or "mock",
             "error_message": analysis.error_message,
             "created_at": analysis.created_at.isoformat() if analysis.created_at else None,

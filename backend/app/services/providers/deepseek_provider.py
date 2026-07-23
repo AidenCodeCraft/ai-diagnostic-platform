@@ -15,9 +15,12 @@ from app.services.providers.base import BaseProvider
 def _load_admin_llm_config() -> Dict[str, str]:
     """Read LLM config from the admin panel's system_config.json.
 
+    Uses same absolute path as admin API and ProviderRegistry.
     Returns empty dict if file doesn't exist or is malformed.
     """
-    config_path = Path("data") / "raw" / "system_config.json"
+    # backend/app/services/providers/deepseek_provider.py
+    #   → ../../../../ → backend/data/raw/system_config.json
+    config_path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "raw" / "system_config.json"
     try:
         if config_path.exists():
             data = json.loads(config_path.read_text(encoding="utf-8"))

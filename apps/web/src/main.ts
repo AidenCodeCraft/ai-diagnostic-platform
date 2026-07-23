@@ -8,12 +8,15 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 import './styles/global.css'
+import './styles/chat-theme.css'
 
 // Logger — initialize early so all startup errors are captured
 import { createLogger } from './logger'
 import { LoggerPlugin } from './plugins/logger-plugin'
+import { initTheme } from './composables/useTheme'
 
 const logger = createLogger()
+initTheme()
 
 // Reporter — start async batch upload to backend
 import { Reporter } from './logger/reporter'

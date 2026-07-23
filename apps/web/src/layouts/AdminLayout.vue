@@ -91,7 +91,7 @@ function handleLogout() {
   transition: background 0.12s; white-space: nowrap;
 }
 .menu-item:hover { background: #f3f4f6; }
-.menu-item.active { background: #eff6ff; color: #2563eb; font-weight: 500; }
+.menu-item.active { background: #edf3fe; color: #2563eb; font-weight: 500; }
 .sidebar-overlay { display: none; }
 
 .admin-content { flex: 1; overflow-y: auto; padding: 24px; }

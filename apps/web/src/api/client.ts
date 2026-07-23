@@ -4,7 +4,9 @@ import { getLogger } from '@/logger'
 const client = axios.create({
   baseURL: '/api/v1',
   timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
+  // 不设置默认 Content-Type：axios 会自动根据 body 类型选择
+  //   — JSON 对象 → application/json
+  //   — FormData  → multipart/form-data（含 boundary）
 })
 
 // 请求拦截：自动注入 JWT Token + 记录请求开始时间

@@ -111,8 +111,8 @@ defineEmits<{
 <style scoped>
 .sidebar {
   width: 260px;
-  background: #f9fafb;
-  border-right: 1px solid #e5e7eb;
+  background: var(--chat-sidebar-bg);
+  border-right: 1px solid var(--chat-sidebar-border);
   flex-shrink: 0;
   overflow: hidden;
   transition: width 0.2s ease;
@@ -143,7 +143,7 @@ defineEmits<{
   border-radius: 50%;
   border: none;
   background: transparent;
-  color: #6b7280;
+  color: var(--chat-sidebar-icon);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -153,8 +153,8 @@ defineEmits<{
 }
 
 .sidebar-icon-btn:hover {
-  background: #e5e7eb;
-  color: #1f2937;
+  background: var(--chat-sidebar-icon-hover-bg);
+  color: var(--chat-sidebar-icon-hover);
 }
 
 .sidebar-new-chat {
@@ -168,16 +168,16 @@ defineEmits<{
   width: 100%;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid #d1d5db;
-  background: #fff;
-  color: #374151;
+  border: 1px solid var(--chat-sidebar-btn-border);
+  background: var(--chat-sidebar-btn-bg);
+  color: var(--chat-sidebar-btn-text);
   cursor: pointer;
   font-size: 14px;
   transition: background 0.15s;
 }
 
 .new-chat-btn:hover {
-  background: #f3f4f6;
+  background: var(--chat-sidebar-btn-hover);
 }
 
 .sidebar-nav {
@@ -192,13 +192,13 @@ defineEmits<{
   border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
-  color: #374151;
+  color: var(--chat-sidebar-nav-text);
   margin-bottom: 2px;
   transition: background 0.12s;
 }
 
 .nav-item:hover {
-  background: #e5e7eb;
+  background: var(--chat-sidebar-nav-hover);
 }
 
 .sidebar-history {
@@ -209,7 +209,7 @@ defineEmits<{
 
 .section-title {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--chat-sidebar-section);
   padding: 8px 12px 4px;
   letter-spacing: 0.5px;
 }
@@ -221,17 +221,17 @@ defineEmits<{
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
-  color: #4b5563;
+  color: var(--chat-sidebar-history-text);
   transition: background 0.12s;
 }
 
 .history-item:hover {
-  background: #e5e7eb;
+  background: var(--chat-sidebar-history-hover);
 }
 
 .history-item.active {
-  background: #dbeafe;
-  color: #2563eb;
+  background: var(--chat-sidebar-history-active-bg);
+  color: var(--chat-sidebar-history-active-text);
 }
 
 .history-title {
@@ -247,7 +247,7 @@ defineEmits<{
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: #9ca3af;
+  color: var(--chat-sidebar-section);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -262,13 +262,13 @@ defineEmits<{
 }
 
 .history-more-btn:hover {
-  background: #d1d5db;
-  color: #374151;
+  background: var(--chat-sidebar-history-hover);
+  color: var(--chat-sidebar-icon-hover);
 }
 
 .empty-hint {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--chat-sidebar-section);
   padding: 12px;
   text-align: center;
 }
@@ -278,21 +278,21 @@ defineEmits<{
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--chat-sidebar-user-border);
   cursor: pointer;
   transition: background 0.12s;
   margin-top: auto;
 }
 
 .sidebar-user:hover {
-  background: #e5e7eb;
+  background: var(--chat-sidebar-nav-hover);
 }
 
 .user-avatar {
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: #2563eb;
+  background: #6688fa;
   color: #fff;
   display: flex;
   align-items: center;
@@ -304,7 +304,7 @@ defineEmits<{
 
 .user-name {
   font-size: 13px;
-  color: #374151;
+  color: var(--chat-sidebar-user-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

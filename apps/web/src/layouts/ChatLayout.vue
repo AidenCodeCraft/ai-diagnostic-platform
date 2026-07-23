@@ -58,7 +58,7 @@
       <template v-if="$route.path === '/chat' || $route.path === '/'">
         <div class="chat-content" :class="{ 'chat-empty': displayMessages.length === 0 }">
           <ChatMessageList ref="msgListRef" :key="'cl-' + currentChatId + '-' + displayMessages.length"
-            :messages="displayMessages" :loading="loading" :isEmpty="displayMessages.length === 0"
+            :messages="displayMessages" :loading="loadingPhase !== 'idle'" :isEmpty="displayMessages.length === 0"
             @previewFile="previewFile" @openKnowledge="openKnowledge" />
           <div class="input-wrapper">
             <ChatInputArea v-model="inputText" :files="attachedFiles" :selectedModel="selectedModel"
@@ -117,22 +117,24 @@ watch(
 )
 
 const sidebarCollapsed = ref(false)
-const selectedModel = ref(localStorage.getItem('selectedModel') || 'mock')
+const selectedModel = ref(localStorage.getItem('selectedModel') || 'deepseek-v4-flash')
 const inputText = ref('')
-const loading = ref(false)
+const loadingPhase = ref<'idle' | 'sending' | 'uploading' | 'streaming' | 'analyzing'>('idle')
+const isSending = ref(false)
 const messages = ref<any[]>([])
 const currentChatId = ref(0)
 const canGenerateReport = ref(false)
 const lastAnalysis = ref<any>(null)
 
-// 去重 + 按 createdAt 升序
+// 按 createdAt 升序排列，使用 ID 去重（而非内容去重）
 const displayMessages = computed(() => {
   const seen = new Set<string>()
   return [...messages.value]
     .filter(m => {
-      const hash = `${m.role}|${(m.content || '').slice(0, 200)}`
-      if (seen.has(hash)) return false
-      seen.add(hash)
+      // 使用消息 ID 去重，而不是内容哈希
+      // 这样即使内容相同，只要是不同的消息实例也能正常显示
+      if (seen.has(m.id)) return false
+      seen.add(m.id)
       return true
     })
     .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
@@ -149,6 +151,7 @@ const chatMenu = reactive({ visible: false, x: 0, y: 0, chatId: 0 })
 const msgListRef = ref<InstanceType<typeof ChatMessageList>>()
 
 const isUploading = computed(() => attachedFiles.value.some(f => f.status === 'uploading'))
+const analysisMode = computed<'chat' | 'diagnose'>(() => attachedFiles.value.length > 0 ? 'diagnose' : 'chat')
 const userName = computed(() => userStore.userName)
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
 
@@ -218,7 +221,7 @@ async function selectChat(id: number) {
   }
 
   try {
-    loading.value = true
+    loadingPhase.value = 'sending'
     const { data } = await chatApi.getMessages(id)
     const msgs = Array.isArray(data) ? data : []
     
@@ -226,14 +229,28 @@ async function selectChat(id: number) {
     
     messageIds.clear()
     currentChatId.value = id
-    messages.value = msgs.map((m: any) => ({
-      id: m.id.toString(),
-      role: m.role,
-      content: m.content || '',
-      createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
-      files: extractFiles(m),
-      sources: m.sources || [],
-    }))
+    messages.value = msgs.map((m: any) => {
+      const msg: any = {
+        id: m.id.toString(),
+        role: m.role,
+        content: m.content || '',
+        createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+        files: extractFiles(m),
+        sources: m.sources || [],
+      }
+      
+      // 恢复持久化的思维链数据
+      if (m.role === 'assistant' && m.thinking) {
+        msg.thinking = {
+          text: m.thinking.text || '',
+          elapsed: m.thinking.elapsed || 0,
+          active: false
+        }
+        msg._thinkOpen = false
+      }
+      
+      return msg
+    })
     messages.value.forEach((m: any) => messageIds.add(m.id))
     sessionStorage.setItem('activeChatId', String(id))
     
@@ -244,7 +261,7 @@ async function selectChat(id: number) {
     canGenerateReport.value = hasAnalysis
     
     router.push('/chat')
-    loading.value = false
+    loadingPhase.value = 'idle'
     
     // 等待DOM更新后滚动到底部
     await nextTick()
@@ -252,7 +269,7 @@ async function selectChat(id: number) {
   } catch (err: any) {
     console.error('[selectChat] error:', err)
     ElMessage.error('加载对话失败: ' + (err.response?.data?.detail || err.message))
-    loading.value = false
+    loadingPhase.value = 'idle'
   }
 }
 
@@ -369,6 +386,10 @@ async function sendMessage() {
   const files = [...attachedFiles.value]
   if (!text) return
 
+  // 并发保护：防止快速连击重复触发
+  if (isSending.value) return
+  isSending.value = true
+
   const isNewChat = !currentChatId.value
   inputText.value = ''
   attachedFiles.value = []
@@ -402,39 +423,83 @@ async function sendMessage() {
       ElMessage.warning('用户消息保存失败，刷新后可能无法恢复')
     }
   }
-  loading.value = true
 
   try {
     if (files.length > 0) {
+      loadingPhase.value = 'uploading'
       await processFiles(files, userMsg)
     } else if (userMsg) {
+      loadingPhase.value = 'streaming'
       await streamChat(userMsg)
     }
   } catch (e: any) {
-    addMessage('assistant', `❌ 分析失败：${e.response?.data?.detail || e.message}`)
+    addMessage('assistant', `❌ 失败：${formatApiError(e)}`)
   } finally {
-    loading.value = false
+    loadingPhase.value = 'idle'
+    isSending.value = false
   }
 }
 
 async function processFiles(files: FileAttachment[], text: string) {
-  for (const fa of files) {
-    fa.status = 'uploading'
-    const fd = new FormData()
-    fd.append('file', fa.file)
-    fd.append('description', text)
+  loadingPhase.value = 'uploading'
 
-    try {
-      const resp = await client.post('/logs/upload', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (e) => {
-          if (e.total) fa.progress = Math.round((e.loaded / e.total) * 100)
-        },
-      })
-      fa.progress = 100
-      fa.status = 'parsing'
-      const logId = resp.data.id
+  // 并发上传所有文件
+  const uploadResults = await Promise.allSettled(
+    files.map(async (fa) => {
+      fa.status = 'uploading'
+      const fd = new FormData()
+      fd.append('file', fa.file)
+      fd.append('description', text)
 
+      try {
+        // axios 自动处理 multipart/form-data 的 Content-Type（含 boundary）
+        const resp = await client.post('/logs/upload', fd, {
+          onUploadProgress: (e) => {
+            if (e.total) fa.progress = Math.round((e.loaded / e.total) * 100)
+          },
+        })
+        fa.progress = 100
+        fa.status = 'parsing'
+        const logId = Number(resp.data?.id)
+        console.log(`[processFiles] upload OK: ${fa.name} → logId=${logId}`)
+        if (!logId || logId <= 0) {
+          throw new Error(`服务器返回了无效的日志ID: ${resp.data?.id}`)
+        }
+        return { fa, logId, ok: true }
+      } catch (e: any) {
+        fa.status = 'error'
+        fa.error = formatApiError(e)
+        console.error(`[processFiles] upload FAIL: ${fa.name}`, fa.error)
+        return { fa, logId: 0, ok: false, error: e }
+      }
+    }),
+  )
+
+  // 检查是否有成功上传的
+  const succeeded = uploadResults.filter(
+    (r): r is PromiseFulfilledResult<{ fa: FileAttachment; logId: number; ok: true }> =>
+      r.status === 'fulfilled' && r.value.ok,
+  )
+  const failed = uploadResults.filter(
+    (r): r is PromiseFulfilledResult<{ fa: FileAttachment; logId: number; ok: false; error: any }> =>
+      r.status === 'fulfilled' && !r.value.ok,
+  )
+
+  // 为失败的显示错误消息
+  for (const r of failed) {
+    addMessage('assistant', `❌ 上传 \`${r.value.fa.name}\` 失败：${formatApiError(r.value.error)}`)
+  }
+
+  if (succeeded.length === 0) {
+    loadingPhase.value = 'idle'
+    return
+  }
+
+  loadingPhase.value = 'analyzing'
+
+  // 并发执行所有分析
+  await Promise.allSettled(
+    succeeded.map(async ({ fa, logId }) => {
       const analysisStartedAt = Date.now()
       const pId = analysisStartedAt.toString()
       messageIds.add(pId)
@@ -458,19 +523,30 @@ async function processFiles(files: FileAttachment[], text: string) {
         msgListRef.value?.scrollToBottom()
       }
 
+      // 安全校验：确保 logId 有效
+      if (!logId || logId <= 0) {
+        processingMsg.content = `❌ 分析 \`${fa.name}\` 失败：日志ID无效 (${logId})`
+        processingMsg.thinking.elapsed = 1
+        processingMsg.thinking.active = false
+        fa.status = 'error'
+        fa.error = `无效的日志ID: ${logId}`
+        return
+      }
+
       try {
         updateThinking('正在解析日志文件，提取结构化事件…')
 
+        console.log(`[processFiles] runAnalysis: logId=${logId} model=${selectedModel.value}`)
         const analysisRes = await chatApi.runAnalysis(logId, selectedModel.value)
         if (analysisRes.data?.id) {
           updateThinking('日志解析完成，正在匹配错误模式并检索相关知识…')
 
           const detail = (await chatApi.getAnalysisResult(analysisRes.data.id)).data
           lastAnalysis.value = detail
-          const confidence = ((detail.confidence || 0) * 100).toFixed(0)
           const sources = detail.sources || detail.knowledge_sources || detail.references || []
 
-          const response = [
+          // 优先使用后端预生成的 Markdown，回退到前端组装
+          const response = detail.diagnosis_markdown || [
             `## ${fa.name} 的诊断结果`,
             '',
             '### 诊断摘要',
@@ -479,7 +555,7 @@ async function processFiles(files: FileAttachment[], text: string) {
             '### 根因分析',
             detail.root_cause || '根因待确认',
             '',
-            `诊断置信度：**${confidence}%**`,
+            `诊断置信度：**${((detail.confidence || 0) * 100).toFixed(0)}%**`,
             '',
             '### 建议措施',
             ...(detail.next_steps || []).map((s: string, i: number) => `${i + 1}. ${s}`),
@@ -491,32 +567,33 @@ async function processFiles(files: FileAttachment[], text: string) {
           processingMsg.thinking.active = false
           canGenerateReport.value = true
           fa.status = 'done'
-          await chatApi.saveMessage(currentChatId.value, 'assistant', response, sources).catch(() => { })
+
+          // 保存消息时包含思维链数据
+          const thinkingData = {
+            text: processingMsg.thinking.text,
+            elapsed: processingMsg.thinking.elapsed,
+          }
+          await chatApi.saveMessage(currentChatId.value, 'assistant', response, sources, thinkingData).catch(() => {})
         }
       } catch (e: any) {
-        processingMsg.content = `❌ 分析 \`${fa.name}\` 失败：${e.response?.data?.detail || e.message}`
+        processingMsg.content = `❌ 分析 \`${fa.name}\` 失败：${formatApiError(e)}`
         processingMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - analysisStartedAt) / 1000))
         processingMsg.thinking.active = false
         fa.status = 'error'
         fa.error = e.response?.data?.detail || e.message
       }
       msgListRef.value?.scrollToBottom()
-    } catch (e: any) {
-      fa.status = 'error'
-      fa.error = e.response?.data?.detail || e.message
-      addMessage('assistant', `❌ 上传 \`${fa.name}\` 失败：${e.response?.data?.detail || e.message}`)
-    }
-  }
+    }),
+  )
 }
 
 async function streamChat(text: string) {
-  loading.value = false
   const thinkStart = Date.now()
   const aId = thinkStart.toString()
   messageIds.add(aId)
   const assistantMsg: any = {
     id: aId, role: 'assistant', content: '', createdAt: thinkStart,
-    thinking: { elapsed: 0, text: '', active: true }, sources: [] as ChatSource[],
+    thinking: { elapsed: 0, text: '', active: false }, sources: [] as ChatSource[],
   }
   messages.value.push(assistantMsg)
   const replyMsg = messages.value[messages.value.length - 1]
@@ -537,15 +614,25 @@ async function streamChat(text: string) {
       replyMsg.content += token
       msgListRef.value?.scrollToBottom()
     },
-    (_model: string) => {
+    async (_model: string) => {
       const chat = recentChats.value.find(c => c.id === currentChatId.value)
       if (chat && chat.title === '新对话') chat.title = text.slice(0, 30)
       replyMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - thinkStart) / 1000))
       replyMsg.thinking.active = false
       msgListRef.value?.scrollToBottom()
+      
+      // 流式对话完成后保存消息，包含思维链数据（如果有）
+      if (currentChatId.value && replyMsg.content) {
+        const thinkingData = (replyMsg.thinking.text || replyMsg.thinking.elapsed > 0) ? {
+          text: replyMsg.thinking.text || '',
+          elapsed: replyMsg.thinking.elapsed
+        } : undefined
+        await chatApi.saveMessage(currentChatId.value, 'assistant', replyMsg.content, replyMsg.sources, thinkingData).catch(() => { })
+      }
     },
     (err: string) => {
       replyMsg.content = '❌ 流式回复失败：' + err
+      replyMsg.thinking.active = false
     },
     lastAnalysis.value,
     (reasoning: string) => {
@@ -558,22 +645,32 @@ async function streamChat(text: string) {
 }
 
 function addMessage(role: string, content: string, files?: MsgAttachment[]) {
-  const duplicate = messages.value.find(
-    m => m.role === role && m.content && m.content.slice(0, 100) === content.slice(0, 100)
-  )
-  if (duplicate) return
-
-  const id = Date.now().toString()
-  if (messageIds.has(id)) return
+  // 生成唯一ID，避免时间戳冲突
+  let id = Date.now().toString()
+  let attempts = 0
+  while (messageIds.has(id) && attempts < 100) {
+    id = (Date.now() + attempts).toString()
+    attempts++
+  }
+  
+  if (messageIds.has(id)) {
+    console.error('[addMessage] Failed to generate unique ID after 100 attempts')
+    return
+  }
+  
   messageIds.add(id)
 
-  messages.value.push({
+  const newMsg = {
     id,
     role: role as any,
     content,
     createdAt: Date.now(),
     files,
-  } as any)
+  } as any
+  
+  messages.value.push(newMsg)
+  console.log(`[addMessage] Added ${role} message, total: ${messages.value.length}`, newMsg)
+  
   setTimeout(() => msgListRef.value?.scrollToBottom(), 50)
 }
 
@@ -583,12 +680,22 @@ function formatSizeStr(bytes: number): string {
   return (bytes / 1048576).toFixed(1) + ' MB'
 }
 
+/** 格式化 API 错误信息（处理 FastAPI 422 返回的 detail 数组） */
+function formatApiError(e: any): string {
+  const detail = e.response?.data?.detail
+  if (Array.isArray(detail)) {
+    return detail.map((d: any) => d.msg || JSON.stringify(d)).join('; ')
+  }
+  if (typeof detail === 'string') return detail
+  return e.message || '未知错误'
+}
+
 async function generateDiagnosticReport() {
   ElMessage.info('报告生成功能开发中')
 }
 
 onMounted(() => {
-  selectedModel.value = localStorage.getItem('selectedModel') || 'mock'
+  selectedModel.value = localStorage.getItem('selectedModel') || 'deepseek-v4-flash'
   const savedChatId = sessionStorage.getItem('activeChatId')
   if (savedChatId) {
     const id = parseInt(savedChatId, 10)

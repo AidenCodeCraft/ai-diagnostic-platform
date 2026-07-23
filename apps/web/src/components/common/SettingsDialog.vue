@@ -95,6 +95,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { ElSelect, ElOption, ElButton } from 'element-plus'
+import { applyTheme, getSavedTheme, type ThemePreference } from '@/composables/useTheme'
 
 const props = defineProps<{
   visible: boolean
@@ -107,7 +108,7 @@ const emit = defineEmits<{
   (e: 'clearData'): void
 }>()
 
-const theme = ref(localStorage.getItem('theme') || 'light')
+const theme = ref<ThemePreference>(getSavedTheme())
 const language = ref('zh-CN')
 const activeTab = ref('general')
 
@@ -124,8 +125,9 @@ const themeOptions = [
   { value: 'system', label: '跟随系统', icon: '💻' },
 ]
 
-function updateTheme(value: string) {
+function updateTheme(value: ThemePreference) {
   theme.value = value
+  applyTheme(value)
   saveSettings()
 }
 
@@ -242,7 +244,7 @@ watch(() => props.visible, (v) => {
 }
 
 .settings-nav-item.active {
-  background: #eff6ff;
+  background: #edf3fe;
   color: #2563eb;
   font-weight: 500;
 }
@@ -313,7 +315,7 @@ watch(() => props.visible, (v) => {
 }
 
 .theme-switch button.active {
-  background: #eff6ff;
+  background: #edf3fe;
   border-color: #2563eb;
   color: #2563eb;
 }
