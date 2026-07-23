@@ -83,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, reactive } from 'vue'
+import { ref, computed, watch, onMounted, reactive, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '@/api/client'
@@ -211,31 +211,48 @@ async function newChat() {
 }
 
 async function selectChat(id: number) {
-  // 同一会话：仅导航不回源，避免覆盖刚发送但未入库的本地消息
-  if (id === currentChatId.value) {
+  // 已有完整本地消息时跳过；刷新后 messages 为空，必须重新拉取。
+  if (id === currentChatId.value && messages.value.length > 0) {
     router.push('/chat')
     return
   }
 
   try {
-    const { data: msgs } = await chatApi.getMessages(id)
+    loading.value = true
+    const { data } = await chatApi.getMessages(id)
+    const msgs = Array.isArray(data) ? data : []
+    
+    console.log(`[selectChat] id=${id} loaded ${msgs.length} messages`, msgs)
+    
     messageIds.clear()
     currentChatId.value = id
     messages.value = msgs.map((m: any) => ({
       id: m.id.toString(),
       role: m.role,
-      content: m.content,
+      content: m.content || '',
       createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
       files: extractFiles(m),
       sources: m.sources || [],
     }))
     messages.value.forEach((m: any) => messageIds.add(m.id))
     sessionStorage.setItem('activeChatId', String(id))
-    canGenerateReport.value = true
+    
+    // 检查是否有日志分析结果，如果有则可以生成报告
+    const hasAnalysis = msgs.some((m: any) => 
+      m.role === 'assistant' && m.content && m.content.includes('诊断结果')
+    )
+    canGenerateReport.value = hasAnalysis
+    
     router.push('/chat')
-    setTimeout(() => msgListRef.value?.scrollToBottom(), 100)
-  } catch {
-    ElMessage.error('加载对话失败')
+    loading.value = false
+    
+    // 等待DOM更新后滚动到底部
+    await nextTick()
+    setTimeout(() => msgListRef.value?.scrollToBottom(), 150)
+  } catch (err: any) {
+    console.error('[selectChat] error:', err)
+    ElMessage.error('加载对话失败: ' + (err.response?.data?.detail || err.message))
+    loading.value = false
   }
 }
 
@@ -377,9 +394,13 @@ async function sendMessage() {
   const userMsg = fileTag ? `${text}\n${fileTag}` : text
   addMessage('user', userMsg, attachments)
 
-  // 用户消息统一由前端持久化到 DB，确保 selectChat 能恢复完整历史（含文件标签）
+  // 用户消息先持久化，确保刷新后 selectChat 能恢复完整历史
   if (currentChatId.value) {
-    chatApi.saveMessage(currentChatId.value, 'user', userMsg).catch(() => { })
+    try {
+      await chatApi.saveMessage(currentChatId.value, 'user', userMsg)
+    } catch {
+      ElMessage.warning('用户消息保存失败，刷新后可能无法恢复')
+    }
   }
   loading.value = true
 
@@ -414,66 +435,68 @@ async function processFiles(files: FileAttachment[], text: string) {
       fa.status = 'parsing'
       const logId = resp.data.id
 
-      // 直接 push assistant 占位消息，绕过 addMessage 去重
-      const pId = Date.now().toString()
+      const analysisStartedAt = Date.now()
+      const pId = analysisStartedAt.toString()
       messageIds.add(pId)
-      messages.value.push({ id: pId, role: 'assistant', content: `🔍 正在分析 \`${fa.name}\`...`, createdAt: Date.now() })
+      messages.value.push({
+        id: pId,
+        role: 'assistant',
+        content: '',
+        createdAt: analysisStartedAt,
+        thinking: {
+          elapsed: 0,
+          active: true,
+          text: '正在读取日志文件并提取关键事件…',
+        },
+        sources: [] as ChatSource[],
+      })
       const processingMsg = messages.value[messages.value.length - 1]
 
-      try {
-        // 展示推理链路的渐进式思考过程
-        processingMsg.content = [
-          `## 🔍 分析中 — ${fa.name}`,
-          '',
-          '> 📋 **步骤 1/4**：正在解析日志文件，提取结构化事件...',
-        ].join('\n')
+      const updateThinking = (text: string) => {
+        processingMsg.thinking.text = text
+        processingMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - analysisStartedAt) / 1000))
         msgListRef.value?.scrollToBottom()
+      }
+
+      try {
+        updateThinking('正在解析日志文件，提取结构化事件…')
 
         const analysisRes = await chatApi.runAnalysis(logId, selectedModel.value)
         if (analysisRes.data?.id) {
-          processingMsg.content = [
-            `## 🔍 分析中 — ${fa.name}`,
-            '',
-            '> ✅ **步骤 1/4**：日志解析完成',
-            '> 🔎 **步骤 2/4**：匹配规则引擎，检索已知错误模式...',
-          ].join('\n')
-          msgListRef.value?.scrollToBottom()
+          updateThinking('日志解析完成，正在匹配错误模式并检索相关知识…')
 
           const detail = (await chatApi.getAnalysisResult(analysisRes.data.id)).data
           lastAnalysis.value = detail
           const confidence = ((detail.confidence || 0) * 100).toFixed(0)
+          const sources = detail.sources || detail.knowledge_sources || detail.references || []
 
-          // 完整分析报告：对齐提问流程参考文档的 Step4-7
           const response = [
-            `## 📊 分析报告 — ${fa.name}`,
+            `## ${fa.name} 的诊断结果`,
             '',
-            '> ✅ 日志解析 · 规则匹配 · 知识检索 · AI 综合分析',
-            '',
-            '---',
-            '',
-            `### 💡 诊断摘要`,
+            '### 诊断摘要',
             detail.summary || '分析完成',
             '',
-            `### 🎯 根因分析`,
+            '### 根因分析',
             detail.root_cause || '根因待确认',
             '',
-            `### 📈 置信度`,
-            `${confidence}%`,
+            `诊断置信度：**${confidence}%**`,
             '',
-            `### 📝 建议措施`,
+            '### 建议措施',
             ...(detail.next_steps || []).map((s: string, i: number) => `${i + 1}. ${s}`),
-            '',
-            '---',
-            `> 模型: ${detail.model || selectedModel.value} | 事件数: ${detail.event_count || '-'}`,
           ].join('\n')
 
           processingMsg.content = response
+          processingMsg.sources = sources
+          processingMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - analysisStartedAt) / 1000))
+          processingMsg.thinking.active = false
           canGenerateReport.value = true
           fa.status = 'done'
-          await chatApi.saveMessage(currentChatId.value, 'assistant', response).catch(() => { })
+          await chatApi.saveMessage(currentChatId.value, 'assistant', response, sources).catch(() => { })
         }
       } catch (e: any) {
         processingMsg.content = `❌ 分析 \`${fa.name}\` 失败：${e.response?.data?.detail || e.message}`
+        processingMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - analysisStartedAt) / 1000))
+        processingMsg.thinking.active = false
         fa.status = 'error'
         fa.error = e.response?.data?.detail || e.message
       }
@@ -581,7 +604,8 @@ onMounted(() => {
 .chat-layout {
   display: flex;
   height: 100vh;
-  background: #fff;
+  background: var(--chat-layout-bg);
+  color: var(--chat-layout-text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -593,9 +617,9 @@ onMounted(() => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 1px solid #e5e7eb;
-  background: #fff;
-  color: #6b7280;
+  border: 1px solid var(--chat-float-btn-border);
+  background: var(--chat-float-btn-bg);
+  color: var(--chat-float-btn-text);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -605,8 +629,8 @@ onMounted(() => {
 }
 
 .float-open-btn:hover {
-  background: #f3f4f6;
-  color: #1f2937;
+  background: var(--chat-float-btn-hover-bg);
+  color: var(--chat-float-btn-hover-text);
 }
 
 .menu-overlay {
@@ -618,8 +642,8 @@ onMounted(() => {
 .chat-menu-popup {
   position: fixed;
   z-index: 100;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--chat-popup-bg);
+  border: 1px solid var(--chat-popup-border);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   padding: 4px;
@@ -648,25 +672,25 @@ onMounted(() => {
   border: none;
   background: transparent;
   font-size: 13px;
-  color: #374151;
+  color: var(--chat-popup-text);
   cursor: pointer;
   border-radius: 6px;
   transition: background 0.1s;
 }
 
 .chat-menu-popup button:hover {
-  background: #f3f4f6;
+  background: var(--chat-popup-hover);
 }
 
 .chat-menu-popup button.danger:hover {
-  background: #fef2f2;
-  color: #ef4444;
+  background: var(--chat-popup-danger-hover-bg);
+  color: var(--chat-popup-danger-hover-text);
 }
 
 .chat-menu-popup hr {
   margin: 4px 0;
   border: none;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--chat-popup-border);
 }
 
 .chat-main {
@@ -676,6 +700,7 @@ onMounted(() => {
   min-width: 0;
   position: relative;
   overflow: hidden;
+  background: var(--chat-main-bg);
 }
 
 .sub-page {
@@ -703,8 +728,7 @@ onMounted(() => {
   justify-content: center;
   padding: 12px 24px 20px;
   width: 100%;
-  max-width: 768px;
-  margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .file-preview-content {

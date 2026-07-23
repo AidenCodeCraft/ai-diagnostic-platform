@@ -39,7 +39,13 @@
       ></textarea>
       <div class="input-actions">
         <div class="actions-left">
-          <el-select :model-value="selectedModel" size="small" class="model-select" @update:model-value="emit('modelChange', $event as string)">
+          <el-select
+            :model-value="selectedModel"
+            size="small"
+            class="model-select"
+            popper-class="model-select-popper"
+            @update:model-value="emit('modelChange', $event as string)"
+          >
             <el-option label="Mock (开发模式)" value="mock" />
             <el-option label="DeepSeek" value="deepseek" />
           </el-select>
@@ -130,15 +136,16 @@ function statusText(fa: FileAttachment): string {
 <style scoped>
 .input-container {
   width: 100%;
-  max-width: 768px;
+  max-width: var(--chat-content-width);
+  margin: 0 auto;
 }
 
 .upload-area {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  background: #e5e7eb;
-  border: 1px solid #d1d5db;
+  background: var(--chat-upload-area-bg);
+  border: 1px solid var(--chat-upload-area-border);
   border-bottom: none;
   border-radius: 10px 10px 0 0;
   overflow: hidden;
@@ -151,17 +158,17 @@ function statusText(fa: FileAttachment): string {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: #fff;
-  border-bottom: 1px solid #f3f4f6;
+  background: var(--chat-upload-card-bg);
+  border-bottom: 1px solid var(--chat-upload-card-border);
 }
 
-.ufc-icon { color: #2563eb; flex-shrink: 0; }
+.ufc-icon { color: var(--chat-upload-icon); flex-shrink: 0; }
 .ufc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ufc-name { font-size: 13px; color: #1f2937; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ufc-size { font-size: 11px; color: #9ca3af; }
+.ufc-name { font-size: 13px; color: var(--chat-upload-name); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ufc-size { font-size: 11px; color: var(--chat-upload-size); }
 .ufc-progress-wrap { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.ufc-progress { flex: 1; height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
-.ufc-progress-bar { height: 100%; border-radius: 2px; transition: width 0.3s; background: #2563eb; }
+.ufc-progress { flex: 1; height: 4px; background: var(--chat-upload-progress-bg); border-radius: 2px; overflow: hidden; }
+.ufc-progress-bar { height: 100%; border-radius: 2px; transition: width 0.3s; background: var(--chat-upload-progress-bar); }
 .ufc-progress-bar.done { background: #22c55e; }
 .ufc-progress-bar.error { background: #ef4444; }
 .ufc-status { font-size: 11px; white-space: nowrap; }
@@ -181,17 +188,17 @@ function statusText(fa: FileAttachment): string {
 }
 
 .input-box {
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--chat-input-border);
+  border-radius: 16px;
+  background: var(--chat-input-bg);
+  box-shadow: var(--chat-input-shadow);
   transition: border-color 0.15s, box-shadow 0.15s;
   overflow: hidden;
 }
 
 .input-box:focus-within {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  border-color: var(--chat-input-focus-border);
+  box-shadow: 0 0 0 3px var(--chat-input-focus-ring);
 }
 
 .msg-textarea {
@@ -203,12 +210,12 @@ function statusText(fa: FileAttachment): string {
   font-size: 15px;
   line-height: 1.6;
   font-family: inherit;
-  color: #1f2937;
+  color: var(--chat-input-text);
   background: transparent;
   min-height: 48px;
 }
 
-.msg-textarea::placeholder { color: #9ca3af; }
+.msg-textarea::placeholder { color: var(--chat-input-placeholder); }
 
 .input-actions {
   display: flex;
@@ -228,14 +235,19 @@ function statusText(fa: FileAttachment): string {
 :deep(.model-select .el-input__wrapper) {
   border-radius: 20px;
   box-shadow: none !important;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--chat-select-border);
+  background: var(--chat-select-bg);
   padding: 0 12px;
   height: 30px;
   font-size: 13px;
 }
 
+:deep(.model-select .el-input__inner) {
+  color: var(--chat-select-text);
+}
+
 :deep(.model-select .el-input__wrapper:hover) {
-  border-color: #d1d5db;
+  border-color: var(--chat-select-hover-border);
 }
 
 .action-btn {
@@ -245,15 +257,15 @@ function statusText(fa: FileAttachment): string {
   height: 30px;
   padding: 0 10px;
   border-radius: 20px;
-  border: 1px solid #e5e7eb;
-  background: #fff;
-  color: #6b7280;
+  border: 1px solid var(--chat-input-action-border);
+  background: var(--chat-input-action-bg);
+  color: var(--chat-input-action-text);
   cursor: pointer;
   font-size: 13px;
   transition: all 0.15s;
 }
 
-.action-btn:hover { background: #f3f4f6; color: #374151; }
+.action-btn:hover { background: var(--chat-input-action-hover-bg); color: var(--chat-input-action-hover-text); }
 .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .attach-btn {
@@ -272,10 +284,10 @@ function statusText(fa: FileAttachment): string {
 .send-btn { width: 30px; padding: 0; justify-content: center; }
 
 .send-btn.active {
-  background: #2563eb;
-  border-color: #2563eb;
+  background: var(--chat-input-send-active-bg);
+  border-color: var(--chat-input-send-active-border);
   color: #fff;
 }
 
-.send-btn.active:hover { background: #1d4ed8; }
+.send-btn.active:hover { filter: brightness(1.08); }
 </style>
