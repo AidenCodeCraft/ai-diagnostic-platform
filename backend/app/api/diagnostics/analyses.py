@@ -43,11 +43,17 @@ def create_analysis(
 def run_analysis(
     log_id: int = Query(...),
     model: Optional[str] = Query(default=None),
+    user_query: Optional[str] = Query(default=None, max_length=2000),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
-    """Create and execute an analysis task for the given log."""
+    """Create and execute an analysis task for the given log.
+
+    user_query: 用户的问题描述，用于引导 RAG 检索和 AI 分析方向。
+    """
     try:
-        return AnalysisTaskService(db).run_analysis(log_id, model=model)
+        return AnalysisTaskService(db).run_analysis(
+            log_id=log_id, model=model, user_query=user_query,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except FileNotFoundError as exc:

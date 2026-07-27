@@ -1,0 +1,47 @@
+# AI Diagnostic Platform — Kustomize 多环境管理
+# 使用:
+#   kubectl apply -k deploy/k8s/overlays/staging
+#   kubectl apply -k deploy/k8s/overlays/production
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ai-diagnostic
+
+resources:
+  - ai-diagnostic-deployment.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/part-of: ai-diagnostic-platform
+
+images:
+  - name: registry.example.com/ai-diagnostic/backend
+    newTag: latest
+  - name: registry.example.com/ai-diagnostic/frontend
+    newTag: latest
+
+# 将 ConfigMap 从 YAML 中提取到生成器（解决 overlays merge 冲突）
+configMapGenerator:
+  - name: backend-config
+    options:
+      disableNameSuffixHash: true
+    literals:
+      - APP_NAME=AI Diagnostic Platform
+      - VERSION=1.0.0
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - LLM_PROVIDER=deepseek
+      - DEEPSEEK_MODEL=deepseek-chat
+      - EMBEDDING_PROVIDER=deepseek
+      - MILVUS_ENABLED=true
+      - MILVUS_HOST=milvus.ai-diagnostic.svc.cluster.local
+      - MILVUS_PORT=19530
+      - MILVUS_COLLECTION=knowledge_docs
+      - MILVUS_DIM=1536
+      - UPLOAD_DIR=/data/uploads
+      - PROMETHEUS_METRICS_ENABLED=true
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_PER_MINUTE=60
+      - LOG_DESENSITIZE_ENABLED=true

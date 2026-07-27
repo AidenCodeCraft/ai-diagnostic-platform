@@ -43,10 +43,18 @@ class AnalysisTaskService:
         self.db.refresh(analysis)
         return analysis
 
-    def run_analysis(self, log_id: int, model: Optional[str] = None) -> Dict[str, Any]:
+    def run_analysis(
+        self, log_id: int, model: Optional[str] = None,
+        user_query: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Create and execute an analysis task end-to-end.
 
         Flow: pending → running → completed|failed
+        
+        Args:
+            log_id: 日志ID
+            model: LLM 模型名
+            user_query: 用户的问题描述，用于引导分析方向
         """
         # Create or reuse existing analysis
         analysis = self.db.query(Analysis).filter(
@@ -62,7 +70,7 @@ class AnalysisTaskService:
         self.db.refresh(analysis)
 
         try:
-            result = self._execute_analysis(analysis)
+            result = self._execute_analysis(analysis, user_query=user_query or "")
             analysis.status = "completed"
             self.db.commit()
             self.db.refresh(analysis)
@@ -74,7 +82,9 @@ class AnalysisTaskService:
             self.db.commit()
             raise
 
-    def _execute_analysis(self, analysis: Analysis) -> Dict[str, Any]:
+    def _execute_analysis(
+        self, analysis: Analysis, user_query: str = "",
+    ) -> Dict[str, Any]:
         """Core analysis: verify → pipeline(parse → rules → RAG → LLM) → persist."""
         log = self._get_log(analysis.log_id)
 
@@ -90,7 +100,7 @@ class AnalysisTaskService:
         # Run full diagnostic pipeline (Rule Engine + RAG + LLM)
         from app.services.diagnostics.diagnosis_pipeline import DiagnosisPipeline
         pipeline = DiagnosisPipeline(self.db, model=analysis.model)
-        result = pipeline.run(str(file_path), user_query="")
+        result = pipeline.run(str(file_path), user_query=user_query or "")
 
         # Persist
         analysis.result = json.dumps(result)

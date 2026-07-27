@@ -14,6 +14,8 @@ from app.api.admin.users import router as users_router
 from app.api.chat.chat_sessions import router as chat_sessions_router
 from app.api.chat.agents import router as agents_router
 from app.api.chat.agent_tasks import router as agent_tasks_router
+from app.api.chat.function_calling import router as function_calling_router
+from app.api.chat.supervisor import router as supervisor_router
 
 # ── Diagnostics ──────────────────────────────────────────────
 from app.api.diagnostics.logs import router as logs_router
@@ -25,6 +27,7 @@ from app.api.diagnostics.reports import router as reports_router
 # ── Knowledge ────────────────────────────────────────────────
 from app.api.knowledge import router as knowledge_router
 from app.api.knowledge.plugins import router as plugins_router
+from app.api.knowledge.vector import router as vector_router
 
 # ── System ───────────────────────────────────────────────────
 from app.api.system.organizations import router as organizations_router
@@ -48,6 +51,8 @@ api_router.include_router(users_router)
 api_router.include_router(chat_sessions_router)
 api_router.include_router(agents_router)
 api_router.include_router(agent_tasks_router)
+api_router.include_router(function_calling_router)
+api_router.include_router(supervisor_router)
 
 # Diagnostics
 api_router.include_router(logs_router)
@@ -59,6 +64,7 @@ api_router.include_router(reports_router)
 # Knowledge
 api_router.include_router(knowledge_router)
 api_router.include_router(plugins_router)
+api_router.include_router(vector_router)
 
 # System
 api_router.include_router(organizations_router)

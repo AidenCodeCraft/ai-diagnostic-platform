@@ -52,9 +52,25 @@
             </blockquote>
           </div>
           <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active" class="message-actions">
-            <button class="copy-button" :class="{ copied: copiedId === msg.id }" @click="copyMessage(msg)">
+            <button class="action-btn" :class="{ active: copiedId === msg.id }" @click="copyMessage(msg)" :title="copiedId === msg.id ? '已复制' : '复制回复'">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-              {{ copiedId === msg.id ? '已复制' : '复制' }}
+            </button>
+            <button class="action-btn" @click="regenerateMessage(msg)" title="重新生成">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </button>
+            <button class="action-btn" :class="{ active: msg._liked }" @click="likeMessage(msg)" title="有帮助">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+            </button>
+            <button class="action-btn" :class="{ active: msg._disliked }" @click="dislikeMessage(msg)" title="无帮助">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
+            </button>
+          </div>
+          <div v-else-if="msg.role === 'user' && msg.content" class="message-actions">
+            <button class="action-btn" @click="editMessage(msg)" title="编辑">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            </button>
+            <button class="action-btn" @click="copyMessage(msg)" title="复制">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
           </div>
         </div>
@@ -78,7 +94,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 import { useFormat } from '@/composables/useFormat'
 
 const { formatFileSize, fileIcon } = useFormat()
@@ -89,9 +105,11 @@ const props = defineProps<{
   isEmpty?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'previewFile', file: { name: string; size: number; type: string }): void
   (e: 'openKnowledge', source: { id?: number; title: string }): void
+  (e: 'regenerate', msg: any): void
+  (e: 'editMessage', msg: any): void
 }>()
 
 // 按 createdAt 升序排列
@@ -115,7 +133,7 @@ function renderContent(text: string, hasFiles?: boolean, sources: any[] = [], me
     display = display.replace(/\n?\[上传文件:.*?\]/g, '')
   }
   try {
-    const content = marked.parse(display) as string
+    const content = renderMarkdown(display)
     return addInlineCitations(content, sources, messageId)
   } catch {
     return display.replace(/\n/g, '<br>')
@@ -201,6 +219,26 @@ async function copyMessage(msg: any) {
   }
   copiedId.value = msg.id
   window.setTimeout(() => { if (copiedId.value === msg.id) copiedId.value = null }, 1600)
+}
+
+function regenerateMessage(msg: any) {
+  emit('regenerate', msg)
+}
+
+function editMessage(msg: any) {
+  emit('editMessage', msg)
+}
+
+function likeMessage(msg: any) {
+  msg._liked = !msg._liked
+  if (msg._liked) msg._disliked = false
+  // TODO: 后端持久化点赞状态
+}
+
+function dislikeMessage(msg: any) {
+  msg._disliked = !msg._disliked
+  if (msg._disliked) msg._liked = false
+  // TODO: 后端持久化点踩状态
 }
 
 defineExpose({ scrollToBottom })
@@ -418,27 +456,95 @@ function scrollToBottom() {
   margin: 2px 0;
 }
 
+/* 行内代码 */
 .msg-content :deep(code) {
   background: var(--chat-msg-code-bg);
-  padding: 1px 5px;
-  border-radius: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
   font-size: 13px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
 }
 
-.msg-content :deep(pre) {
+/* 代码块容器 */
+.msg-content :deep(.code-block-wrapper) {
+  position: relative;
+  margin: 12px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--chat-msg-pre-bg);
+  border: 1px solid var(--chat-msg-pre-border);
+}
+
+.msg-content :deep(.code-block-header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.05);
+  border-bottom: 1px solid var(--chat-msg-pre-border);
+}
+
+.msg-content :deep(.code-block-lang) {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--chat-msg-pre-text);
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.msg-content :deep(.code-block-copy) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--chat-msg-pre-text);
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: all 0.15s;
+}
+
+.msg-content :deep(.code-block-copy:hover) {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.msg-content :deep(.code-block-copy.copied) {
+  color: #10b981;
+}
+
+.msg-content :deep(.code-block-wrapper pre) {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--chat-msg-pre-bg);
+  color: var(--chat-msg-pre-text);
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.msg-content :deep(.code-block-wrapper pre code) {
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+/* 兼容旧样式的普通 pre */
+.msg-content :deep(pre:not(.code-block-wrapper pre)) {
   background: var(--chat-msg-pre-bg);
   color: var(--chat-msg-pre-text);
   border: 1px solid var(--chat-msg-pre-border);
   padding: 14px 16px;
-  border-radius: 10px;
+  border-radius: 8px;
   overflow-x: auto;
   margin: 10px 0;
-}
-
-.msg-content :deep(pre code) {
-  background: none;
-  padding: 0;
-  color: inherit;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .msg-content :deep(blockquote) {
@@ -448,22 +554,51 @@ function scrollToBottom() {
   margin: 6px 0;
 }
 
+/* 表格容器 - 支持横向滚动 */
+.msg-content :deep(.table-wrapper) {
+  overflow-x: auto;
+  margin: 12px 0;
+  border-radius: 8px;
+  border: 1px solid var(--chat-msg-table-border);
+}
+
 .msg-content :deep(table) {
   border-collapse: collapse;
   width: 100%;
-  margin: 6px 0;
-}
-
-.msg-content :deep(th),
-.msg-content :deep(td) {
-  border: 1px solid var(--chat-msg-table-border);
-  padding: 6px 10px;
+  margin: 0;
   font-size: 13px;
 }
 
-.msg-content :deep(th) {
+.msg-content :deep(thead) {
   background: var(--chat-msg-table-head-bg);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.msg-content :deep(th) {
+  padding: 10px 12px;
   font-weight: 600;
+  text-align: left;
+  border: 1px solid var(--chat-msg-table-border);
+  white-space: nowrap;
+}
+
+.msg-content :deep(td) {
+  padding: 8px 12px;
+  border: 1px solid var(--chat-msg-table-border);
+}
+
+.msg-content :deep(tbody tr:hover) {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.msg-content :deep(tbody tr:nth-child(even)) {
+  background: rgba(0, 0, 0, 0.01);
+}
+
+.msg-content :deep(tbody tr:nth-child(even):hover) {
+  background: rgba(0, 0, 0, 0.03);
 }
 
 .msg-content :deep(strong) {
@@ -517,10 +652,12 @@ function scrollToBottom() {
 .source-detail strong { font-size: 12px; font-weight: 600; }
 .source-detail small { font-size: 11px; color: var(--chat-source-muted); }
 .source-open { margin-left: auto; border: 0; padding: 4px; background: transparent; color: var(--chat-source-link); font-size: 12px; cursor: pointer; white-space: nowrap; }
-.message-actions { display: flex; margin-top: 10px; }
-.copy-button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; color: var(--chat-copy-text); background: transparent; border: 0; border-radius: 6px; font-size: 12px; cursor: pointer; }
-.copy-button:hover { background: var(--chat-copy-hover-bg); color: var(--chat-copy-hover-text); }
-.copy-button.copied { color: #6ed49a; }
+.message-actions { display: flex; gap: 4px; margin-top: 10px; opacity: 0.7; transition: opacity 0.2s; }
+.message-row:hover .message-actions { opacity: 1; }
+.action-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--chat-copy-text); background: transparent; border: 0; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+.action-btn:hover { background: var(--chat-copy-hover-bg); color: var(--chat-copy-hover-text); }
+.action-btn.active { color: #2563eb; background: #eff6ff; }
+.action-btn svg { flex-shrink: 0; }
 
 .msg-content :deep(.inline-citation) { display: inline-flex; align-items: center; justify-content: center; min-width: 19px; height: 19px; margin-left: 3px; padding: 0 4px; border-radius: 5px; background: var(--chat-citation-bg); color: var(--chat-citation-text); font-size: 11px; font-weight: 600; line-height: 1; text-decoration: none; vertical-align: middle; }
 .msg-content :deep(.inline-citation:hover) { background: var(--chat-citation-hover-bg); color: var(--chat-citation-hover-text); }

@@ -11,9 +11,9 @@ from app.services.parser.kernel_parser import KernelLogParser
 from app.services.parser.linux_parser import LinuxSyslogParser
 from app.services.parser.registry import ParserRegistry
 from app.services.parser.log_reader import LogReader
-from app.services.parser_service import LogParserService
-from app.services.rule_engine import RuleEngine
-from app.schemas.parser import ParseResult, ParsedEventSchema
+from app.services.diagnostics.parser_service import LogParserService
+from app.services.system.rule_engine import RuleEngine
+from app.schemas.diagnostics.parser import ParseResult, ParsedEventSchema
 
 
 # ------------------------------------------------------------------

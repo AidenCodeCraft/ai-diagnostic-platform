@@ -26,6 +26,19 @@ class Settings(BaseSettings):
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1/chat/completions"
     DEEPSEEK_MODEL: str = "deepseek-chat"
 
+    # ── Milvus (Vector Database) ────────────────────────────
+    MILVUS_HOST: str = "localhost"
+    MILVUS_PORT: int = 19530
+    MILVUS_COLLECTION: str = "knowledge_docs"
+    MILVUS_DIM: int = 1536  # embedding dimension (default: OpenAI ada-002)
+    MILVUS_ENABLED: bool = False  # 启用 Milvus（未部署时自动回退到关键词搜索）
+    MILVUS_USER: str = ""
+    MILVUS_PASSWORD: str = ""
+
+    # ── Embedding ────────────────────────────────────────────
+    EMBEDDING_PROVIDER: str = "deepseek"  # 使用 LLM provider 生成 embedding
+    EMBEDDING_BATCH_SIZE: int = 32        # 批量嵌入大小
+
     @field_validator("DEBUG", mode="before")
     @classmethod
     def parse_debug(cls, v: object) -> bool:

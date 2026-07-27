@@ -1,0 +1,165 @@
+{
+  "__dashboard_meta": {
+    "title": "AI Diagnostic Platform — Backend Overview",
+    "description": "后端服务核心指标仪表盘：QPS、延迟、错误率、资源使用、HPA状态",
+    "tags": ["ai-diagnostic", "backend", "fastapi"],
+    "refresh": "30s",
+    "time": "now-6h",
+    "uid": "ai-diagnostic-backend"
+  },
+  "dashboard": {
+    "uid": "ai-diagnostic-backend",
+    "title": "AI Diagnostic — Backend Overview",
+    "tags": ["ai-diagnostic", "backend"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "refresh": "30s",
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "query": "prometheus",
+          "current": { "text": "Prometheus", "value": "Prometheus" }
+        },
+        {
+          "name": "pod",
+          "type": "query",
+          "query": "label_values(up{job=\"ai-diagnostic-backend\"}, pod)",
+          "multi": true,
+          "includeAll": true,
+          "label": "Pod"
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Request Rate (QPS)",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [{
+          "expr": "sum(rate(http_requests_total{job=\"ai-diagnostic-backend\"}[1m])) by (method, path)",
+          "legendFormat": "{{method}} {{path}}"
+        }],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 50 }, { "color": "red", "value": 200 }] }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Error Rate (5xx)",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+        "targets": [{
+          "expr": "rate(http_requests_total{job=\"ai-diagnostic-backend\",status=~\"5..\"}[5m])",
+          "legendFormat": "{{pod}}"
+        }],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Latency (P50/P90/P99)",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"ai-diagnostic-backend\"}[5m])) by (le))",
+            "legendFormat": "P50"
+          },
+          {
+            "expr": "histogram_quantile(0.90, sum(rate(http_request_duration_seconds_bucket{job=\"ai-diagnostic-backend\"}[5m])) by (le))",
+            "legendFormat": "P90"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"ai-diagnostic-backend\"}[5m])) by (le))",
+            "legendFormat": "P99"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "s" } }
+      },
+      {
+        "id": 4,
+        "title": "CPU Usage",
+        "type": "gauge",
+        "gridPos": { "x": 0, "y": 16, "w": 4, "h": 6 },
+        "targets": [{
+          "expr": "avg(rate(container_cpu_usage_seconds_total{namespace=\"ai-diagnostic\",container=\"backend\"}[5m])) * 100",
+          "legendFormat": "CPU"
+        }],
+        "fieldConfig": { "defaults": { "unit": "percent", "max": 100 } }
+      },
+      {
+        "id": 5,
+        "title": "Memory Usage",
+        "type": "gauge",
+        "gridPos": { "x": 4, "y": 16, "w": 4, "h": 6 },
+        "targets": [{
+          "expr": "container_memory_usage_bytes{namespace=\"ai-diagnostic\",container=\"backend\"} / container_spec_memory_limit_bytes * 100",
+          "legendFormat": "Memory"
+        }],
+        "fieldConfig": { "defaults": { "unit": "percent", "max": 100 } }
+      },
+      {
+        "id": 6,
+        "title": "HPA Replicas",
+        "type": "stat",
+        "gridPos": { "x": 8, "y": 16, "w": 4, "h": 6 },
+        "targets": [{
+          "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"ai-diagnostic\"}",
+          "legendFormat": "Replicas"
+        }]
+      },
+      {
+        "id": 7,
+        "title": "Open Connections",
+        "type": "stat",
+        "gridPos": { "x": 12, "y": 16, "w": 4, "h": 6 },
+        "targets": [{
+          "expr": "sum(pg_stat_database_numbackends{datname=\"diagnostic\"})",
+          "legendFormat": "DB Connections"
+        }]
+      },
+      {
+        "id": 8,
+        "title": "Rate Limit Rejections",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+        "targets": [{
+          "expr": "rate(http_ratelimit_rejected_total{job=\"ai-diagnostic-backend\"}[5m])",
+          "legendFormat": "{{pod}} - {{path}}"
+        }],
+        "fieldConfig": { "defaults": { "unit": "reqps" } }
+      },
+      {
+        "id": 9,
+        "title": "HTTP Status Codes",
+        "type": "piechart",
+        "gridPos": { "x": 0, "y": 22, "w": 12, "h": 6 },
+        "targets": [{
+          "expr": "sum(rate(http_requests_total{job=\"ai-diagnostic-backend\"}[1h])) by (status)",
+          "legendFormat": "{{status}}"
+        }]
+      },
+      {
+        "id": 10,
+        "title": "Database Query Duration",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 22, "w": 12, "h": 6 },
+        "targets": [{
+          "expr": "histogram_quantile(0.95, rate(db_query_duration_seconds_bucket[5m]))",
+          "legendFormat": "P95 DB Query"
+        }],
+        "fieldConfig": { "defaults": { "unit": "s" } }
+      }
+    ]
+  }
+}

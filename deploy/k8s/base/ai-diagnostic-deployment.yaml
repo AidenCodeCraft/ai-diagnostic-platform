@@ -1,0 +1,704 @@
+# ============================================================================
+# AI Diagnostic Platform — Kubernetes 生产级部署配置
+# ============================================================================
+# 使用 Kustomize 管理多环境：base/ + overlays/{staging,production}
+#
+# 部署架构：
+#   Namespace: ai-diagnostic
+#   Services:  backend (FastAPI) + frontend (Nginx) + postgres + redis + milvus
+#   HA:        HPA 自动扩缩容 + PodDisruptionBudget + anti-affinity
+#   存储:      PVC (postgres, uploads)
+#   网络:      NetworkPolicy (零信任)
+#   入口:      Ingress (nginx-ingress) + TLS 终结
+# ============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-diagnostic
+  labels:
+    app.kubernetes.io/part-of: ai-diagnostic-platform
+    pod-security.kubernetes.io/enforce: restricted
+---
+# ═══════════════════════════════════════════════════════════
+# ConfigMap 由 Kustomize configMapGenerator 生成
+# ═══════════════════════════════════════════════════════════
+---
+# ═══════════════════════════════════════════════════════════
+# Secret — 敏感配置（生产环境使用 sealed-secrets 或 vault）
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-secrets
+  namespace: ai-diagnostic
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql://ai:CHANGE_ME_IN_PRODUCTION@postgres:5432/diagnostic"
+  REDIS_URL: "redis://redis:6379/0"
+  DEEPSEEK_API_KEY: "CHANGE_ME"
+  DEEPSEEK_BASE_URL: "https://api.deepseek.com/v1"
+  MILVUS_USER: ""
+  MILVUS_PASSWORD: ""
+  SECRET_KEY: "CHANGE_ME_GENERATE_RANDOM_64_CHAR"
+  POSTGRES_USER: "ai"
+  POSTGRES_PASSWORD: "CHANGE_ME_IN_PRODUCTION"
+  POSTGRES_DB: "diagnostic"
+---
+# ═══════════════════════════════════════════════════════════
+# Backend Deployment
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: ai-diagnostic
+  labels:
+    app: backend
+    version: v1
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        version: v1
+    spec:
+      # Pod 反亲和 — 分散到不同节点
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: backend
+                topologyKey: kubernetes.io/hostname
+      # 优雅终止
+      terminationGracePeriodSeconds: 60
+      # 安全上下文
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: backend
+          image: registry.example.com/ai-diagnostic/backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          # ── 健康检查 ──────────────────────────────────
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 18
+          # ── 资源限制 ─────────────────────────────────
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2048Mi"
+          # ── 环境变量 ─────────────────────────────────
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: backend-secrets
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          volumeMounts:
+            - name: upload-data
+              mountPath: /data/uploads
+            - name: tmp
+              mountPath: /tmp
+          # 就绪前等待数据库迁移完成
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+      volumes:
+        - name: upload-data
+          persistentVolumeClaim:
+            claimName: backend-uploads
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+---
+# ═══════════════════════════════════════════════════════════
+# Backend Service
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: ai-diagnostic
+  labels:
+    app: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+  sessionAffinity: None
+---
+# ═══════════════════════════════════════════════════════════
+# Backend HPA (Horizontal Pod Autoscaler)
+# ═══════════════════════════════════════════════════════════
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-hpa
+  namespace: ai-diagnostic
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+      selectPolicy: Max
+---
+# ═══════════════════════════════════════════════════════════
+# Backend PodDisruptionBudget
+# ═══════════════════════════════════════════════════════════
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend-pdb
+  namespace: ai-diagnostic
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: backend
+---
+# ═══════════════════════════════════════════════════════════
+# Frontend Deployment
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: ai-diagnostic
+  labels:
+    app: frontend
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 80
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: frontend
+                topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+      containers:
+        - name: frontend
+          image: registry.example.com/ai-diagnostic/frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+---
+# ═══════════════════════════════════════════════════════════
+# Frontend Service
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: ai-diagnostic
+spec:
+  type: ClusterIP
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+# ═══════════════════════════════════════════════════════════
+# PostgreSQL StatefulSet
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: ai-diagnostic
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      securityContext:
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: POSTGRES_DB
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ai", "-d", "diagnostic"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ai", "-d", "diagnostic"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "4096Mi"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: ssd
+        resources:
+          requests:
+            storage: 50Gi
+---
+# ═══════════════════════════════════════════════════════════
+# PostgreSQL Service
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ai-diagnostic
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for StatefulSet
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+# ═══════════════════════════════════════════════════════════
+# Redis Deployment
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: ai-diagnostic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+# ═══════════════════════════════════════════════════════════
+# Redis Service
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: ai-diagnostic
+spec:
+  type: ClusterIP
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+# ═══════════════════════════════════════════════════════════
+# PVC — 上传文件持久化
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backend-uploads
+  namespace: ai-diagnostic
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs  # 需要 ReadWriteMany，使用 NFS 或对象存储
+  resources:
+    requests:
+      storage: 20Gi
+---
+# ═══════════════════════════════════════════════════════════
+# NetworkPolicy — 零信任网络策略
+# ═══════════════════════════════════════════════════════════
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-policy
+  namespace: ai-diagnostic
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 仅允许 frontend 和 ingress-controller 访问
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - port: 8000
+    # Prometheus 抓取
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - port: 8000
+  egress:
+    # 允许 DNS 查询
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+    # 允许访问 postgres
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - port: 5432
+    # 允许访问 redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+    # 允许出站 HTTP/HTTPS（LLM API 调用）
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 443
+        - port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-policy
+  namespace: ai-diagnostic
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: backend
+      ports:
+        - port: 5432
+---
+# ═══════════════════════════════════════════════════════════
+# Ingress — 外部入口
+# ═══════════════════════════════════════════════════════════
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: platform-ingress
+  namespace: ai-diagnostic
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "200m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/limit-connections: "100"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://ai-diagnostic.example.com"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.ai-diagnostic.example.com
+        - ai-diagnostic.example.com
+      secretName: platform-tls
+  rules:
+    - host: api.ai-diagnostic.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+    - host: ai-diagnostic.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+---
+# ═══════════════════════════════════════════════════════════
+# ResourceQuota — 命名空间资源配额
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: namespace-quota
+  namespace: ai-diagnostic
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: "16Gi"
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+    persistentvolumeclaims: "5"
+    requests.storage: "100Gi"
+    pods: "30"
+    services: "10"
+    configmaps: "20"
+    secrets: "20"
+---
+# ═══════════════════════════════════════════════════════════
+# LimitRange — 默认容器限制
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: container-limits
+  namespace: ai-diagnostic
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+      max:
+        cpu: "4000m"
+        memory: "8192Mi"
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+---
+# ═══════════════════════════════════════════════════════════
+# ServiceMonitor — Prometheus 自动发现
+# ═══════════════════════════════════════════════════════════
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: backend-monitor
+  namespace: ai-diagnostic
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: backend
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - ai-diagnostic

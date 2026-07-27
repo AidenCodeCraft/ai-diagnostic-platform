@@ -113,9 +113,10 @@ export const chatApi = {
       timeout: 60000, // 大文件上传需要更长超时
     })
   },
-  runAnalysis(logId: number, model?: string) {
+  runAnalysis(logId: number, model?: string, userQuery?: string) {
     const params: any = { log_id: logId }
     if (model) params.model = model
+    if (userQuery) params.user_query = userQuery
     // 诊断流水线（解析+RAG+LLM）可能需要 60-120s，给足超时
     return client.post('/analyses/run', null, { params, timeout: 180000 })
   },

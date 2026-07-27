@@ -1,0 +1,94 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ai-diagnostic
+
+resources:
+  - ../../base
+
+namePrefix: prod-
+
+patches:
+  # 生产环境：4 副本 + 严格资源限制
+  - patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 4
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "1000m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "1024Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "4000m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "4096Mi"
+    target:
+      kind: Deployment
+      name: backend
+  - patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 3
+    target:
+      kind: Deployment
+      name: frontend
+  # HPA 生产策略
+  - patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 4
+      - op: replace
+        path: /spec/maxReplicas
+        value: 20
+    target:
+      kind: HorizontalPodAutoscaler
+      name: backend-hpa
+  # Postgres 生产资源
+  - patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "1000m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "2048Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "4000m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "8192Mi"
+    target:
+      kind: StatefulSet
+      name: postgres
+  # 生产域名
+  - patch: |
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: api.ai-diagnostic.example.com
+      - op: replace
+        path: /spec/tls/0/hosts/1
+        value: ai-diagnostic.example.com
+      - op: replace
+        path: /spec/rules/0/host
+        value: api.ai-diagnostic.example.com
+      - op: replace
+        path: /spec/rules/1/host
+        value: ai-diagnostic.example.com
+    target:
+      kind: Ingress
+      name: platform-ingress
+
+configMapGenerator:
+  - name: backend-config
+    behavior: merge
+    literals:
+      - DEBUG="false"
+      - LOG_LEVEL="WARNING"
+      - RATE_LIMIT_ENABLED="true"
+      - RATE_LIMIT_PER_MINUTE="60"
+      - LOG_DESENSITIZE_ENABLED="true"
+      - PROMETHEUS_METRICS_ENABLED="true"

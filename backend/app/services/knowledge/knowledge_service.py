@@ -97,56 +97,172 @@ class KnowledgeService:
         page: int = 1,
         page_size: int = 20,
     ) -> Dict[str, Any]:
-        """Hybrid search: tries vector search first, falls back to keyword.
+        """Hybrid search: tries vector search (Milvus) first, falls back to keyword.
 
-        Vector search via Milvus (production) or FAISS (development).
-        Keyword search via SQL ILIKE as final fallback.
+        Search pipeline:
+        1. Try Milvus vector search (semantic)
+        2. If no results, try keyword phrase search (exact match)
+        3. If still no results, try token-based search (fuzzy match)
+
+        Keyword search now supports token-based matching:
+        first tries exact phrase ILIKE, then falls back to
+        individual token OR-matching for better recall.
         """
-        # Try vector search first
-        from app.services.vector_service import VectorService
-        vector = VectorService()
-        vector_results = vector.search(query_text, top_k=page_size)
+        # Try vector search first (Milvus)
+        try:
+            from app.services.knowledge.vector_service import VectorService
+            vector = VectorService()
+            vector_results = vector.search(query_text, top_k=page_size)
 
-        if vector_results:
-            doc_ids = [r["id"] for r in vector_results]
-            docs = self.db.query(KnowledgeDocument).filter(
-                KnowledgeDocument.id.in_(doc_ids),
-                KnowledgeDocument.status == "active",
-            ).all()
-            doc_map = {d.id: d for d in docs}
-            results = []
-            for vr in vector_results:
-                doc = doc_map.get(vr["id"])
-                if doc:
-                    results.append({
-                        "id": doc.id, "title": doc.title,
-                        "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
-                        "relevance_score": round(vr.get("score", 0), 2),
-                        "snippet": self._extract_snippet(doc.content, query_text),
-                    })
-            return {"items": results, "total": len(results), "page": page, "page_size": page_size}
+            if vector_results:
+                doc_ids = [r["id"] for r in vector_results]
+                docs = self.db.query(KnowledgeDocument).filter(
+                    KnowledgeDocument.id.in_(doc_ids),
+                    KnowledgeDocument.status == "active",
+                ).all()
+                doc_map = {d.id: d for d in docs}
+                results = []
+                for vr in vector_results:
+                    doc = doc_map.get(vr["id"])
+                    if doc:
+                        results.append({
+                            "id": doc.id, "title": doc.title,
+                            "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
+                            "relevance_score": round(vr.get("score", 0), 2),
+                            "snippet": self._extract_snippet(doc.content, query_text),
+                        })
+                return {"items": results, "total": len(results), "page": page, "page_size": page_size}
+        except Exception as exc:
+            logger = __import__("app.core.logging_config", fromlist=["get_logger"]).get_logger(__name__)
+            logger.debug("[KnowledgeService] Vector search unavailable, falling back to keyword: %s", exc)
 
-        # Fallback to keyword search
+        # Fallback: two-phase keyword search
+        # Phase 1: exact phrase match
+        items = self._keyword_search_phrase(query_text, page_size)
+        if items:
+            total = len(items)
+            paged = items[:page_size]
+            return {"items": paged, "total": total, "page": page, "page_size": page_size}
+
+        # Phase 2: token-based OR match (分词回退)
+        tokens = self._tokenize_query(query_text)
+        if tokens:
+            items = self._keyword_search_tokens(tokens, page_size)
+            total = len(items)
+            paged = items[:page_size]
+            return {"items": paged, "total": total, "page": page, "page_size": page_size}
+
+        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+
+    def _keyword_search_phrase(self, query_text: str, limit: int) -> list:
+        """Exact phrase ILIKE search."""
+        if not query_text.strip():
+            return []
         pattern = f"%{query_text}%"
-        base_query = self.db.query(KnowledgeDocument).filter(
-            KnowledgeDocument.status == "active",
-            or_(
-                KnowledgeDocument.title.ilike(pattern),
-                KnowledgeDocument.content.ilike(pattern),
-            ),
+        docs = (
+            self.db.query(KnowledgeDocument)
+            .filter(
+                KnowledgeDocument.status == "active",
+                or_(
+                    KnowledgeDocument.title.ilike(pattern),
+                    KnowledgeDocument.content.ilike(pattern),
+                ),
+            )
+            .order_by(KnowledgeDocument.updated_at.desc())
+            .limit(limit)
+            .all()
         )
-        total = base_query.count()
-        items = base_query.order_by(KnowledgeDocument.updated_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
-        results = []
-        for doc in items:
-            score = self._relevance_score(doc, query_text)
-            results.append({
+        return [
+            {
                 "id": doc.id, "title": doc.title,
                 "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
-                "relevance_score": round(score, 2),
+                "relevance_score": round(self._relevance_score(doc, query_text), 2),
                 "snippet": self._extract_snippet(doc.content, query_text),
-            })
-        return {"items": results, "total": total, "page": page, "page_size": page_size}
+            }
+            for doc in docs
+        ]
+
+    def _keyword_search_tokens(self, tokens: list[str], limit: int) -> list:
+        """Token-level OR search — each token matched independently."""
+        if not tokens:
+            return []
+        # Build OR conditions: title ILIKE '%token1%' OR title ILIKE '%token2%' ...
+        title_conditions = [
+            KnowledgeDocument.title.ilike(f"%{t}%") for t in tokens
+        ]
+        content_conditions = [
+            KnowledgeDocument.content.ilike(f"%{t}%") for t in tokens
+        ]
+        docs = (
+            self.db.query(KnowledgeDocument)
+            .filter(
+                KnowledgeDocument.status == "active",
+                or_(or_(*title_conditions), or_(*content_conditions)),
+            )
+            .order_by(KnowledgeDocument.updated_at.desc())
+            .limit(limit)
+            .all()
+        )
+        # Re-score based on how many tokens matched
+        query_lower = " ".join(tokens).lower()
+        return [
+            {
+                "id": doc.id, "title": doc.title,
+                "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
+                "relevance_score": round(self._token_relevance(doc, tokens), 2),
+                "snippet": self._extract_snippet(doc.content, tokens[0]) if tokens else "",
+            }
+            for doc in docs
+        ]
+
+    @staticmethod
+    def _tokenize_query(query_text: str) -> list[str]:
+        """Split query into meaningful tokens for individual matching.
+
+        Chinese: extract 2-4 character n-grams and full phrases.
+        English: split by whitespace and punctuation.
+        """
+        tokens: set[str] = set()
+
+        # Extract Chinese phrases (2-4 chars) — most meaningful for search
+        cn_chars = re.findall(r"[\u4e00-\u9fff]+", query_text)
+        for phrase in cn_chars:
+            if len(phrase) >= 2:
+                tokens.add(phrase)  # full Chinese phrase
+                # Also add 2-3 char windows
+                if len(phrase) >= 2:
+                    for i in range(len(phrase) - 1):
+                        tokens.add(phrase[i:i + 2])
+                    if len(phrase) >= 3:
+                        for i in range(len(phrase) - 2):
+                            tokens.add(phrase[i:i + 3])
+
+        # Extract English/technical tokens
+        en_tokens = re.findall(r"[a-zA-Z_]\w{1,}", query_text)
+        for t in en_tokens:
+            if len(t) >= 2:
+                tokens.add(t)
+
+        # Filter common stop words
+        stop_words = {"的", "了", "在", "是", "我", "有", "和", "就", "不",
+                       "人", "都", "一", "个", "上", "也", "很", "到", "说",
+                       "要", "去", "你", "会", "着", "没有", "看", "好", "自己"}
+        tokens = {t for t in tokens if t.lower() not in stop_words and len(t) >= 2}
+
+        # Sort: longer tokens first (more specific)
+        return sorted(tokens, key=len, reverse=True)
+
+    @staticmethod
+    def _token_relevance(doc: KnowledgeDocument, tokens: list[str]) -> float:
+        """Score based on how many tokens match in title vs content."""
+        title_lower = (doc.title or "").lower()
+        content_lower = (doc.content or "").lower()
+        total_tokens = len(tokens)
+        if total_tokens == 0:
+            return 0
+        title_hits = sum(1 for t in tokens if t.lower() in title_lower)
+        content_hits = sum(1 for t in tokens if t.lower() in content_lower)
+        return min(1.0, (title_hits * 0.4 + content_hits * 0.15) / max(1, total_tokens))
 
     # ------------------------------------------------------------------
     # Update

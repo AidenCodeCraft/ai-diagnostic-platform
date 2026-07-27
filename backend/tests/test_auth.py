@@ -1,6 +1,6 @@
 """Tests for User Authentication (v0.5)."""
 
-from app.services.auth_service import AuthService
+from app.services.auth.auth_service import AuthService
 from app.database import session as sm
 
 

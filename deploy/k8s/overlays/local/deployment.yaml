@@ -1,0 +1,316 @@
+# ============================================================================
+# AI Diagnostic Platform — 本地 Docker Desktop K8s 部署 (一键可用)
+# ============================================================================
+# 适配本地单节点 K8s（Docker Desktop / minikube / kind）
+# 与生产环境的差异：
+#   - 单副本、无 HPA/PDB
+#   - imagePullPolicy: Never（用本地 docker build 的镜像）
+#   - 无 NetworkPolicy / Ingress / TLS（用 port-forward 访问）
+#   - emptyDir 替代 PVC（无需额外存储配置）
+#   - 简化 securityContext
+#   - Postgres 固定密码
+# ============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-diagnostic
+---
+# ═══════════════════════════════════════════════════════════
+# ConfigMap（由 Kustomize 生成）
+# ═══════════════════════════════════════════════════════════
+---
+# ═══════════════════════════════════════════════════════════
+# Secret — 本地开发用固定密码
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-secrets
+  namespace: ai-diagnostic
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql://ai:ai@postgres:5432/diagnostic"
+  REDIS_URL: "redis://redis:6379/0"
+  DEEPSEEK_API_KEY: ""
+  DEEPSEEK_BASE_URL: "https://api.deepseek.com/v1"
+  MILVUS_USER: ""
+  MILVUS_PASSWORD: ""
+  SECRET_KEY: "local-dev-key-not-for-production-use"
+  POSTGRES_USER: "ai"
+  POSTGRES_PASSWORD: "ai"
+  POSTGRES_DB: "diagnostic"
+---
+# ═══════════════════════════════════════════════════════════
+# Backend Deployment
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: ai-diagnostic
+  labels:
+    app: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: host.docker.internal:5000/ai-diagnostic-backend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 5
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: backend-secrets
+---
+# ═══════════════════════════════════════════════════════════
+# Backend Service
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: ai-diagnostic
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+# ═══════════════════════════════════════════════════════════
+# Frontend Deployment
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: ai-diagnostic
+  labels:
+    app: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: host.docker.internal:5000/ai-diagnostic-frontend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+# ═══════════════════════════════════════════════════════════
+# Frontend Service
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: ai-diagnostic
+spec:
+  type: ClusterIP
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+# ═══════════════════════════════════════════════════════════
+# PostgreSQL Deployment（本地用 Deployment 替代 StatefulSet）
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: ai-diagnostic
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "ai"
+            - name: POSTGRES_PASSWORD
+              value: "ai"
+            - name: POSTGRES_DB
+              value: "diagnostic"
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ai", "-d", "diagnostic"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ai", "-d", "diagnostic"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+# ═══════════════════════════════════════════════════════════
+# PostgreSQL Service
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ai-diagnostic
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+# ═══════════════════════════════════════════════════════════
+# Redis Deployment
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: ai-diagnostic
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+---
+# ═══════════════════════════════════════════════════════════
+# Redis Service
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: ai-diagnostic
+spec:
+  type: ClusterIP
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379

@@ -1,4 +1,4 @@
-from app.services.provider_registry import ProviderRegistry
+from app.services.knowledge.provider_registry import ProviderRegistry
 
 
 def test_provider_registry_uses_mock_by_default():

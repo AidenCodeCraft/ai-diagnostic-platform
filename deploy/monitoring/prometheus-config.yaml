@@ -1,0 +1,79 @@
+# ============================================================================
+# Prometheus 配置 — AI Diagnostic Platform 监控
+# ============================================================================
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: production
+    environment: production
+
+# Alertmanager 配置
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager.monitoring.svc.cluster.local:9093"]
+
+# 告警规则文件
+rule_files:
+  - /etc/prometheus/rules/*.yaml
+
+# 抓取配置
+scrape_configs:
+  # ── Backend FastAPI 指标 ──────────────────────────────
+  - job_name: ai-diagnostic-backend
+    metrics_path: /metrics
+    scheme: http
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [ai-diagnostic]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_label_app]
+        action: keep
+        regex: backend
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+
+  # ── PostgreSQL 指标（通过 exporter）───────────────────
+  - job_name: postgres-exporter
+    static_configs:
+      - targets: ["postgres-exporter.ai-diagnostic.svc.cluster.local:9187"]
+        labels:
+          service: postgres
+
+  # ── Redis 指标（通过 exporter）────────────────────────
+  - job_name: redis-exporter
+    static_configs:
+      - targets: ["redis-exporter.ai-diagnostic.svc.cluster.local:9121"]
+        labels:
+          service: redis
+
+  # ── Nginx Ingress 指标 ────────────────────────────────
+  - job_name: nginx-ingress
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [ingress-nginx]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        action: keep
+        regex: ingress-nginx
+      - source_labels: [__meta_kubernetes_pod_container_port_number]
+        action: keep
+        regex: "10254"
+
+  # ── Node Exporter（宿主机指标）────────────────────────
+  - job_name: node-exporter
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [monitoring]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_label_app]
+        action: keep
+        regex: node-exporter

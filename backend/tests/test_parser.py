@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.services.parser_service import LogParserService
+from app.services.diagnostics.parser_service import LogParserService
 
 
 def test_parse_text_extracts_linux_log_details():

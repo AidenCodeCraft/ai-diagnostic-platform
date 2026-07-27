@@ -5,10 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from app.agents.core.tool import Tool, ToolRegistry, ToolResult
-from app.services.infrastructure.llm_service import LLMService
-from app.services.diagnostics.parser_service import LogParserService
-from app.services.diagnostics.report_service import ReportService
-from app.services.system.rule_engine import RuleEngine
 
 
 class ParseLogTool(Tool):
@@ -21,6 +17,7 @@ class ParseLogTool(Tool):
             return ToolResult(success=False, error="log_file_path is required")
 
         try:
+            from app.services.diagnostics.parser_service import LogParserService
             events = LogParserService().parse_file(file_path)
             return ToolResult(
                 success=True,
@@ -36,7 +33,14 @@ class RuleCheckTool(Tool):
 
     def __init__(self) -> None:
         super().__init__()
-        self.engine = RuleEngine()
+        self._engine = None
+
+    @property
+    def engine(self):
+        if self._engine is None:
+            from app.services.system.rule_engine import RuleEngine
+            self._engine = RuleEngine()
+        return self._engine
 
     def execute(self, **kwargs: Any) -> ToolResult:
         parse_result = kwargs.get("parse_log_result", {})
@@ -65,6 +69,7 @@ class LLMAnalyzeTool(Tool):
         events = parse_result.get("events", [])
 
         try:
+            from app.services.infrastructure.llm_service import LLMService
             result = LLMService().generate_summary(log_content, events)
             return ToolResult(success=True, data=result)
         except Exception as exc:
@@ -84,6 +89,7 @@ class GenerateReportTool(Tool):
             return ToolResult(success=False, error="db_session and log_id are required")
 
         try:
+            from app.services.diagnostics.report_service import ReportService
             report = ReportService(db).generate_report(log_id)
             return ToolResult(success=True, data=report)
         except ValueError:

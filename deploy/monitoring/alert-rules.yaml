@@ -1,0 +1,176 @@
+# ============================================================================
+# Prometheus 告警规则 — AI Diagnostic Platform
+# ============================================================================
+
+groups:
+  # ── 应用层告警 ────────────────────────────────────────
+  - name: application_alerts
+    interval: 30s
+    rules:
+      # 服务宕机
+      - alert: BackendServiceDown
+        expr: up{job="ai-diagnostic-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "后端服务不可用 ({{ $labels.pod }})"
+          description: "Pod {{ $labels.pod }} 已宕机超过 2 分钟"
+          runbook_url: "https://wiki.example.com/runbooks/backend-down"
+
+      # 高错误率
+      - alert: HighErrorRate
+        expr: |
+          rate(http_requests_total{status=~"5.."}[5m]) /
+          rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          category: errors
+        annotations:
+          summary: "后端错误率过高 ({{ $value | humanizePercentage }})"
+          description: "5xx 错误率超过 5%，当前路径: {{ $labels.path }}"
+
+      # 高延迟
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket[5m])
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "API 响应延迟过高 (P95: {{ $value }}s)"
+          description: "P95 延迟超过 2 秒，路径: {{ $labels.path }}"
+
+      # CPU 使用率过高
+      - alert: HighCPUUsage
+        expr: |
+          avg(rate(container_cpu_usage_seconds_total{
+            namespace="ai-diagnostic", container="backend"
+          }[5m])) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          category: resource
+        annotations:
+          summary: "后端 CPU 使用率过高 ({{ $value | humanize }}%)"
+
+      # 内存使用率过高
+      - alert: HighMemoryUsage
+        expr: |
+          container_memory_usage_bytes{
+            namespace="ai-diagnostic", container="backend"
+          } / container_spec_memory_limit_bytes > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          category: resource
+        annotations:
+          summary: "后端内存使用率过高 ({{ $value | humanizePercentage }})"
+
+      # Pod 频繁重启
+      - alert: PodCrashLooping
+        expr: |
+          rate(kube_pod_container_status_restarts_total{
+            namespace="ai-diagnostic"
+          }[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          category: stability
+        annotations:
+          summary: "Pod {{ $labels.pod }} 频繁重启"
+          description: "过去 15 分钟内 Pod {{ $labels.pod }} 重启 {{ $value }} 次"
+
+      # 磁盘空间不足
+      - alert: LowDiskSpace
+        expr: |
+          kubelet_volume_stats_available_bytes{
+            namespace="ai-diagnostic"
+          } / kubelet_volume_stats_capacity_bytes < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          category: resource
+        annotations:
+          summary: "磁盘空间不足 (剩余 {{ $value | humanizePercentage }})"
+
+  # ── 数据库告警 ────────────────────────────────────────
+  - name: database_alerts
+    interval: 30s
+    rules:
+      - alert: PostgresDown
+        expr: up{job="postgres-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "PostgreSQL 不可用"
+
+      - alert: PostgresHighConnections
+        expr: |
+          pg_stat_database_numbackends{datname="diagnostic"} /
+          pg_settings_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          category: database
+        annotations:
+          summary: "PostgreSQL 连接数过高 ({{ $value | humanizePercentage }})"
+
+      - alert: PostgresReplicationLag
+        expr: pg_stat_replication_replay_lag_seconds > 30
+        for: 5m
+        labels:
+          severity: warning
+          category: database
+        annotations:
+          summary: "PostgreSQL 复制延迟超过 30s"
+
+  # ── API 安全告警 ──────────────────────────────────────
+  - name: security_alerts
+    interval: 30s
+    rules:
+      - alert: HighRateLimitRejections
+        expr: |
+          rate(http_ratelimit_rejected_total[5m]) > 50
+        for: 5m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "API 限流拒绝次数过高"
+          description: "过去 5 分钟平均 {{ $value }}/s 请求被限流拒绝"
+
+      - alert: High4xxRate
+        expr: |
+          sum(rate(http_requests_total{status=~"4.."}[10m])) > 100
+        for: 10m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "4xx 错误请求激增"
+          description: "可能遭受探测攻击或配置错误"
+
+  # ── HPA 伸缩告警 ─────────────────────────────────────
+  - name: scaling_alerts
+    interval: 30s
+    rules:
+      - alert: HPAAtMaxReplicas
+        expr: |
+          kube_horizontalpodautoscaler_status_current_replicas{
+            namespace="ai-diagnostic"
+          } >= kube_horizontalpodautoscaler_spec_max_replicas
+        for: 10m
+        labels:
+          severity: warning
+          category: scaling
+        annotations:
+          summary: "HPA {{ $labels.horizontalpodautoscaler }} 已达最大副本数"
+          description: "当前 {{ $value }} 副本，可能需要增加 maxReplicas"

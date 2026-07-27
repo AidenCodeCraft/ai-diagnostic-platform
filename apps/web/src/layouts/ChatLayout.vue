@@ -37,6 +37,13 @@
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
           </svg> 分析
         </button>
+        <button @click="exportChat">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg> 导出
+        </button>
         <hr />
         <button class="danger" @click="deleteChat">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -59,7 +66,7 @@
         <div class="chat-content" :class="{ 'chat-empty': displayMessages.length === 0 }">
           <ChatMessageList ref="msgListRef" :key="'cl-' + currentChatId + '-' + displayMessages.length"
             :messages="displayMessages" :loading="loadingPhase !== 'idle'" :isEmpty="displayMessages.length === 0"
-            @previewFile="previewFile" @openKnowledge="openKnowledge" />
+            @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editMessage="handleEditMessage" />
           <div class="input-wrapper">
             <ChatInputArea v-model="inputText" :files="attachedFiles" :selectedModel="selectedModel"
               :isUploading="isUploading" :canReport="canGenerateReport" :hasMessages="messages.length > 0"
@@ -89,6 +96,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '@/api/client'
 import { chatApi, type ChatSource } from '@/api/chat'
 import { useUserStore } from '@/stores/user'
+import { exportChat as exportChatUtil } from '@/utils/export'
+import type { ExportMessage } from '@/utils/export'
 
 import ChatSidebar from '@/components/chat/ChatSidebar.vue'
 import ChatMessageList from '@/components/chat/ChatMessageList.vue'
@@ -319,6 +328,48 @@ function pinChat() {
 
 function analyzeChat() { ElMessage.info('分析功能开发中'); closeChatMenu() }
 
+async function exportChat() {
+  const chatId = chatMenu.chatId
+  const chat = recentChats.value.find(c => c.id === chatId)
+  if (!chat) return
+
+  try {
+    // 如果是当前对话，使用内存中的消息；否则从服务端加载
+    let msgs = chatId === currentChatId.value 
+      ? messages.value 
+      : (await chatApi.getMessages(chatId)).data
+
+    if (!Array.isArray(msgs)) msgs = []
+    if (msgs.length === 0) {
+      ElMessage.warning('该对话暂无消息')
+      closeChatMenu()
+      return
+    }
+
+    // 转换为导出格式
+    const exportMessages: ExportMessage[] = msgs.map((m: any) => ({
+      role: m.role,
+      content: m.content || '',
+      createdAt: m.createdAt || (m.created_at ? new Date(m.created_at).getTime() : Date.now()),
+      sources: m.sources,
+      thinking: m.thinking,
+    }))
+
+    await exportChatUtil(exportMessages, {
+      title: chat.title || '对话记录',
+      model: chat.model || selectedModel.value,
+      includeMetadata: true,
+      includeSources: true,
+      includeThinking: false, // 默认不导出思维过程
+    })
+
+    ElMessage.success('对话已导出')
+  } catch (err: any) {
+    ElMessage.error('导出失败: ' + (err.message || '未知错误'))
+  }
+  closeChatMenu()
+}
+
 async function deleteChat() {
   try {
     await ElMessageBox.confirm('删除后，该对话将不可恢复', '确认删除', {
@@ -534,12 +585,12 @@ async function processFiles(files: FileAttachment[], text: string) {
       }
 
       try {
-        updateThinking('正在解析日志文件，提取结构化事件…')
+        updateThinking('正在解析日志并提取关键错误片段…')
 
-        console.log(`[processFiles] runAnalysis: logId=${logId} model=${selectedModel.value}`)
-        const analysisRes = await chatApi.runAnalysis(logId, selectedModel.value)
+        console.log(`[processFiles] runAnalysis: logId=${logId} model=${selectedModel.value} query=${text?.slice(0, 50)}`)
+        const analysisRes = await chatApi.runAnalysis(logId, selectedModel.value, text)
         if (analysisRes.data?.id) {
-          updateThinking('日志解析完成，正在匹配错误模式并检索相关知识…')
+          updateThinking('规则引擎匹配 + 知识库检索中…')
 
           const detail = (await chatApi.getAnalysisResult(analysisRes.data.id)).data
           lastAnalysis.value = detail
@@ -672,6 +723,43 @@ function addMessage(role: string, content: string, files?: MsgAttachment[]) {
   console.log(`[addMessage] Added ${role} message, total: ${messages.value.length}`, newMsg)
   
   setTimeout(() => msgListRef.value?.scrollToBottom(), 50)
+}
+
+// ── Regenerate / Edit ────────────────────────────────────────
+
+async function handleRegenerate(assistantMsg: any) {
+  if (isSending.value || !currentChatId.value) return
+  // 找到该 assistant 消息之前最近的 user 消息
+  const idx = messages.value.findIndex(m => m.id === assistantMsg.id)
+  const userMsg = [...messages.value].slice(0, idx).reverse().find(m => m.role === 'user')
+  if (!userMsg) return
+
+  // 截断：移除该 assistant 消息及其之后的所有消息（对话分支）
+  messages.value = messages.value.slice(0, idx)
+  messageIds.clear()
+  messages.value.forEach((m: any) => messageIds.add(m.id))
+
+  isSending.value = true
+  loadingPhase.value = 'streaming'
+  try {
+    await streamChat(userMsg.content)
+  } finally {
+    loadingPhase.value = 'idle'
+    isSending.value = false
+  }
+}
+
+function handleEditMessage(userMsg: any) {
+  if (isSending.value) return
+  // 将消息内容填入输入框，截断该消息及之后的所有消息
+  const idx = messages.value.findIndex(m => m.id === userMsg.id)
+  if (idx === -1) return
+  // 去掉文件标签，只保留文字
+  const text = userMsg.content.replace(/\n?\[上传文件:.*?\]/g, '').trim()
+  inputText.value = text
+  messages.value = messages.value.slice(0, idx)
+  messageIds.clear()
+  messages.value.forEach((m: any) => messageIds.add(m.id))
 }
 
 function formatSizeStr(bytes: number): string {

@@ -9,12 +9,15 @@ from sqlalchemy.orm import Session
 
 from app.models import ChatSession, ChatMessage
 from app.services.chat.diagnostic_chat_agent import DiagnosticChatAgent
+from app.services.chat.context_manager import ContextManager
+from app.services.chat.title_generator import generate_chat_title, should_generate_title
 from app.services.knowledge.provider_registry import ProviderRegistry
 
 
 class ChatService:
     def __init__(self, db: Session):
         self.db = db
+        self.context_manager = ContextManager()
 
     # ------------------------------------------------------------------
     # Sessions
@@ -101,18 +104,100 @@ class ChatService:
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": DiagnosticChatAgent.SYSTEM_BASE}
         ]
+        
+        # 构建完整历史消息
+        history_messages = []
         for m in history:
-            messages.append({"role": m.role, "content": m.content})
+            history_messages.append({"role": m.role, "content": m.content})
+        
+        # 应用上下文管理（自动摘要压缩）
+        if self.context_manager.should_compress(history_messages):
+            history_messages = self.context_manager.manage_context(
+                history_messages,
+                DiagnosticChatAgent.SYSTEM_BASE
+            )
+        
+        messages.extend(history_messages)
         return messages
 
     def _auto_title(self, session_id: int, content: str):
+        """智能生成对话标题（基于 LLM 而非简单截取）。"""
         session = self.get_session(session_id)
-        if not session.title or session.title == "新对话":
-            title = content[:30].strip()
-            if len(content) > 30:
-                title += "…"
+        messages = self.get_messages(session_id)
+        
+        if not should_generate_title(session.title, len(messages)):
+            return
+        
+        try:
+            # 构建消息历史供标题生成使用
+            history_messages = []
+            for m in messages:
+                history_messages.append({"role": m.role, "content": m.content})
+            
+            # 使用同步方式生成标题
+            title = self._generate_title_sync(
+                history_messages,
+                provider_name=session.model or "deepseek"
+            )
+            
             session.title = title
             self.db.commit()
+        except Exception:
+            # 失败回退：使用简单截取
+            if not session.title or session.title == "新对话":
+                title = content[:30].strip()
+                if len(content) > 30:
+                    title += "…"
+                session.title = title
+                self.db.commit()
+
+    def _generate_title_sync(
+        self,
+        messages: List[Dict[str, str]],
+        provider_name: str,
+    ) -> str:
+        """同步版本的标题生成。"""
+        from app.services.chat.title_generator import generate_title_prompt
+        
+        if not messages:
+            return "新对话"
+        
+        # 至少要有一条用户消息
+        user_messages = [m for m in messages if m.get("role") == "user"]
+        if not user_messages:
+            return "新对话"
+        
+        # 如果只有一条消息，直接使用前 20 字
+        if len(messages) == 1:
+            first_content = messages[0].get("content", "")[:20].strip()
+            return first_content if first_content else "新对话"
+        
+        try:
+            # 构建 prompt
+            prompt = generate_title_prompt(messages)
+            
+            # 调用 LLM
+            provider = self._get_provider(provider_name)
+            title = provider.chat([{"role": "user", "content": prompt}])
+            
+            # 清理标题
+            title = title.strip().replace('"', '').replace("'", '').replace('：', '').replace(':', '')
+            
+            # 限制长度
+            if len(title) > 30:
+                title = title[:30]
+            
+            # 如果生成失败，回退到简单截取
+            if not title or len(title) < 3:
+                first_user = user_messages[0].get("content", "")[:20].strip()
+                return first_user if first_user else "新对话"
+            
+            return title
+            
+        except Exception:
+            # 失败回退：使用第一条用户消息的前 20 字
+            first_user = user_messages[0].get("content", "")[:20].strip()
+            return first_user if first_user else "新对话"
 
     def send_message(
         self,
