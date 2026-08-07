@@ -83,8 +83,8 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="category" label="修改人" width="120"><template #default="{ row }">{{ row.category || '—' }}</template></el-table-column>
-          <el-table-column label="管理人" width="120"><template #default>{ row }}{{ '—' }}</template></el-table-column>
+          <el-table-column prop="category" label="分类" width="120"><template #default="{ row }">{{ row.category || '—' }}</template></el-table-column>
+          <el-table-column label="文档类型" width="100"><template #default="{ row }">{{ typeLabel(row.doc_type) }}</template></el-table-column>
           <el-table-column prop="updated_at" label="修改时间" width="180"><template #default="{ row }">{{ formatTime(row.updated_at || row.created_at) }}</template></el-table-column>
           <el-table-column label="大小" width="100"><template #default="{ row }">{{ formatSize(row) }}</template></el-table-column>
           <!-- 更多菜单 -->
@@ -314,6 +314,7 @@ function formatTime(ts: string) {
   return `${Y}-${String(M).padStart(2,'0')}-${String(D).padStart(2,'0')} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
 }
 function formatSize(row: any) { if (row.doc_type === 'folder') return '—'; if (!row.content) return '—'; const bytes = new Blob([row.content]).size; return bytes < 1024 ? bytes + ' B' : (bytes / 1024).toFixed(1) + ' KB' }
+function typeLabel(docType: string) { const map: Record<string, string> = { note: '笔记', folder: '文件夹', manual: '手册', faq: 'FAQ', bug_report: 'Bug', datasheet: '数据手册' }; return map[docType] || docType || '—' }
 
 // ============================================================
 // Markdown TOC — 改为响应式数组（非 v-html）

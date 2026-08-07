@@ -72,8 +72,3 @@ api_router.include_router(projects_router)
 api_router.include_router(rules_router)
 api_router.include_router(bug_cases_router)
 api_router.include_router(client_logs_router)
-
-
-@api_router.get("/test")
-def test():
-    return {"message": "API working"}

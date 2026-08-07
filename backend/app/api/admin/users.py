@@ -110,6 +110,18 @@ def update_user(
         if field in body:
             setattr(user, field, body[field])
 
+    # 支持密码修改：编辑模式下若传入新密码，则更新密码哈希
+    if "password" in body and body["password"]:
+        pw = str(body["password"])
+        pw_lower = pw.lower()
+        if pw_lower in WEAK_PASSWORDS:
+            raise HTTPException(status_code=400, detail="密码过于简单，请使用更复杂的密码")
+        if user.username.lower() in pw_lower or pw_lower in user.username.lower():
+            raise HTTPException(status_code=400, detail="密码不能与用户名相同")
+        if len(pw) < 12:
+            raise HTTPException(status_code=400, detail="密码至少12位")
+        user.password_hash = AuthService._hash_password(pw)
+
     db.commit()
     db.refresh(user)
     return user
