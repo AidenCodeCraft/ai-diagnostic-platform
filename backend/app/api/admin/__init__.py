@@ -163,3 +163,28 @@ def get_available_models():
             {"label": "DeepSeek V4 Pro", "value": "deepseek-v4-pro", "isDefault": False}
         ]
     }
+
+
+@router.get("/config/system")
+def get_system_config():
+    """Get system parameters."""
+    config = _load_config()
+    system = config.get("system", {})
+    return {
+        "maxUploadMb": system.get("max_upload_mb", 100),
+        "timeoutSeconds": system.get("timeout_seconds", 300),
+        "logRetentionDays": system.get("log_retention_days", 90),
+    }
+
+
+@router.put("/config/system")
+def save_system_config(body: Dict[str, Any]):
+    """Save system parameters."""
+    config = _load_config()
+    config["system"] = {
+        "max_upload_mb": body.get("maxUploadMb", 100),
+        "timeout_seconds": body.get("timeoutSeconds", 300),
+        "log_retention_days": body.get("logRetentionDays", 90),
+    }
+    _save_config(config)
+    return {"ok": True, "message": "系统参数已保存"}

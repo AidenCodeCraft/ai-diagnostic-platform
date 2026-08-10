@@ -85,6 +85,7 @@
           />
           <ChatMessageList ref="msgListRef" :key="'cl-' + currentChatId + '-' + displayMessages.length"
             :messages="displayMessages" :loading="loadingPhase !== 'idle'" :isEmpty="displayMessages.length === 0"
+            :chatId="currentChatId"
             @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editMessage="handleEditMessage" />
           <div class="input-wrapper">
             <ChatInputArea v-model="inputText" :files="attachedFiles" :selectedModel="selectedModel"
@@ -114,6 +115,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '@/api/client'
 import { chatApi, type ChatSource } from '@/api/chat'
+import { adminApi } from '@/api/admin'
 import { useUserStore } from '@/stores/user'
 import { exportChat as exportChatUtil } from '@/utils/export'
 import type { ExportMessage } from '@/utils/export'
@@ -142,9 +144,10 @@ const isChatRoute = computed(() => route.path === '/chat' || route.path === '/')
 watch(
   () => route.path,
   (path) => {
-    console.log(
-      `[route→${path}] messages=${messages.value.length} display=${displayMessages.value.length}`,
-      messages.value.map((m: any) => `${m.role}:${(m.content || '').slice(0, 20)}`),
+    if (import.meta.env.DEV) {
+      console.log(
+        `[route→${path}] messages=${messages.value.length} display=${displayMessages.value.length}`,
+        messages.value.map((m: any) => `${m.role}:${(m.content || '').slice(0, 20)}`),
     )
   },
 )
@@ -245,15 +248,39 @@ function handleUserAction(action: 'download' | 'settings' | 'help' | 'logout') {
 
 async function changePwd() {
   try {
-    const { value } = await ElMessageBox.prompt('请输入新密码', '修改密码', { inputType: 'password' })
-    if (value) ElMessage.success('密码修改成功')
+    const { value } = await ElMessageBox.prompt(
+      '请输入新密码（至少12位，含大小写字母+数字+特殊字符）',
+      '修改密码',
+      {
+        inputType: 'password',
+        inputValidator: (v: string) => {
+          if (!v) return '密码不能为空'
+          if (v.length < 12) return '密码至少12位'
+          return true
+        },
+      },
+    )
+    if (!value) return
+    // 调用后端更新密码
+    const userInfo = userStore.userInfo as any
+    const userId = userInfo?.id || userInfo?.user?.id
+    if (!userId) {
+      ElMessage.error('无法获取用户信息，请重新登录')
+      return
+    }
+    try {
+      await adminApi.updateUser(userId, { password: value })
+      ElMessage.success('密码修改成功')
+    } catch (err: any) {
+      ElMessage.error('修改失败: ' + (err.response?.data?.detail || err.message))
+    }
   } catch { /* cancelled */ }
 }
 
 async function clearData() {
   try {
     await ElMessageBox.confirm('确定清除所有对话数据？不可恢复。', '确认', { type: 'warning' })
-    await Promise.all(recentChats.value.map(c => chatApi.deleteSession(c.id).catch(() => { })))
+    await Promise.all(recentChats.value.map(c => chatApi.deleteSession(c.id).catch(e => console.warn('[clearData] delete session failed:', c.id, e))))
     recentChats.value = []
     messages.value = []
     currentChatId.value = 0
@@ -264,11 +291,18 @@ async function clearData() {
 
 // ── Session Management ────────────────────────────────────────
 
+const sessionsLoading = ref(false)
+
 async function loadSessions() {
+  sessionsLoading.value = true
   try {
     const { data } = await chatApi.listSessions()
-    recentChats.value = data.items.map((s: any) => ({ id: s.id, title: s.title || '新对话', model: s.model }))
-  } catch { /* ignore */ }
+    recentChats.value = (data.items || []).map((s: any) => ({ id: s.id, title: s.title || '新对话', model: s.model }))
+  } catch {
+    recentChats.value = []
+  } finally {
+    sessionsLoading.value = false
+  }
 }
 
 async function newChat() {
@@ -296,7 +330,7 @@ async function selectChat(id: number) {
     const { data } = await chatApi.getMessages(id)
     const msgs = Array.isArray(data) ? data : []
     
-    console.log(`[selectChat] id=${id} loaded ${msgs.length} messages`, msgs)
+    if (import.meta.env.DEV) console.log(`[selectChat] id=${id} loaded ${msgs.length} messages`, msgs)
     
     messageIds.clear()
     currentChatId.value = id
@@ -511,7 +545,11 @@ async function sendMessage() {
       currentChatId.value = s.id
       sessionStorage.setItem('activeChatId', String(s.id))
       recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model || undefined })
-    } catch { /* fallback */ }
+    } catch (e: any) {
+      console.error('[sendMessage] create session failed:', e?.response?.data?.detail || e?.message || e)
+      ElMessage.warning('创建会话失败，请重试')
+      return
+    }
   }
 
   const attachments: MsgAttachment[] = files.map(f => ({
@@ -572,7 +610,7 @@ async function processFiles(files: FileAttachment[], text: string) {
         fa.progress = 100
         fa.status = 'parsing'
         const logId = Number(resp.data?.id)
-        console.log(`[processFiles] upload OK: ${fa.name} → logId=${logId}`)
+        if (import.meta.env.DEV) console.log(`[processFiles] upload OK: ${fa.name} → logId=${logId}`)
         if (!logId || logId <= 0) {
           throw new Error(`服务器返回了无效的日志ID: ${resp.data?.id}`)
         }
@@ -580,7 +618,7 @@ async function processFiles(files: FileAttachment[], text: string) {
       } catch (e: any) {
         fa.status = 'error'
         fa.error = formatApiError(e)
-        console.error(`[processFiles] upload FAIL: ${fa.name}`, fa.error)
+        if (import.meta.env.DEV) console.error(`[processFiles] upload FAIL: ${fa.name}`, fa.error)
         return { fa, logId: 0, ok: false, error: e }
       }
     }),
@@ -647,7 +685,7 @@ async function processFiles(files: FileAttachment[], text: string) {
       try {
         updateThinking('正在解析日志并提取关键错误片段…')
 
-        console.log(`[processFiles] runAnalysis: logId=${logId} model=${selectedModel.value} query=${text?.slice(0, 50)}`)
+        if (import.meta.env.DEV) console.log(`[processFiles] runAnalysis: logId=${logId} model=${selectedModel.value} query=${text?.slice(0, 50)}`)
         const analysisRes = await chatApi.runAnalysis(logId, selectedModel.value, text)
         if (analysisRes.data?.id) {
           updateThinking('规则引擎匹配 + 知识库检索中…')
@@ -738,7 +776,7 @@ async function streamChat(text: string) {
           text: replyMsg.thinking.text || '',
           elapsed: replyMsg.thinking.elapsed
         } : undefined
-        await chatApi.saveMessage(currentChatId.value, 'assistant', replyMsg.content, replyMsg.sources, thinkingData).catch(() => { })
+        await chatApi.saveMessage(currentChatId.value, 'assistant', replyMsg.content, replyMsg.sources, thinkingData).catch(e => console.warn('[streamChat] save message failed:', e))
       }
     },
     (err: string) => {
@@ -780,7 +818,7 @@ function addMessage(role: string, content: string, files?: MsgAttachment[]) {
   } as any
   
   messages.value.push(newMsg)
-  console.log(`[addMessage] Added ${role} message, total: ${messages.value.length}`, newMsg)
+  if (import.meta.env.DEV) console.log(`[addMessage] Added ${role} message, total: ${messages.value.length}`, newMsg)
   
   setTimeout(() => msgListRef.value?.scrollToBottom(), 50)
 }

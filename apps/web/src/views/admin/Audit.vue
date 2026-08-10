@@ -30,6 +30,7 @@
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
           </el-table>
+          <div v-if="!analysesLoading && analyses.length === 0" class="empty-hint">暂无分析任务</div>
         </div>
       </el-tab-pane>
 
@@ -53,6 +54,7 @@
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
           </el-table>
+          <div v-if="!bugsLoading && bugCases.length === 0" class="empty-hint">暂无 Bug 案例</div>
         </div>
       </el-tab-pane>
 
@@ -69,6 +71,7 @@
               </template>
             </el-table-column>
           </el-table>
+          <div v-if="!pluginsLoading && plugins.length === 0" class="empty-hint">暂无插件数据</div>
         </div>
       </el-tab-pane>
 
@@ -80,6 +83,7 @@
             <el-table-column prop="category" label="分类" width="120"><template #default="{ row }">{{ row.category || '—' }}</template></el-table-column>
             <el-table-column prop="description" label="描述" min-width="200"><template #default="{ row }">{{ row.description || '—' }}</template></el-table-column>
           </el-table>
+          <div v-if="!rulesLoading && rules.length === 0" class="empty-hint">暂无诊断规则</div>
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -88,8 +92,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import axios from 'axios'
-import { ElMessage } from 'element-plus'
+import client from '@/api/client'
 
 const activeTab = ref('analyses')
 
@@ -105,15 +108,16 @@ const rulesLoading = ref(false)
 
 const analysisStatus = ref('')
 
+/** 使用 Intl.DateTimeFormat 统一处理时区（浏览器本地时区） */
+const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+  hour12: false,
+})
+
 function formatTime(ts: string) {
   if (!ts) return ''
-  const match = ts.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/)
-  if (!match) return ts
-  let Y = +match[1], M = +match[2], D = +match[3], h = +match[4], m = +match[5], s = +match[6]
-  h += 8; if (h >= 24) { h -= 24; D += 1 }
-  const daysInMonth = new Date(Y, M, 0).getDate()
-  if (D > daysInMonth) { D = 1; M += 1; if (M > 12) { M = 1; Y += 1 } }
-  return `${Y}-${String(M).padStart(2,'0')}-${String(D).padStart(2,'0')} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`
+  try { return timeFormatter.format(new Date(ts)) } catch { return ts }
 }
 
 function statusTag(s: string) {
@@ -134,33 +138,53 @@ async function fetchAnalyses() {
   try {
     const params: any = { page_size: 50 }
     if (analysisStatus.value) params.status = analysisStatus.value
-    const { data } = await axios.get('/api/v1/analyses', { params })
+    const { data } = await client.get('/analyses', { params })
     analyses.value = data.items || []
-  } catch {} finally { analysesLoading.value = false }
+  } catch (e: any) {
+    analyses.value = []
+    console.error('[Audit] fetchAnalyses failed:', e?.response?.data?.detail || e?.message || e)
+  } finally {
+    analysesLoading.value = false
+  }
 }
 
 async function fetchBugCases() {
   bugsLoading.value = true
   try {
-    const { data } = await axios.get('/api/v1/bug-cases', { params: { page_size: 50 } })
+    const { data } = await client.get('/bug-cases', { params: { page_size: 50 } })
     bugCases.value = data.items || []
-  } catch {} finally { bugsLoading.value = false }
+  } catch (e: any) {
+    bugCases.value = []
+    console.error('[Audit] fetchBugCases failed:', e?.response?.data?.detail || e?.message || e)
+  } finally {
+    bugsLoading.value = false
+  }
 }
 
 async function fetchPlugins() {
   pluginsLoading.value = true
   try {
-    const { data } = await axios.get('/api/v1/plugins')
+    const { data } = await client.get('/plugins')
     plugins.value = Array.isArray(data) ? data : data.plugins || []
-  } catch {} finally { pluginsLoading.value = false }
+  } catch (e: any) {
+    plugins.value = []
+    console.error('[Audit] fetchPlugins failed:', e?.response?.data?.detail || e?.message || e)
+  } finally {
+    pluginsLoading.value = false
+  }
 }
 
 async function fetchRules() {
   rulesLoading.value = true
   try {
-    const { data } = await axios.get('/api/v1/rules')
+    const { data } = await client.get('/rules')
     rules.value = Array.isArray(data) ? data : []
-  } catch {} finally { rulesLoading.value = false }
+  } catch (e: any) {
+    rules.value = []
+    console.error('[Audit] fetchRules failed:', e?.response?.data?.detail || e?.message || e)
+  } finally {
+    rulesLoading.value = false
+  }
 }
 
 onMounted(() => {
@@ -176,4 +200,5 @@ onMounted(() => {
 .audit-tabs { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 0 16px 16px; }
 .tab-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding-top: 8px; }
 .audit-table-wrap { min-height: 200px; }
+.empty-hint { text-align: center; padding: 40px 0; color: #9ca3af; font-size: 14px; }
 </style>

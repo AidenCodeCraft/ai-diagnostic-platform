@@ -35,4 +35,9 @@ export const knowledgeApi = {
   tree() {
     return client.get<{ tree: any[] }>('/knowledge/tree')
   },
+  upload(formData: FormData) {
+    return client.post('/knowledge/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
 }

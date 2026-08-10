@@ -175,16 +175,8 @@ function openEdit(row: UserInfo) {
   dialogVisible.value = true
 }
 
-function formatTime(ts: string) {
-  if (!ts) return ''
-  const match = ts.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/)
-  if (!match) return ts
-  let Y = +match[1], M = +match[2], D = +match[3], h = +match[4], m = +match[5], s = +match[6]
-  h += 8; if (h >= 24) { h -= 24; D += 1 }
-  const daysInMonth = new Date(Y, M, 0).getDate()
-  if (D > daysInMonth) { D = 1; M += 1; if (M > 12) { M = 1; Y += 1 } }
-  return `${Y}-${String(M).padStart(2,'0')}-${String(D).padStart(2,'0')} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`
-}
+const _uTimeFmt = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+function formatTime(ts: string) { if (!ts) return ''; try { return _uTimeFmt.format(new Date(ts)) } catch { return ts } }
 
 async function fetchUsers() {
   loading.value = true
@@ -194,7 +186,7 @@ async function fetchUsers() {
     const { data } = await adminApi.listUsers(params)
     users.value = data.items
     total.value = data.total
-  } catch {} finally { loading.value = false }
+  } catch { users.value = []; total.value = 0 } finally { loading.value = false }
 }
 
 function doSearch() { page.value = 1; fetchUsers() }
@@ -207,12 +199,29 @@ function handleRowAction(cmd: string, row: UserInfo) {
   }
 }
 
+const PWD_RE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\[\]{}|;:,.<>?]).{12,}$/
+
+function validatePassword(pwd: string): string | null {
+  if (!pwd) return '请输入密码'
+  if (pwd.length < 12) return '密码至少12位'
+  if (!/[a-z]/.test(pwd)) return '密码需包含小写字母'
+  if (!/[A-Z]/.test(pwd)) return '密码需包含大写字母'
+  if (!/\d/.test(pwd)) return '密码需包含数字'
+  if (!/[!@#$%^&*()_+\[\]{}|;:,.<>?]/.test(pwd)) return '密码需包含特殊字符'
+  return null
+}
+
 async function handleSubmit() {
   if (!form.value.username.trim()) { ElMessage.warning('请输入用户名'); return }
+  if (form.value.username.trim().length < 3 || form.value.username.trim().length > 50) { ElMessage.warning('用户名需 3-50 个字符'); return }
 
   if (dialogMode.value === 'create') {
-    if (!form.value.password) { ElMessage.warning('请输入密码'); return }
-    if (form.value.password.length < 12) { ElMessage.warning('密码至少12位'); return }
+    const pwdErr = validatePassword(form.value.password)
+    if (pwdErr) { ElMessage.warning(pwdErr); return }
+  } else if (form.value.password) {
+    // 编辑模式下输入了新密码也校验
+    const pwdErr = validatePassword(form.value.password)
+    if (pwdErr) { ElMessage.warning(pwdErr); return }
   }
 
   submitting.value = true

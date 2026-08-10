@@ -96,6 +96,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { useFormat } from '@/composables/useFormat'
+import { chatApi } from '@/api/chat'
 
 const { formatFileSize, fileIcon } = useFormat()
 
@@ -103,6 +104,7 @@ const props = defineProps<{
   messages: any[]
   loading: boolean
   isEmpty?: boolean
+  chatId?: number
 }>()
 
 const emit = defineEmits<{
@@ -230,15 +232,23 @@ function editMessage(msg: any) {
 }
 
 function likeMessage(msg: any) {
-  msg._liked = !msg._liked
-  if (msg._liked) msg._disliked = false
-  // TODO: 后端持久化点赞状态
+  const newLiked = !msg._liked
+  msg._liked = newLiked
+  if (newLiked) msg._disliked = false
+  if (props.chatId) {
+    chatApi.updateFeedback(props.chatId, msg.id, newLiked ? 'like' : null)
+      .catch(e => console.warn('[likeMessage] persist failed:', e))
+  }
 }
 
 function dislikeMessage(msg: any) {
-  msg._disliked = !msg._disliked
-  if (msg._disliked) msg._liked = false
-  // TODO: 后端持久化点踩状态
+  const newDisliked = !msg._disliked
+  msg._disliked = newDisliked
+  if (newDisliked) msg._liked = false
+  if (props.chatId) {
+    chatApi.updateFeedback(props.chatId, msg.id, newDisliked ? 'dislike' : null)
+      .catch(e => console.warn('[dislikeMessage] persist failed:', e))
+  }
 }
 
 defineExpose({ scrollToBottom })

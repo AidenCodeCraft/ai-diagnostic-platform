@@ -302,17 +302,8 @@ const MAX_PATH_LENGTH = 200
 const folderDepth = ref(0)
 
 // ============================================================
-function formatTime(ts: string) {
-  if (!ts) return ''
-  const match = ts.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/)
-  if (!match) return ts
-  let Y = +match[1], M = +match[2], D = +match[3], h = +match[4], m = +match[5], s = +match[6]
-  h += 8
-  if (h >= 24) { h -= 24; D += 1 }
-  const daysInMonth = new Date(Y, M, 0).getDate()
-  if (D > daysInMonth) { D = 1; M += 1; if (M > 12) { M = 1; Y += 1 } }
-  return `${Y}-${String(M).padStart(2,'0')}-${String(D).padStart(2,'0')} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
-}
+const _kTimeFmt = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+function formatTime(ts: string) { if (!ts) return ''; try { return _kTimeFmt.format(new Date(ts)) } catch { return ts } }
 function formatSize(row: any) { if (row.doc_type === 'folder') return '—'; if (!row.content) return '—'; const bytes = new Blob([row.content]).size; return bytes < 1024 ? bytes + ' B' : (bytes / 1024).toFixed(1) + ' KB' }
 function typeLabel(docType: string) { const map: Record<string, string> = { note: '笔记', folder: '文件夹', manual: '手册', faq: 'FAQ', bug_report: 'Bug', datasheet: '数据手册' }; return map[docType] || docType || '—' }
 
@@ -498,7 +489,14 @@ function enterEdit() { viewState.value = 'edit' }
 function handleRowAction(cmd: string, row: any) {
   if (cmd === 'edit') { form.value = { title: row.title, category: row.category || '', doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; viewState.value = 'edit' }
   else if (cmd === 'rename') { renameId.value = row.id; renameName.value = row.title; showRename.value = true }
-  else if (cmd === 'pin') { ElMessage.success('已置顶') }
+  else if (cmd === 'pin') {
+    try {
+      const newPinned = !row.is_pinned
+      await knowledgeApi.update(row.id, { is_pinned: newPinned })
+      ElMessage.success(newPinned ? '已置顶' : '已取消置顶')
+      await fetch()
+    } catch { ElMessage.error('操作失败') }
+  }
   else if (cmd === 'delete') { remove(row.id) }
 }
 async function doRename() { if (!renameName.value.trim() || !renameId.value) return; try { await knowledgeApi.update(renameId.value, { title: renameName.value }); ElMessage.success('已重命名'); showRename.value = false; await fetch() } catch { ElMessage.error('重命名失败') } }
@@ -512,7 +510,7 @@ function handleCreateCommand(cmd: string) {
   else if (cmd === 'note') { editingId.value = null; form.value = { title: '', category: '', doc_type: 'note', content: '' }; viewState.value = 'edit' }
 }
 function handleFileSelect(f: any) { uploadFile.value = f.raw }
-async function doUpload() { if (!uploadFile.value) return; uploading.value = true; try { const fd = new FormData(); fd.append('file', uploadFile.value); if (uploadForm.value.category) fd.append('category', uploadForm.value.category); fd.append('doc_type', uploadForm.value.doc_type); if (currentFolder.value) fd.append('parent_id', currentFolder.value.id.toString()); await fetch('/api/v1/knowledge/upload', { method: 'POST', body: fd }); ElMessage.success('上传成功'); showUpload.value = false; await fetch() } catch { ElMessage.error('上传失败') } finally { uploading.value = false } }
+async function doUpload() { if (!uploadFile.value) return; uploading.value = true; try { const fd = new FormData(); fd.append('file', uploadFile.value); if (uploadForm.value.category) fd.append('category', uploadForm.value.category); fd.append('doc_type', uploadForm.value.doc_type); if (currentFolder.value) fd.append('parent_id', currentFolder.value.id.toString()); await knowledgeApi.upload(fd); ElMessage.success('上传成功'); showUpload.value = false; await fetch() } catch (e: any) { ElMessage.error(e?.response?.data?.detail || '上传失败') } finally { uploading.value = false } }
 function createFolder() { if (!folderName.value.trim()) return; if (!checkPathDepth()) { showFolder.value = false; return } const data: any = { title: folderName.value, content: '', doc_type: 'folder' }; if (currentFolder.value) data.parent_id = currentFolder.value.id; knowledgeApi.create(data).then(() => { ElMessage.success('文件夹已创建'); showFolder.value = false; folderName.value = ''; fetch() }).catch(() => ElMessage.error('创建失败')) }
 
 async function save() { saving.value = true; try { const data: any = { ...form.value }; if (currentFolder.value) data.parent_id = currentFolder.value.id; if (editingId.value) { await knowledgeApi.update(editingId.value, data); ElMessage.success('已保存') } else { await knowledgeApi.create(data); ElMessage.success('已创建') }; viewState.value = 'list'; editingId.value = null; await fetch() } catch (e: any) { ElMessage.error(e.response?.data?.detail || '保存失败') } finally { saving.value = false } }

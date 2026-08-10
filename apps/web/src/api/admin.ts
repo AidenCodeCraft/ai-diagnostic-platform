@@ -88,6 +88,17 @@ export const adminApi = {
     return client.get<AdminStatsResponse>('/admin/stats')
   },
 
+  // ── 系统参数 ──────────────────────────────────────────────
+  /** 获取系统参数配置 */
+  getSystemConfig() {
+    return client.get<{ maxUploadMb: number; timeoutSeconds: number; logRetentionDays: number }>('/admin/config/system')
+  },
+
+  /** 保存系统参数配置 */
+  saveSystemConfig(config: { maxUploadMb: number; timeoutSeconds: number; logRetentionDays: number }) {
+    return client.put('/admin/config/system', config)
+  },
+
   // ── 用户管理 ──────────────────────────────────────────────
   /** 获取用户列表（支持分页、搜索、筛选） */
   listUsers(params?: {

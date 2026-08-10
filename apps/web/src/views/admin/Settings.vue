@@ -306,12 +306,37 @@ async function saveLLMConfig() {
   }
 }
 
-function saveSysConfig() {
-  localStorage.setItem('sys_config', JSON.stringify(sysConfig.value))
-  ElMessage.success('系统参数已保存')
+async function saveSysConfig() {
+  saving.value = true
+  try {
+    await adminApi.saveSystemConfig(sysConfig.value)
+    ElMessage.success('系统参数已保存')
+  } catch (err: any) {
+    ElMessage.error('保存失败: ' + (err.response?.data?.detail || err.message))
+  } finally {
+    saving.value = false
+  }
 }
 
-onMounted(loadLLMConfig)
+async function loadSysConfig() {
+  try {
+    const { data } = await adminApi.getSystemConfig()
+    if (data) {
+      sysConfig.value = {
+        maxUploadMb: data.maxUploadMb ?? 100,
+        timeoutSeconds: data.timeoutSeconds ?? 300,
+        logRetentionDays: data.logRetentionDays ?? 90,
+      }
+    }
+  } catch (err) {
+    console.error('[Settings] Failed to load system config:', err)
+  }
+}
+
+onMounted(() => {
+  loadLLMConfig()
+  loadSysConfig()
+})
 </script>
 
 <style scoped>

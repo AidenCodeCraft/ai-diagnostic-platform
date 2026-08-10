@@ -24,6 +24,7 @@ class KnowledgeUpdate(BaseModel):
     doc_type: Optional[str] = Field(default=None, max_length=50)
     project_id: Optional[int] = None
     status: Optional[str] = Field(default=None, max_length=50)
+    is_pinned: Optional[bool] = None
 
 
 class KnowledgeResponse(BaseModel):
@@ -37,6 +38,7 @@ class KnowledgeResponse(BaseModel):
     doc_type: str
     project_id: Optional[int] = None
     status: str
+    is_pinned: bool = False
     vector_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

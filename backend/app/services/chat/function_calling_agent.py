@@ -108,7 +108,6 @@ class QuickAnalysisTool(Tool):
 
     def __init__(self, db: Session):
         self.parser = LogParserService()
-        self.db = db
 
     def to_spec(self) -> Dict[str, Any]:
         return {

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 
 from app.database.base import Base
 
@@ -17,6 +17,7 @@ class KnowledgeDocument(Base):
     parent_id = Column(Integer, ForeignKey("knowledge_documents.id"), nullable=True)  # 文件夹层级
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
     status = Column(String(50), default="active")
+    is_pinned = Column(Boolean, default=False)
     vector_id = Column(String(200), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(

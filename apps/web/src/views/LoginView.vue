@@ -31,7 +31,9 @@ const loading = ref(false)
 const loginForm = reactive({ username: '', password: '' })
 
 async function handleLogin() {
-  if (!loginForm.username || !loginForm.password) { ElMessage.warning('请输入用户名和密码'); return }
+  if (!loginForm.username.trim()) { ElMessage.warning('请输入用户名'); return }
+  if (loginForm.username.trim().length < 2) { ElMessage.warning('用户名至少 2 个字符'); return }
+  if (!loginForm.password) { ElMessage.warning('请输入密码'); return }
   loading.value = true
   try {
     await userStore.login(loginForm.username, loginForm.password)

@@ -270,7 +270,7 @@ class KnowledgeService:
 
     def update(self, doc_id: int, data: Dict[str, Any]) -> KnowledgeDocument:
         doc = self.get(doc_id)
-        for field in ("title", "content", "category", "source", "doc_type", "project_id", "status"):
+        for field in ("title", "content", "category", "source", "doc_type", "project_id", "status", "is_pinned"):
             if field in data and data[field] is not None:
                 setattr(doc, field, data[field])
         self.db.commit()

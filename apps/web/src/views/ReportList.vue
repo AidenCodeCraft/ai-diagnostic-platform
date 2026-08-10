@@ -16,6 +16,7 @@
           </template>
         </el-table-column>
       </el-table>
+      <div v-if="!loading && items.length === 0" class="empty-hint">暂无诊断报告</div>
       <el-pagination v-if="total > pageSize" style="margin-top:16px;justify-content:center" background layout="prev,pager,next" :total="total" :page-size="pageSize" v-model:current-page="page" @change="fetch" />
     </el-card>
 
@@ -53,12 +54,14 @@ function formatTime(ts: string) { return ts ? new Date(ts).toLocaleString() : ''
 
 async function fetch() {
   loading.value = true
-  try { const { data } = await reportApi.list({ page: page.value, page_size: pageSize }); items.value = data.items; total.value = data.total } catch { warn('Failed to fetch reports', 'api') }
+  try { const { data } = await reportApi.list({ page: page.value, page_size: pageSize }); items.value = data.items; total.value = data.total }
+  catch { items.value = []; total.value = 0; console.error('[ReportList] fetch failed') }
   finally { loading.value = false }
 }
 
 async function viewDetail(row: any) {
-  try { const { data } = await reportApi.get(row.id); detail.value = data; showDetail.value = true } catch {}
+  try { const { data } = await reportApi.get(row.id); detail.value = data; showDetail.value = true }
+  catch { console.error('[ReportList] viewDetail failed for id:', row.id) }
 }
 
 async function exportMd(id: number) {

@@ -59,6 +59,10 @@ export const chatApi = {
   saveMessage(sessionId: number, role: string, content: string, sources?: ChatSource[], thinking?: { text: string, elapsed: number }) {
     return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, { role, content, sources, thinking })
   },
+  /** 更新消息反馈（like / dislike / null） */
+  updateFeedback(sessionId: number, messageId: number, feedback: string | null) {
+    return client.put(`/chat-sessions/${sessionId}/messages/${messageId}/feedback`, { feedback })
+  },
   /** SSE stream with optional diagnostic context */
   async sendMessageStream(
     sessionId: number,

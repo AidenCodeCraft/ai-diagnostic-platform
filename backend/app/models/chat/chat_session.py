@@ -31,4 +31,5 @@ class ChatMessage(Base):
     content = Column(Text, nullable=False)
     sources = Column(JSON, nullable=True)
     thinking = Column(JSON, nullable=True)  # { text: str, elapsed: int }
+    feedback = Column(String(10), nullable=True)  # null / 'like' / 'dislike'
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

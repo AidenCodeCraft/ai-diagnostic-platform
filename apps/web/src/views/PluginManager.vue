@@ -15,6 +15,7 @@
           </template>
         </el-table-column>
       </el-table>
+      <div v-if="!loading && plugins.length === 0" class="empty-hint">暂无插件数据</div>
     </el-card>
   </div>
 </template>
@@ -41,8 +42,9 @@ async function fetch() {
       }
     }
     plugins.value = flat
-  } catch {
-    warn('Failed to fetch plugins', 'api')
+  } catch (e: any) {
+    plugins.value = []
+    console.error('[PluginManager] fetch failed:', e?.response?.data?.detail || e?.message || e)
   }
   finally { loading.value = false }
 }
