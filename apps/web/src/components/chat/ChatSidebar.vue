@@ -27,7 +27,7 @@
             v-model="searchQuery"
             class="search-input"
             placeholder="搜索对话..."
-            @input="$emit('searchChats', $event.target.value)"
+            @input="$emit('searchChats', ($event.target as HTMLInputElement).value)"
             @keydown.escape="closeSearch"
           />
           <button v-if="searchQuery" class="search-clear" @click="clearSearch">&times;</button>

@@ -140,7 +140,7 @@ const userStore = useUserStore()
 
 const isChatRoute = computed(() => route.path === '/chat' || route.path === '/')
 
-// 诊断：路由变化时打印消息状态
+// 诊断：路由变化时打印消息状态（仅开发模式）
 watch(
   () => route.path,
   (path) => {
@@ -148,7 +148,8 @@ watch(
       console.log(
         `[route→${path}] messages=${messages.value.length} display=${displayMessages.value.length}`,
         messages.value.map((m: any) => `${m.role}:${(m.content || '').slice(0, 20)}`),
-    )
+      )
+    }
   },
 )
 
@@ -654,7 +655,8 @@ async function processFiles(files: FileAttachment[], text: string) {
 
   // 并发执行所有分析
   await Promise.allSettled(
-    succeeded.map(async ({ fa, logId }) => {
+    succeeded.map(async (item: any) => {
+      const { fa, logId } = item
       const analysisStartedAt = Date.now()
       const pId = analysisStartedAt.toString()
       messageIds.add(pId)

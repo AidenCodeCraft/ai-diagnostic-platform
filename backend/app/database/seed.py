@@ -24,6 +24,9 @@ DEFAULT_USERS = [
 
 def seed_users():
     """Create default users if they don't exist."""
+    # 确保表已创建
+    session.init_db()
+
     db = session.create_session()
     try:
         for u in DEFAULT_USERS:

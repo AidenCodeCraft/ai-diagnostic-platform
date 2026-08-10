@@ -83,11 +83,11 @@ export const adminApi = {
   // ── 系统参数 ──────────────────────────────────────────────
   /** 获取系统参数配置 */
   getSystemConfig() {
-    return client.get<{ maxUploadMb: number; timeoutSeconds: number; logRetentionDays: number }>('/admin/config/system')
+    return client.get<{ max_upload_mb: number; timeout_seconds: number; log_retention_days: number }>('/admin/config/system')
   },
 
   /** 保存系统参数配置 */
-  saveSystemConfig(config: { maxUploadMb: number; timeoutSeconds: number; logRetentionDays: number }) {
+  saveSystemConfig(config: { max_upload_mb: number; timeout_seconds: number; log_retention_days: number }) {
     return client.put('/admin/config/system', config)
   },
 

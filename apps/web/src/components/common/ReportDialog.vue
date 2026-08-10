@@ -80,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { ElButton, ElMessage } from 'element-plus'
 
 interface SelectableMessage {

@@ -1,7 +1,54 @@
-__pycache__
+# Python
+__pycache__/
 *.pyc
-.pytest_cache
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
 .env
-data/
+.env.*
+
+# Tests (不需要打包进生产镜像)
 tests/
+htmlcov/
+.coverage
+pytest_cache/
+.mypy_cache/
+
+# Data & uploads
+data/
+logs/
+*.log
+*.db
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+docs/
 *.md
+!README.md
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml

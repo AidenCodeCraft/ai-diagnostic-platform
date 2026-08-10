@@ -22,7 +22,7 @@ def get_db_session():
         db.close()
 
 
-router = APIRouter(prefix="/logs", tags=["logs"])
+router = APIRouter(prefix="/client-logs", tags=["client-logs"])
 
 
 def _extract_user_id(request: Request, db: Session) -> Optional[int]:

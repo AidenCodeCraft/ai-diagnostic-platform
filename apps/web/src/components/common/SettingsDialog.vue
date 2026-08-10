@@ -32,7 +32,7 @@
                     v-for="opt in themeOptions"
                     :key="opt.value"
                     :class="{ active: theme === opt.value }"
-                    @click="updateTheme(opt.value)"
+                    @click="updateTheme(opt.value as ThemePreference)"
                   >
                     {{ opt.icon }} {{ $t(`settings.${opt.value}`) }}
                   </button>

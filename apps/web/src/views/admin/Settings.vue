@@ -323,9 +323,9 @@ async function loadSysConfig() {
     const { data } = await adminApi.getSystemConfig()
     if (data) {
       sysConfig.value = {
-        maxUploadMb: data.maxUploadMb ?? 100,
-        timeoutSeconds: data.timeoutSeconds ?? 300,
-        logRetentionDays: data.logRetentionDays ?? 90,
+        max_upload_mb: data.max_upload_mb ?? 100,
+        timeout_seconds: data.timeout_seconds ?? 300,
+        log_retention_days: data.log_retention_days ?? 90,
       }
     }
   } catch (err) {

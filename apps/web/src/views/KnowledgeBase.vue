@@ -486,7 +486,7 @@ function enterEdit() { viewState.value = 'edit' }
 // ============================================================
 // 更多菜单操作
 // ============================================================
-function handleRowAction(cmd: string, row: any) {
+async function handleRowAction(cmd: string, row: any) {
   if (cmd === 'edit') { form.value = { title: row.title, category: row.category || '', doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; viewState.value = 'edit' }
   else if (cmd === 'rename') { renameId.value = row.id; renameName.value = row.title; showRename.value = true }
   else if (cmd === 'pin') {

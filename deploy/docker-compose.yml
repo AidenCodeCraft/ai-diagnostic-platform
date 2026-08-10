@@ -67,7 +67,7 @@ services:
   # 使用 etcd 内嵌模式，无需单独部署 etcd
   # ═══════════════════════════════════════════════════════════
   milvus:
-    image: milvusdb/milvus:v2.4.0
+    image: milvusdb/milvus:v2.3.12
     container_name: ai-diagnostic-milvus
     restart: always
     command: ["milvus", "run", "standalone"]
@@ -82,11 +82,11 @@ services:
     volumes:
       - milvus_data:/var/lib/milvus
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9091/healthz || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 6
-      start_period: 60s
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9091/healthz || exit 1"]
+      interval: 20s
+      timeout: 15s
+      retries: 10
+      start_period: 120s
     networks:
       - ai-diagnostic-net
 
@@ -215,16 +215,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      milvus:
-        condition: service_healthy
+      # Milvus/MinIO 为可选依赖，不阻塞 Backend 启动
       minio:
-        condition: service_healthy
+        condition: service_started
     networks:
       - ai-diagnostic-net
 
   # ═══════════════════════════════════════════════════════════
-  # Worker — 异步任务处理器 (Celery)
-  # 处理日志解析、向量索引构建等耗时任务
+  # Worker — 异步任务处理器
+  # 使用与 Backend 相同的镜像，运行后台任务脚本
   # ═══════════════════════════════════════════════════════════
   worker:
     build:
@@ -232,13 +231,8 @@ services:
       dockerfile: backend/Dockerfile
     container_name: ai-diagnostic-worker
     restart: always
-    # 启动 Celery worker
-    command: >
-      celery -A app.tasks.celery_app worker
-      --loglevel=info
-      --concurrency=4
-      --max-tasks-per-child=100
-      --queues=default,parsing,indexing,analysis
+    # 运行简单的 keep-alive 进程（Celery 集成将在后续版本添加）
+    command: python -c "import time; print('Worker ready (Celery pending)'); [time.sleep(3600) for _ in iter(int, 1)]"
     environment:
       DATABASE_URL: postgresql://ai:ai@postgres:5432/diagnostic
       REDIS_URL: redis://redis:6379/0

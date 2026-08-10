@@ -88,7 +88,7 @@ export const DEFAULT_CONFIG: LoggerConfig = {
   level: import.meta.env.DEV ? LogLevel.DEBUG : LogLevel.WARN,
   consoleEnabled: import.meta.env.DEV,
   remoteEnabled: import.meta.env.PROD,
-  endpoint: '/api/v1/logs/batch',
+  endpoint: '/api/v1/client-logs/batch',
   batchSize: 50,
   flushInterval: 5000,
   maxRetentionDays: 7,
