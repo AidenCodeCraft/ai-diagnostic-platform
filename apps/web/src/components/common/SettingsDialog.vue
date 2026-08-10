@@ -4,7 +4,7 @@
     <transition name="settings-modal">
       <div v-if="visible" class="settings-dialog">
         <div class="settings-header">
-          <h3>设置</h3>
+          <h3>{{ $t('settings.title') }}</h3>
           <button class="settings-close" @click="$emit('close')">&times;</button>
         </div>
         <div class="settings-layout">
@@ -26,7 +26,7 @@
             <!-- 通用 -->
             <div v-show="activeTab === 'general'">
               <div class="setting-group">
-                <h4>主题</h4>
+                <h4>{{ $t('settings.theme') }}</h4>
                 <div class="theme-switch">
                   <button
                     v-for="opt in themeOptions"
@@ -34,15 +34,15 @@
                     :class="{ active: theme === opt.value }"
                     @click="updateTheme(opt.value)"
                   >
-                    {{ opt.icon }} {{ opt.label }}
+                    {{ opt.icon }} {{ $t(`settings.${opt.value}`) }}
                   </button>
                 </div>
               </div>
               <div class="setting-group">
-                <h4>语言</h4>
-                <el-select v-model="language" size="small" style="width:150px" @change="saveSettings">
-                  <el-option label="简体中文" value="zh-CN" />
-                  <el-option label="English" value="en" />
+                <h4>{{ $t('settings.language') }}</h4>
+                <el-select v-model="language" size="small" style="width:150px" @change="updateLanguage">
+                  <el-option :label="$t('settings.zhCN')" value="zh-CN" />
+                  <el-option :label="$t('settings.en')" value="en" />
                 </el-select>
               </div>
             </div>
@@ -50,17 +50,17 @@
             <!-- 账号 -->
             <div v-show="activeTab === 'account'">
               <div class="setting-group">
-                <h4>个人信息</h4>
+                <h4>{{ $t('settings.personalInfo') }}</h4>
                 <div class="setting-row">
-                  <span>用户名</span>
+                  <span>{{ $t('settings.username') }}</span>
                   <span class="setting-value">{{ userName }}</span>
                 </div>
               </div>
               <div class="setting-group">
-                <h4>安全</h4>
+                <h4>{{ $t('settings.security') }}</h4>
                 <div class="setting-row">
-                  <span>修改密码</span>
-                  <el-button size="small" @click="$emit('changePassword')">修改</el-button>
+                  <span>{{ $t('settings.changePwd') }}</span>
+                  <el-button size="small" @click="$emit('changePassword')">{{ $t('common.edit') }}</el-button>
                 </div>
               </div>
             </div>
@@ -68,21 +68,21 @@
             <!-- 数据 -->
             <div v-show="activeTab === 'data'">
               <div class="setting-group">
-                <h4>清除数据</h4>
-                <p class="setting-desc">清除后将不可恢复，请谨慎操作。</p>
-                <el-button size="small" type="danger" @click="$emit('clearData')">清除所有对话数据</el-button>
+                <h4>{{ $t('settings.clearData') }}</h4>
+                <p class="setting-desc">{{ $t('settings.clearDataDesc') }}</p>
+                <el-button size="small" type="danger" @click="$emit('clearData')">{{ $t('settings.clearDataBtn') }}</el-button>
               </div>
             </div>
 
             <!-- 关于 -->
             <div v-show="activeTab === 'about'">
               <div class="setting-group">
-                <h4>AI Diagnostic Platform</h4>
-                <p class="setting-desc">版本 v0.1.0</p>
+                <h4>{{ $t('settings.version') }}</h4>
+                <p class="setting-desc">{{ $t('settings.versionNumber') }}</p>
               </div>
               <div class="setting-group">
-                <h4>服务条款</h4>
-                <p class="setting-desc">本平台为 AI 驱动的设备日志诊断工具。上传的日志文件仅用于分析诊断，AI 分析结果仅供参考。</p>
+                <h4>{{ $t('settings.about') }}</h4>
+                <p class="setting-desc">{{ $t('settings.terms') }}</p>
               </div>
             </div>
           </div>
@@ -94,8 +94,12 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElSelect, ElOption, ElButton } from 'element-plus'
 import { applyTheme, getSavedTheme, type ThemePreference } from '@/composables/useTheme'
+import { setLocale, type SupportedLocale } from '@/locales'
+
+const { locale } = useI18n()
 
 const props = defineProps<{
   visible: boolean
@@ -109,7 +113,7 @@ const emit = defineEmits<{
 }>()
 
 const theme = ref<ThemePreference>(getSavedTheme())
-const language = ref('zh-CN')
+const language = ref<SupportedLocale>((locale.value as SupportedLocale) || 'zh-CN')
 const activeTab = ref('general')
 
 const tabs = [
@@ -131,13 +135,21 @@ function updateTheme(value: ThemePreference) {
   saveSettings()
 }
 
+function updateLanguage(lang: SupportedLocale) {
+  language.value = lang
+  setLocale(lang)
+}
+
 function saveSettings() {
   localStorage.setItem('theme', theme.value)
 }
 
-// Reset tab when dialog opens
+// Sync language with current locale on open
 watch(() => props.visible, (v) => {
-  if (v) activeTab.value = 'general'
+  if (v) {
+    activeTab.value = 'general'
+    language.value = (locale.value as SupportedLocale) || 'zh-CN'
+  }
 })
 </script>
 

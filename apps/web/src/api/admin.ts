@@ -49,11 +49,17 @@ export interface AdminStats {
   total_logs: number
   total_analyses: number
   total_knowledge: number
+  total_sessions?: number
+  total_messages?: number
   analysis_completed: number
   analysis_failed: number
+  analysis_success_rate?: number
   analysis_trend: Array<{ date: string; count: number }>
   total_log_size_bytes: number
-  active_plugins: number
+  total_log_size_mb?: number
+  active_plugins?: number
+  active_users_30d?: number
+  knowledge_by_category?: Array<{ category: string; count: number }>
 }
 
 /** 管理员统计信息（从后端 /admin/stats 返回） */

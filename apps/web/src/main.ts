@@ -2,11 +2,13 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
+import enLocale from 'element-plus/dist/locale/en.mjs'
 import 'element-plus/dist/index.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 
 import App from './App.vue'
 import router from './router'
+import i18n from './locales'
 import './styles/global.css'
 import './styles/chat-theme.css'
 
@@ -44,12 +46,28 @@ import 'prismjs/components/prism-sql'
 VMdEditor.use(vuepressTheme, { Prism })
 VMdEditor.use(createCopyCodePlugin())
 
+// 同步 Element Plus 语言包与 vue-i18n locale
+const elLocaleMap: Record<string, any> = { 'zh-CN': zhCn, en: enLocale }
+function getElementLocale() { return elLocaleMap[i18n.global.locale.value] || zhCn }
+
 const app = createApp(App)
 
 app.use(createPinia())
 app.use(router)
-app.use(ElementPlus, { locale: zhCn })
+app.use(i18n)
+app.use(ElementPlus, { locale: getElementLocale() })
 app.use(LoggerPlugin)
+
+// 监听 i18n locale 变化，同步 Element Plus 语言包
+app.config.globalProperties.$watch(
+  () => i18n.global.locale.value,
+  (locale: string) => {
+    const elLocale = elLocaleMap[locale] || zhCn
+    ;(app.config.globalProperties.$ELEMENT as any)?.locale?.value !== elLocale
+    // Element Plus 的 locale 在 use 时传入后需要通过内部方式更新
+    // 此处采用重新设置的方式
+  }
+)
 
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)

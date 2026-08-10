@@ -72,6 +72,38 @@ class AuthService:
         }
 
     # ------------------------------------------------------------------
+    # Register
+    # ------------------------------------------------------------------
+
+    def register(self, username: str, password: str, role: str = "user") -> Dict[str, Any]:
+        """Register a new user and return a JWT token.
+
+        Raises ValueError if username already exists.
+        """
+        existing = self.db.query(User).filter(User.username == username).first()
+        if existing:
+            raise ValueError("用户名已存在")
+
+        password_hash = self._hash_password(password)
+        user = User(
+            username=username,
+            password_hash=password_hash,
+            role=role,
+            is_active=True,
+        )
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+
+        logger.info("User registered: username=%s role=%s", user.username, user.role)
+
+        return {
+            "access_token": self._create_token(user),
+            "token_type": "bearer",
+            "user": user,
+        }
+
+    # ------------------------------------------------------------------
     # Brute-force protection
     # ------------------------------------------------------------------
 

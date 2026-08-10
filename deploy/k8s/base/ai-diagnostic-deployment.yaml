@@ -6,6 +6,8 @@
 # 部署架构：
 #   Namespace: ai-diagnostic
 #   Services:  backend (FastAPI) + frontend (Nginx) + postgres + redis + milvus
+#              + minio + ollama (optional) + worker (celery)
+#   监控:      prometheus + grafana
 #   HA:        HPA 自动扩缩容 + PodDisruptionBudget + anti-affinity
 #   存储:      PVC (postgres, uploads)
 #   网络:      NetworkPolicy (零信任)
@@ -40,10 +42,13 @@ stringData:
   DEEPSEEK_BASE_URL: "https://api.deepseek.com/v1"
   MILVUS_USER: ""
   MILVUS_PASSWORD: ""
+  MINIO_ACCESS_KEY: "minioadmin"
+  MINIO_SECRET_KEY: "CHANGE_ME_MINIO_PASSWORD"
   SECRET_KEY: "CHANGE_ME_GENERATE_RANDOM_64_CHAR"
   POSTGRES_USER: "ai"
   POSTGRES_PASSWORD: "CHANGE_ME_IN_PRODUCTION"
   POSTGRES_DB: "diagnostic"
+  CELERY_BROKER_URL: "redis://redis:6379/1"
 ---
 # ═══════════════════════════════════════════════════════════
 # Backend Deployment
@@ -702,3 +707,590 @@ spec:
   namespaceSelector:
     matchNames:
       - ai-diagnostic
+---
+# ═══════════════════════════════════════════════════════════
+# Milvus Standalone — 向量数据库 Deployment
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: milvus
+  namespace: ai-diagnostic
+  labels:
+    app: milvus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: milvus
+  template:
+    metadata:
+      labels:
+        app: milvus
+    spec:
+      containers:
+        - name: milvus
+          image: milvusdb/milvus:v2.4.0
+          command: ["milvus", "run", "standalone"]
+          ports:
+            - name: grpc
+              containerPort: 19530
+            - name: health
+              containerPort: 9091
+          env:
+            - name: ETCD_AUTO_COMPACTION_MODE
+              value: "revision"
+            - name: ETCD_AUTO_COMPACTION_RETENTION
+              value: "1000"
+            - name: ETCD_QUOTA_BACKEND_BYTES
+              value: "4294967296"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9091
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9091
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1024Mi"
+            limits:
+              cpu: "2000m"
+              memory: "4096Mi"
+          volumeMounts:
+            - name: milvus-data
+              mountPath: /var/lib/milvus
+      volumes:
+        - name: milvus-data
+          persistentVolumeClaim:
+            claimName: milvus-pvc
+---
+# Milvus Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: milvus
+  namespace: ai-diagnostic
+spec:
+  type: ClusterIP
+  selector:
+    app: milvus
+  ports:
+    - name: grpc
+      port: 19530
+      targetPort: 19530
+    - name: health
+      port: 9091
+      targetPort: 9091
+---
+# Milvus PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: milvus-pvc
+  namespace: ai-diagnostic
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ssd
+  resources:
+    requests:
+      storage: 20Gi
+---
+# ═══════════════════════════════════════════════════════════
+# MinIO — 对象存储 Deployment
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: ai-diagnostic
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          command: ["minio", "server", "/data", "--console-address", ":9001"]
+          ports:
+            - name: api
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          env:
+            - name: MINIO_ROOT_USER
+              value: "minioadmin"
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: MINIO_SECRET_KEY
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+      volumes:
+        - name: minio-data
+          persistentVolumeClaim:
+            claimName: minio-pvc
+---
+# MinIO Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: ai-diagnostic
+spec:
+  type: ClusterIP
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+# MinIO PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-pvc
+  namespace: ai-diagnostic
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ssd
+  resources:
+    requests:
+      storage: 50Gi
+---
+# ═══════════════════════════════════════════════════════════
+# Worker — Celery 异步任务 Deployment
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: ai-diagnostic
+  labels:
+    app: worker
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 80
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: worker
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: worker
+          image: registry.example.com/ai-diagnostic/backend:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - app.tasks.celery_app
+            - worker
+            - --loglevel=info
+            - --concurrency=4
+            - --max-tasks-per-child=100
+            - --queues=default,parsing,indexing,analysis
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: backend-secrets
+          env:
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: CELERY_BROKER_URL
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+          volumeMounts:
+            - name: upload-data
+              mountPath: /data/uploads
+      volumes:
+        - name: upload-data
+          persistentVolumeClaim:
+            claimName: backend-uploads
+---
+# ═══════════════════════════════════════════════════════════
+# NetworkPolicy — Milvus 网络策略
+# ═══════════════════════════════════════════════════════════
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: milvus-policy
+  namespace: ai-diagnostic
+spec:
+  podSelector:
+    matchLabels:
+      app: milvus
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: backend
+        - podSelector:
+            matchLabels:
+              app: worker
+      ports:
+        - port: 19530
+---
+# NetworkPolicy — MinIO 网络策略
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minio-policy
+  namespace: ai-diagnostic
+spec:
+  podSelector:
+    matchLabels:
+      app: minio
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: backend
+        - podSelector:
+            matchLabels:
+              app: worker
+      ports:
+        - port: 9000
+---
+# ═══════════════════════════════════════════════════════════
+# Prometheus Deployment — 监控指标采集
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: ai-diagnostic
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: prometheus
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.52.0
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=15d"
+            - "--web.enable-lifecycle"
+          ports:
+            - name: web
+              containerPort: 9090
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2048Mi"
+          volumeMounts:
+            - name: prometheus-config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+            - name: prometheus-data
+              mountPath: /prometheus
+      volumes:
+        - name: prometheus-config
+          configMap:
+            name: prometheus-config
+        - name: prometheus-data
+          persistentVolumeClaim:
+            claimName: prometheus-pvc
+---
+# Prometheus Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: ai-diagnostic
+  labels:
+    app: prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app: prometheus
+  ports:
+    - name: web
+      port: 9090
+      targetPort: 9090
+---
+# Prometheus PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-pvc
+  namespace: ai-diagnostic
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ssd
+  resources:
+    requests:
+      storage: 20Gi
+---
+# Prometheus ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: ai-diagnostic
+---
+# Prometheus ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/metrics", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+---
+# Prometheus ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: ai-diagnostic
+roleRef:
+  kind: ClusterRole
+  name: prometheus
+  apiGroup: rbac.authorization.k8s.io
+---
+# ═══════════════════════════════════════════════════════════
+# Grafana Deployment — 监控可视化
+# ═══════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: ai-diagnostic
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.4.0
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: admin
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: SECRET_KEY
+                  optional: true
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            - name: GF_INSTALL_PLUGINS
+              value: ""
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: grafana-data
+          persistentVolumeClaim:
+            claimName: grafana-pvc
+---
+# Grafana Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: ai-diagnostic
+  labels:
+    app: grafana
+spec:
+  type: ClusterIP
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+---
+# Grafana PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-pvc
+  namespace: ai-diagnostic
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ssd
+  resources:
+    requests:
+      storage: 5Gi
+---
+# ═══════════════════════════════════════════════════════════
+# Prometheus ConfigMap — 从监控配置生成
+# ═══════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: ai-diagnostic
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: []
+
+    rule_files:
+      - "/etc/prometheus/alert.rules.yml"
+
+    scrape_configs:
+      - job_name: "ai-diagnostic-backend"
+        metrics_path: /metrics
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - ai-diagnostic
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: backend
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+
+      - job_name: "prometheus"
+        static_configs:
+          - targets: ["localhost:9090"]

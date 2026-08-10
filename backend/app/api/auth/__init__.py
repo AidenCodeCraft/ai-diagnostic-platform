@@ -1,4 +1,4 @@
-"""Authentication API — login, verify, with MAC-based brute-force protection."""
+"""Authentication API — login, register, verify, with MAC-based brute-force protection."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.database import session as session_module
-from app.schemas import TokenResponse, UserLogin
+from app.schemas import TokenResponse, UserLogin, UserCreate
 from app.services import AuthService
 
 
@@ -29,6 +29,22 @@ def _get_client_mac(request: Request) -> str:
     if forwarded:
         return forwarded
     return request.client.host if request.client else "unknown"
+
+
+@router.post("/register", response_model=TokenResponse)
+def register(
+    body: UserCreate,
+    db: Session = Depends(get_db_session),
+):
+    """Register a new user and receive a JWT access token."""
+    try:
+        return AuthService(db).register(
+            username=body.username,
+            password=body.password,
+            role=body.role if hasattr(body, 'role') else 'user',
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/verify")

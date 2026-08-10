@@ -104,22 +104,11 @@
         <div class="config-section">
           <div class="cleanup-card">
             <div class="cleanup-info">
-              <h4>清理分析任务</h4>
-              <p>删除指定日期之前的分析任务及关联结果</p>
+              <h4>清除所有对话数据</h4>
+              <p>清除当前用户的所有聊天对话记录，此操作不可恢复</p>
             </div>
             <div class="cleanup-action">
-              <el-date-picker v-model="cleanupDate" type="date" placeholder="选择日期" style="width:160px" />
-              <el-button type="danger" plain style="margin-left:8px">执行清理</el-button>
-            </div>
-          </div>
-          <div class="cleanup-card" style="margin-top:12px">
-            <div class="cleanup-info">
-              <h4>清理日志文件</h4>
-              <p>删除指定日期之前的日志文件及解析数据</p>
-            </div>
-            <div class="cleanup-action">
-              <el-date-picker v-model="cleanupLogDate" type="date" placeholder="选择日期" style="width:160px" />
-              <el-button type="danger" plain style="margin-left:8px">执行清理</el-button>
+              <el-button type="danger" plain :loading="clearingData" @click="clearAllChatData">清除所有对话数据</el-button>
             </div>
           </div>
         </div>
@@ -149,6 +138,8 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '@/api/admin'
+import { chatApi } from '@/api/chat'
+import { useUserStore } from '@/stores/user'
 
 interface LLMModel {
   name: string
@@ -185,6 +176,45 @@ const sysConfig = ref({
 
 const cleanupDate = ref('')
 const cleanupLogDate = ref('')
+const clearingData = ref(false)
+
+const userStore = useUserStore()
+
+async function clearAllChatData() {
+  try {
+    await ElMessageBox.confirm(
+      '确定要清除当前用户的所有对话数据吗？此操作不可恢复。',
+      '确认清除',
+      { type: 'warning', confirmButtonText: '确认清除', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  clearingData.value = true
+  try {
+    // 获取当前用户的所有会话
+    const { data } = await chatApi.listSessions()
+    const sessions = data?.items || []
+    if (sessions.length === 0) {
+      ElMessage.info('没有需要清除的对话数据')
+      return
+    }
+    // 逐个删除
+    let deleted = 0
+    await Promise.all(
+      sessions.map(async (s: any) => {
+        try {
+          await chatApi.deleteSession(s.id)
+          deleted++
+        } catch { /* 单个删除失败继续 */ }
+      })
+    )
+    ElMessage.success(`已清除 ${deleted} 个对话记录`)
+  } catch (err: any) {
+    ElMessage.error('清除失败: ' + (err.response?.data?.detail || err.message))
+  } finally {
+    clearingData.value = false
+  }
+}
 
 function addModel() {
   llmModels.value.push({

@@ -52,7 +52,7 @@
         <div class="storage-info">
           <div class="storage-value">{{ formatBytes(stats.total_log_size_bytes) }}</div>
           <div class="storage-label">日志总存储量</div>
-          <div class="storage-bar"><div class="storage-bar-fill" :style="{ width: '42%' }"></div></div>
+          <div class="storage-bar"><div class="storage-bar-fill" :style="{ width: storagePercent + '%' }"></div></div>
         </div>
       </div>
     </div>
@@ -92,6 +92,14 @@ const successRate = computed(() => {
 const maxTrendCount = computed(() => {
   if (!stats.value.analysis_trend.length) return 1
   return Math.max(...stats.value.analysis_trend.map(i => i.count), 1)
+
+const storagePercent = computed(() => {
+  const bytes = stats.value.total_log_size_bytes || 0
+  // 假设 10GB 为 100%
+  const maxBytes = 10 * 1024 * 1024 * 1024
+  if (bytes <= 0) return 2
+  return Math.min(100, Math.round((bytes / maxBytes) * 100))
+})
 })
 
 function formatBytes(bytes: number) {

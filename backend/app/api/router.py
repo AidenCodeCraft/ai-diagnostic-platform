@@ -35,6 +35,8 @@ from app.api.system.projects import router as projects_router
 from app.api.system.rules import router as rules_router
 from app.api.system.bug_cases import router as bug_cases_router
 from app.api.system.client_logs import router as client_logs_router
+from app.api.system.dashboard import router as dashboard_router
+from app.api.system.search import router as search_router
 
 
 api_router = APIRouter()
@@ -72,3 +74,5 @@ api_router.include_router(projects_router)
 api_router.include_router(rules_router)
 api_router.include_router(bug_cases_router)
 api_router.include_router(client_logs_router)
+api_router.include_router(dashboard_router)
+api_router.include_router(search_router)

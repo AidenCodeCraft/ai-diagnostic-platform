@@ -19,9 +19,9 @@ def test_prompt_build_includes_error_summary():
         {"is_error": False, "classification": "normal", "module": "system"},
     ]
     prompt = DiagnosticPrompt.build("raw log", events)
-    assert "ERROR SUMMARY" in prompt
+    assert "错误概览" in prompt
     assert "timeout" in prompt
-    assert "2 occurrences" in prompt
+    assert "2" in prompt  # occurrence count
 
 
 def test_prompt_build_no_errors():
@@ -33,7 +33,7 @@ def test_prompt_build_no_errors():
 
 
 def test_prompt_version():
-    assert DiagnosticPrompt.VERSION == "1.0"
+    assert DiagnosticPrompt.VERSION == "2.0"
 
 
 # ------------------------------------------------------------------

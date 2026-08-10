@@ -1,11 +1,11 @@
 <template>
   <div class="chat-layout">
     <!-- 左侧边栏 -->
-    <ChatSidebar v-model:collapsed="sidebarCollapsed" :chats="recentChats"
+    <ChatSidebar v-model:collapsed="sidebarCollapsed" :chats="filteredChats"
       :activeChatId="isChatRoute ? currentChatId : 0"
       :userName="userName" :userInitial="userInitial" :isAdmin="userStore.isAdmin" @toggleSearch="toggleSearch"
       @newChat="newChat" @navigate="navigateTo" @selectChat="selectChat" @chatMenu="openChatMenu"
-      @toggleUserMenu="showUserMenu = !showUserMenu" />
+      @toggleUserMenu="showUserMenu = !showUserMenu" @searchChats="onSearchChats" />
 
     <button v-if="sidebarCollapsed" class="float-open-btn" @click="sidebarCollapsed = false" title="展开侧栏">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -32,11 +32,6 @@
             <polyline points="19 12 12 19 5 12" />
           </svg> 置顶
         </button>
-        <button @click="analyzeChat">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-          </svg> 分析
-        </button>
         <button @click="exportChat">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -58,12 +53,36 @@
     <SettingsDialog :visible="showSettings" :userName="userName" @close="showSettings = false"
       @changePassword="changePwd" @clearData="clearData" />
 
+    <!-- 帮助与反馈弹窗 -->
+    <HelpDialog :visible="showHelp" @close="showHelp = false" />
+
+    <!-- 下载客户端弹窗 -->
+    <DownloadDialog :visible="showDownload" @close="showDownload = false" />
+
+    <!-- 生成诊断报告弹窗 -->
+    <ReportDialog
+      :visible="showReportDialog"
+      :messages="selectableMessages"
+      :chatTitle="currentChatTitle"
+      :model="selectedModel"
+      @close="showReportDialog = false"
+      @generate="onReportGenerate"
+    />
+
     <!-- ============================================================ -->
     <!-- 对话主区域                                                    -->
     <!-- ============================================================ -->
     <main class="chat-main">
       <template v-if="$route.path === '/chat' || $route.path === '/'">
         <div class="chat-content" :class="{ 'chat-empty': displayMessages.length === 0 }">
+          <!-- 分支面板 -->
+          <BranchPanel
+            v-if="branchCount > 1"
+            :branches="branchList"
+            :current-branch-id="currentBranchId"
+            @switch="onBranchSwitch"
+            @delete="onBranchDelete"
+          />
           <ChatMessageList ref="msgListRef" :key="'cl-' + currentChatId + '-' + displayMessages.length"
             :messages="displayMessages" :loading="loadingPhase !== 'idle'" :isEmpty="displayMessages.length === 0"
             @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editMessage="handleEditMessage" />
@@ -104,7 +123,12 @@ import ChatMessageList from '@/components/chat/ChatMessageList.vue'
 import ChatInputArea from '@/components/chat/ChatInputArea.vue'
 import UserMenu from '@/components/common/UserMenu.vue'
 import SettingsDialog from '@/components/common/SettingsDialog.vue'
+import HelpDialog from '@/components/common/HelpDialog.vue'
+import DownloadDialog from '@/components/common/DownloadDialog.vue'
+import ReportDialog from '@/components/common/ReportDialog.vue'
+import BranchPanel from '@/components/common/BranchPanel.vue'
 import type { ChatRecord, FileAttachment, MsgAttachment } from '@/components/chat/types'
+import { useChatBranch } from '@/composables/useChatBranch'
 
 // ── State ──────────────────────────────────────────────────────
 
@@ -153,8 +177,45 @@ const messageIds = new Set<string>()
 const attachedFiles = ref<FileAttachment[]>([])
 const showUserMenu = ref(false)
 const showSettings = ref(false)
+const showHelp = ref(false)
+const showDownload = ref(false)
+const showReportDialog = ref(false)
+
+// ── 分支管理 ────────────────────────────────────────────────
+const { state: branchState, currentBranch, branchCount, createBranch, switchBranch, getBranches, reset: resetBranches, deleteBranch: removeBranch } = useChatBranch()
+
+const branchList = computed(() => getBranches())
+const currentBranchId = computed(() => branchState.currentBranchId)
+
+function onBranchSwitch(branchId: string) {
+  const saved = switchBranch(branchId)
+  if (saved) {
+    messages.value = saved
+    messageIds.clear()
+    messages.value.forEach((m: any) => messageIds.add(m.id))
+  }
+}
+
+function onBranchDelete(branchId: string) {
+  removeBranch(branchId)
+}
+
+/** 供报告生成选择的消息列表（仅 user + assistant，去除系统消息） */
+const selectableMessages = computed(() =>
+  messages.value.filter(m => m.role === 'user' || m.role === 'assistant')
+)
+const currentChatTitle = computed(() => {
+  const chat = recentChats.value.find(c => c.id === currentChatId.value)
+  return chat?.title || '诊断报告'
+})
 
 const recentChats = ref<ChatRecord[]>([])
+const searchChatQuery = ref('')
+const filteredChats = computed(() => {
+  if (!searchChatQuery.value.trim()) return recentChats.value
+  const q = searchChatQuery.value.toLowerCase()
+  return recentChats.value.filter(c => (c.title || '').toLowerCase().includes(q))
+})
 const chatMenu = reactive({ visible: false, x: 0, y: 0, chatId: 0 })
 
 const msgListRef = ref<InstanceType<typeof ChatMessageList>>()
@@ -166,7 +227,7 @@ const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
 
 // ── UI Actions ────────────────────────────────────────────────
 
-function toggleSearch() { /* placeholder */ }
+function onSearchChats(query: string) { searchChatQuery.value = query }
 function navigateTo(path: string) { router.push(path) }
 function openKnowledge(source: { id?: number }) {
   router.push(source.id ? `/knowledge?document=${source.id}` : '/knowledge')
@@ -177,8 +238,8 @@ function handleUserAction(action: 'download' | 'settings' | 'help' | 'logout') {
   switch (action) {
     case 'settings': showSettings.value = true; break
     case 'logout': userStore.logout(); router.push('/login'); break
-    case 'download': ElMessage.info('桌面版下载页面开发中'); break
-    case 'help': ElMessage.info('帮助文档开发中'); break
+    case 'download': showDownload.value = true; break
+    case 'help': showHelp.value = true; break
   }
 }
 
@@ -219,6 +280,7 @@ async function newChat() {
   lastAnalysis.value = null
   inputText.value = ''
   attachedFiles.value = []
+  resetBranches()
   router.push('/chat')
 }
 
@@ -325,8 +387,6 @@ function pinChat() {
   }
   closeChatMenu()
 }
-
-function analyzeChat() { ElMessage.info('分析功能开发中'); closeChatMenu() }
 
 async function exportChat() {
   const chatId = chatMenu.chatId
@@ -734,6 +794,9 @@ async function handleRegenerate(assistantMsg: any) {
   const userMsg = [...messages.value].slice(0, idx).reverse().find(m => m.role === 'user')
   if (!userMsg) return
 
+  // 创建分支：保存截断前的消息状态
+  createBranch(messages.value, idx, `regen-${new Date().toLocaleTimeString()}`)
+
   // 截断：移除该 assistant 消息及其之后的所有消息（对话分支）
   messages.value = messages.value.slice(0, idx)
   messageIds.clear()
@@ -756,6 +819,10 @@ function handleEditMessage(userMsg: any) {
   if (idx === -1) return
   // 去掉文件标签，只保留文字
   const text = userMsg.content.replace(/\n?\[上传文件:.*?\]/g, '').trim()
+
+  // 创建分支
+  createBranch(messages.value, idx, `edit-${new Date().toLocaleTimeString()}`)
+
   inputText.value = text
   messages.value = messages.value.slice(0, idx)
   messageIds.clear()
@@ -779,7 +846,63 @@ function formatApiError(e: any): string {
 }
 
 async function generateDiagnosticReport() {
-  ElMessage.info('报告生成功能开发中')
+  if (messages.value.length === 0) {
+    ElMessage.warning('当前对话暂无内容，请先进行对话或上传日志分析')
+    return
+  }
+  showReportDialog.value = true
+}
+
+function onReportGenerate(selectedIds: Set<string>, format: 'markdown' | 'pdf' = 'markdown') {
+  const selected = messages.value.filter(m => selectedIds.has(m.id))
+  if (selected.length === 0) {
+    ElMessage.warning('请至少选择一条消息')
+    return
+  }
+
+  if (format === 'pdf') {
+    // PDF 导出
+    import('@/utils/pdfExport').then(({ exportToPdf }) => {
+      const pdfMessages = selected.map((m: any) => ({
+        role: m.role,
+        content: m.content || '',
+        createdAt: m.createdAt || Date.now(),
+      }))
+      exportToPdf(pdfMessages, {
+        title: currentChatTitle.value,
+        model: selectedModel.value,
+        includeMetadata: true,
+      }).then(() => {
+        ElMessage.success(`PDF 报告已生成，包含 ${selected.length} 条消息`)
+        showReportDialog.value = false
+      }).catch((err: any) => {
+        ElMessage.error('PDF 导出失败: ' + (err.message || '未知错误'))
+      })
+    }).catch((err: any) => {
+      ElMessage.error('PDF 模块加载失败: ' + (err.message || '未知错误'))
+    })
+    return
+  }
+
+  // Markdown 导出
+  const exportMessages: ExportMessage[] = selected.map((m: any) => ({
+    role: m.role,
+    content: m.content || '',
+    createdAt: m.createdAt || Date.now(),
+    sources: m.sources,
+    thinking: m.thinking,
+  }))
+
+  exportChatUtil(exportMessages, {
+    title: currentChatTitle.value,
+    model: selectedModel.value,
+    includeMetadata: true,
+    includeSources: true,
+    includeThinking: false,
+  })
+
+  ElMessage.success(`诊断报告已生成，包含 ${selected.length} 条消息`)
+  showReportDialog.value = false
 }
 
 onMounted(() => {

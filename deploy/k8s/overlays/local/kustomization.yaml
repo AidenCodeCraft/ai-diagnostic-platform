@@ -25,8 +25,12 @@ configMapGenerator:
       - LLM_PROVIDER=mock
       - DEEPSEEK_MODEL=deepseek-chat
       - EMBEDDING_PROVIDER=mock
+      - EMBEDDING_BATCH_SIZE=32
       - MILVUS_ENABLED=false
+      - MINIO_ENABLED=false
+      - OLLAMA_ENABLED=false
       - UPLOAD_DIR=/data/uploads
+      - SECRET_KEY=local-dev-secret-key-not-for-production
       - PROMETHEUS_METRICS_ENABLED=false
       - RATE_LIMIT_ENABLED=false
       - RATE_LIMIT_PER_MINUTE=600

@@ -2,7 +2,7 @@
   <aside class="sidebar" :class="{ collapsed }">
     <div class="sidebar-inner">
       <div class="sidebar-top">
-        <button class="sidebar-icon-btn" title="搜索" @click="$emit('toggleSearch')">
+        <button class="sidebar-icon-btn" title="搜索" @click="toggleSearchBox">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8" />
@@ -16,6 +16,22 @@
             <path :d="collapsed ? 'M9 3v18' : 'M15 3v18'" />
           </svg>
         </button>
+      </div>
+
+      <!-- 搜索框 -->
+      <div v-show="!collapsed && showSearch" class="sidebar-search">
+        <div class="search-input-wrap">
+          <svg class="search-input-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input
+            ref="searchInputRef"
+            v-model="searchQuery"
+            class="search-input"
+            placeholder="搜索对话..."
+            @input="$emit('searchChats', $event.target.value)"
+            @keydown.escape="closeSearch"
+          />
+          <button v-if="searchQuery" class="search-clear" @click="clearSearch">&times;</button>
+        </div>
       </div>
 
       <div class="sidebar-new-chat" v-show="!collapsed">
@@ -86,6 +102,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref, nextTick } from 'vue'
 import type { ChatRecord } from './types'
 
 defineProps<{
@@ -97,7 +114,7 @@ defineProps<{
   isAdmin: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'update:collapsed', value: boolean): void
   (e: 'toggleSearch'): void
   (e: 'newChat'): void
@@ -105,7 +122,32 @@ defineEmits<{
   (e: 'selectChat', id: number): void
   (e: 'chatMenu', event: MouseEvent, chat: ChatRecord): void
   (e: 'toggleUserMenu'): void
+  (e: 'searchChats', query: string): void
 }>()
+
+const showSearch = ref(false)
+const searchQuery = ref('')
+const searchInputRef = ref<HTMLInputElement>()
+
+function toggleSearchBox() {
+  showSearch.value = !showSearch.value
+  if (showSearch.value) {
+    nextTick(() => searchInputRef.value?.focus())
+  } else {
+    clearSearch()
+  }
+}
+
+function clearSearch() {
+  searchQuery.value = ''
+  emit('searchChats', '')
+  nextTick(() => searchInputRef.value?.focus())
+}
+
+function closeSearch() {
+  showSearch.value = false
+  clearSearch()
+}
 </script>
 
 <style scoped>
@@ -135,6 +177,59 @@ defineEmits<{
   align-items: center;
   gap: 8px;
   padding: 12px 14px;
+}
+
+/* 搜索框 */
+.sidebar-search {
+  padding: 0 10px 6px;
+}
+
+.search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--chat-sidebar-search-bg, #f3f4f6);
+  border: 1px solid var(--chat-sidebar-search-border, #e5e7eb);
+  border-radius: 8px;
+  transition: border-color 0.15s;
+}
+
+.search-input-wrap:focus-within {
+  border-color: var(--chat-sidebar-search-focus, #2563eb);
+}
+
+.search-input-icon {
+  color: var(--chat-sidebar-icon);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 13px;
+  color: var(--chat-sidebar-history-text);
+}
+
+.search-input::placeholder {
+  color: var(--chat-sidebar-section);
+}
+
+.search-clear {
+  background: none;
+  border: none;
+  color: var(--chat-sidebar-section);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.search-clear:hover {
+  color: var(--chat-sidebar-icon-hover);
 }
 
 .sidebar-icon-btn {

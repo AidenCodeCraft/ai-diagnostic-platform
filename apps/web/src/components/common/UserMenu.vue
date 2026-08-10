@@ -2,7 +2,7 @@
   <teleport to="body">
     <div v-if="visible" class="menu-overlay" @click="$emit('close')"></div>
     <div v-if="visible" class="user-menu-popup">
-      <button @click="handleAction('download')">📥 下载桌面版</button>
+      <button @click="handleAction('download')">📥 下载客户端</button>
       <button @click="handleAction('settings')">⚙️ 设置</button>
       <button @click="handleAction('help')">💬 帮助与反馈</button>
       <hr />

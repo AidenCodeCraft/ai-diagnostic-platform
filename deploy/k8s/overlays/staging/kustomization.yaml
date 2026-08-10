@@ -46,4 +46,8 @@ configMapGenerator:
       - LOG_LEVEL=DEBUG
       - LLM_PROVIDER=mock
       - MILVUS_ENABLED=false
+      - MINIO_ENABLED=false
+      - OLLAMA_ENABLED=false
       - RATE_LIMIT_ENABLED=false
+      - PROMETHEUS_METRICS_ENABLED=false
+      - LOG_DESENSITIZE_ENABLED=false

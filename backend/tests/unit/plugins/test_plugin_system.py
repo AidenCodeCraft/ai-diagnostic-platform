@@ -7,8 +7,9 @@ from typing import List
 
 import pytest
 
-# Ensure project root is on sys.path so plugins package is importable
-_project_root = Path(__file__).resolve().parents[2]
+# Ensure project root (g:/ai-diagnostic-platform/) is on sys.path so plugins package is importable
+# __file__ is at tests/unit/plugins/test_plugin_system.py → parents[4] = project root
+_project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 

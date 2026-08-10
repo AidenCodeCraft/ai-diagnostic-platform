@@ -88,6 +88,9 @@ configMapGenerator:
     literals:
       - DEBUG="false"
       - LOG_LEVEL="WARNING"
+      - MILVUS_ENABLED="true"
+      - MINIO_ENABLED="true"
+      - OLLAMA_ENABLED="false"
       - RATE_LIMIT_ENABLED="true"
       - RATE_LIMIT_PER_MINUTE="60"
       - LOG_DESENSITIZE_ENABLED="true"
