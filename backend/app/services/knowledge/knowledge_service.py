@@ -368,14 +368,31 @@ class KnowledgeService:
         return min(1.0, (title_hits * 0.3 + content_hits * 0.1))
 
     @staticmethod
-    def _extract_snippet(content: str, query: str, window: int = 80) -> str:
+    def _extract_snippet(content: str, query: str, window: int = 300) -> str:
+        """提取包含搜索关键词的上下文片段。
+
+        优先匹配完整搜索词，如果找不到则尝试匹配搜索词中的
+        数字/字母数字 token（如 "1078"、"CJT1078"）。
+        """
         if not content or not query:
-            return content[:200] if content else ""
+            return content[:300] if content else ""
+
         idx = content.lower().find(query.lower())
+
+        # 完整匹配失败 → 尝试匹配数字/字母数字 token
         if idx == -1:
-            return content[:200]
+            tokens = re.findall(r'[A-Za-z]*\d+[A-Za-z]*', query)
+            for token in tokens:
+                idx = content.lower().find(token.lower())
+                if idx != -1:
+                    break
+
+        # 所有匹配失败 → 返回开头
+        if idx == -1:
+            return content[:300]
+
         start = max(0, idx - window // 2)
-        end = min(len(content), idx + len(query) + window // 2)
+        end = min(len(content), idx + window // 2)
         snippet = content[start:end]
         if start > 0:
             snippet = "..." + snippet

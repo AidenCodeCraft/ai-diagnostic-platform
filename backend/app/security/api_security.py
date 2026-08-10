@@ -287,6 +287,12 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         "/health", "/metrics", "/docs", "/openapi.json", "/redoc",
     }
 
+    # 跳过输入验证的路径前缀（知识库 Markdown 内容含 SQL 关键词属正常文本）
+    INPUT_VALIDATION_SKIP_PREFIXES: Set[str] = {
+        "/api/v1/knowledge",
+        "/api/v1/chat-sessions",
+    }
+
     def __init__(
         self,
         app: ASGIApp,
@@ -337,40 +343,42 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 content={"detail": replay_error},
             )
 
-        # 3. 输入验证（仅 POST/PUT/PATCH）
+        # 3. 输入验证（仅 POST/PUT/PATCH，跳过知识库/对话等富文本端点）
         if self.enable_input_validation and request.method in ("POST", "PUT", "PATCH"):
-            content_type = request.headers.get("content-type", "")
-            # 克隆请求体用于验证（不影响后续处理）
-            if "application/json" in content_type:
-                try:
-                    body = await request.body()
-                    if len(body) > self.max_body_size:
-                        return JSONResponse(
-                            status_code=413,
-                            content={"detail": "请求体过大"},
-                        )
-
-                    if body:
-                        data = json.loads(body)
-                        errors = InputValidator.validate_dict(data)
-                        if errors:
-                            from app.security.log_desensitizer import get_audit_logger
-                            get_audit_logger().log(
-                                "input_validation_failed",
-                                resource=path,
-                                success=False,
-                                extra={"errors": errors[:3]},
-                            )
+            skip_validation = any(path.startswith(prefix) for prefix in self.INPUT_VALIDATION_SKIP_PREFIXES)
+            if not skip_validation:
+                content_type = request.headers.get("content-type", "")
+                # 克隆请求体用于验证（不影响后续处理）
+                if "application/json" in content_type:
+                    try:
+                        body = await request.body()
+                        if len(body) > self.max_body_size:
                             return JSONResponse(
-                                status_code=400,
-                                content={
-                                    "detail": "输入验证失败",
-                                    "errors": errors[:3],
-                                },
+                                status_code=413,
+                                content={"detail": "请求体过大"},
                             )
 
-                except json.JSONDecodeError:
-                    pass  # 非 JSON 请求体，跳过验证
+                        if body:
+                            data = json.loads(body)
+                            errors = InputValidator.validate_dict(data)
+                            if errors:
+                                from app.security.log_desensitizer import get_audit_logger
+                                get_audit_logger().log(
+                                    "input_validation_failed",
+                                    resource=path,
+                                    success=False,
+                                    extra={"errors": errors[:3]},
+                                )
+                                return JSONResponse(
+                                    status_code=400,
+                                    content={
+                                        "detail": "输入验证失败",
+                                        "errors": errors[:3],
+                                    },
+                                )
+
+                    except json.JSONDecodeError:
+                        pass  # 非 JSON 请求体，跳过验证
 
         # 4. 执行请求 + 添加安全头
         response = await call_next(request)

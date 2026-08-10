@@ -209,27 +209,32 @@ def chat_stream(
     db: Session = Depends(get_db_session),
 ):
     """Stream AI reply via SSE with diagnostic context injection."""
-    try:
 
-        def generate():
+    def generate():
+        try:
             yield from ChatService(db).send_message_stream(
                 session_id=session_id,
                 content=body["content"],
                 model=body.get("model"),
                 log_analysis=body.get("log_analysis"),
             )
+        except ValueError as e:
+            # 会话不存在等可恢复错误 → 通过 SSE 返回错误
+            import json
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        except Exception as e:
+            import json
+            yield f"data: {json.dumps({'error': 'Internal server error'})}\n\n"
 
-        return StreamingResponse(
-            generate(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.put("/{session_id}/messages/{message_id}/feedback")

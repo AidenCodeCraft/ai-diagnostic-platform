@@ -44,5 +44,6 @@ def get_session_factory():
 
 
 def create_session():
+    init_db()
     logger.debug("Creating new DB session")
     return SessionLocal()

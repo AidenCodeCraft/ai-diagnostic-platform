@@ -238,10 +238,10 @@ function openKnowledge(source: { id?: number }) {
 }
 function onModelChange(model: string) { selectedModel.value = model; localStorage.setItem('selectedModel', model) }
 
-function handleUserAction(action: 'download' | 'settings' | 'help' | 'logout') {
+async function handleUserAction(action: 'download' | 'settings' | 'help' | 'logout') {
   switch (action) {
     case 'settings': showSettings.value = true; break
-    case 'logout': userStore.logout(); router.push('/login'); break
+    case 'logout': await userStore.logout(); router.push('/login'); break
     case 'download': showDownload.value = true; break
     case 'help': showHelp.value = true; break
   }

@@ -150,28 +150,45 @@ class DiagnosticChatAgent:
         analysis = self._analyze_question(cleaned)
 
         # Stage 2.5: 主动追问检测（增强版，支持 LLM 增强分析）
+        # 关键：主动追问前先检索知识库——如果知识库已有答案，直接进入 RAG 模式，不追问
         if analysis.get("is_diagnostic") and not log_analysis:
-            # 尝试 LLM 增强追问分析，失败时回退到关键词分析
-            try:
-                proactive_llm = analyze_and_ask_with_llm(cleaned, existing_messages)
-                if proactive_llm.get("should_ask") and proactive_llm.get("response"):
-                    # 记录用户水平以便后续追问中调整策略
-                    return existing_messages + [
-                        {"role": "assistant", "content": proactive_llm["response"]}
-                    ]
-            except Exception:
-                pass
+            # 先尝试检索知识库
+            knowledge_context, _ = self._retrieve_knowledge(cleaned, analysis)
 
-            # 回退：关键词追问
-            proactive_response = check_and_generate_proactive_questions(
-                cleaned,
-                existing_messages,
-                use_llm=False,
-            )
-            if proactive_response:
-                return existing_messages + [
-                    {"role": "assistant", "content": proactive_response}
-                ]
+            if not knowledge_context:
+                # 知识库无匹配 → 可以追问（收集更多信息）
+                try:
+                    proactive_llm = analyze_and_ask_with_llm(cleaned, existing_messages)
+                    if proactive_llm.get("should_ask") and proactive_llm.get("response"):
+                        return existing_messages + [
+                            {"role": "assistant", "content": proactive_llm["response"]}
+                        ]
+                except Exception:
+                    pass
+
+                proactive_response = check_and_generate_proactive_questions(
+                    cleaned,
+                    existing_messages,
+                    use_llm=False,
+                )
+                if proactive_response:
+                    return existing_messages + [
+                        {"role": "assistant", "content": proactive_response}
+                    ]
+
+                # 无匹配也无追问 → 走无知识库模式
+                return self._assemble_chat_mode(
+                    existing_messages, cleaned_input=cleaned,
+                    analysis=analysis,
+                    log_analysis=log_analysis,
+                )
+            else:
+                # 知识库有匹配 → 直接走严格 RAG 模式（跳过追问）
+                return self._assemble_rag_mode(
+                    existing_messages, cleaned_input=cleaned,
+                    knowledge_context=knowledge_context,
+                    log_analysis=log_analysis,
+                )
 
         # Stage 3: 始终检索知识库（references 存入 self.references 供外层读取）
         knowledge_context, _ = self._retrieve_knowledge(cleaned, analysis)
@@ -340,7 +357,7 @@ class DiagnosticChatAgent:
 
         for term in search_terms[:3]:  # 最多尝试 3 个搜索词
             try:
-                result = self.knowledge.search(term, page_size=5)
+                result = self.knowledge.search(term, page=1, page_size=5)
                 items = result.get("items", [])
                 for item in items:
                     if item.get("id") not in seen_ids:
@@ -363,9 +380,9 @@ class DiagnosticChatAgent:
         lines = []
         for i, item in enumerate(items):
             title = item.get("title", "Untitled")
-            snippet = item.get("snippet", "")[:300]
+            snippet = item.get("snippet", "")[:600]
             score = item.get("relevance_score", 0)
-            if score > 0.1:
+            if score >= 0.05:
                 lines.append(
                     f"{i + 1}. **{title}** (相关度: {score:.0%})\n   {snippet}"
                 )
@@ -412,6 +429,12 @@ class DiagnosticChatAgent:
 
         # 构建搜索词列表（按优先级）
         terms: list[str] = []
+
+        # 优先级0：数字/字母数字组合关键词（如"1078"、"CJT1078"、"808"）
+        alphanum = re.findall(r'\b[A-Za-z]*\d+[A-Za-z]*\b', text)
+        for token in alphanum:
+            if len(token) >= 2 and token not in terms:
+                terms.append(token)
 
         # 优先级1：剥离后的完整 cleaned query（如果有意义）
         if len(cleaned) >= 2 and cleaned not in ("的", "了"):
@@ -481,8 +504,29 @@ class DiagnosticChatAgent:
         analysis: Dict[str, Any],
         log_analysis: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, str]]:
-        """通用对话模式：自由对话（知识库无匹配时）。"""
-        system_parts = [self.SYSTEM_BASE]
+        """知识库无匹配时的对话模式。
+
+        原则：
+          - 如果问题看起来是诊断类问题 → 告知用户知识库暂无相关内容
+          - 如果是纯闲聊/通用问题 → 可以自由回答，但注明信息来源
+          - 绝不编造诊断结论或技术规格
+        """
+        system_parts: list[str] = [self.SYSTEM_BASE]
+
+        # 知识库无匹配时的约束
+        no_kb_hint = (
+            "## 知识库状态\n"
+            "当前知识库中**未找到**与用户问题直接匹配的文档。\n\n"
+            "## 回答规则\n"
+            "1. 如果用户问题涉及设备诊断、技术故障、产品规格等专业问题："
+            "必须明确回复「知识库中暂无相关信息，请联系管理员补充相关文档」。\n"
+            "2. 如果用户问题是一般性技术讨论（如编程概念、通用原理）："
+            "可以基于你的通用知识回答，但必须在回复末尾注明「以上内容来源于通用知识，"
+            "非本平台知识库，仅供参考」。\n"
+            "3. 如果用户问题是纯闲聊：可以正常回复，无需特殊标注。\n"
+            "4. **绝对禁止**编造设备参数、故障原因、修复步骤等具体信息。"
+        )
+        system_parts.append(no_kb_hint)
 
         analysis_context = self._build_analysis_context(log_analysis)
         if analysis_context:
