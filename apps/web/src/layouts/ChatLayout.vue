@@ -1,7 +1,7 @@
 <template>
   <div class="chat-layout">
     <!-- 左侧边栏 -->
-    <ChatSidebar v-model:collapsed="sidebarCollapsed" :chats="filteredChats"
+    <ChatSidebar v-model:collapsed="sidebarCollapsed" :chats="filteredChats" :loading="sessionsLoading"
       :activeChatId="isChatRoute ? currentChatId : 0"
       :userName="userName" :userInitial="userInitial" :isAdmin="userStore.isAdmin" @toggleSearch="toggleSearch"
       @newChat="newChat" @navigate="navigateTo" @selectChat="selectChat" @chatMenu="openChatMenu"
@@ -262,8 +262,8 @@ async function changePwd() {
     )
     if (!value) return
     // 调用后端更新密码
-    const userInfo = userStore.userInfo as any
-    const userId = userInfo?.id || userInfo?.user?.id
+    const currentUser = userStore.user
+    const userId = currentUser?.id
     if (!userId) {
       ElMessage.error('无法获取用户信息，请重新登录')
       return
@@ -482,11 +482,17 @@ async function deleteChat() {
 
 // ── File Handling ─────────────────────────────────────────────
 
+const MAX_FILE_SIZE = 200 * 1024 * 1024  // 200MB
+
 function onFileInput(e: Event) {
   const t = e.target as HTMLInputElement
   if (t.files) {
     for (let i = 0; i < t.files.length; i++) {
       const f = t.files[i]
+      if (f.size > MAX_FILE_SIZE) {
+        ElMessage.warning(`文件 "${f.name}" 超过 200MB 限制，已跳过`)
+        continue
+      }
       attachedFiles.value.push({
         id: Date.now().toString() + i,
         file: f,

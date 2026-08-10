@@ -1,20 +1,12 @@
 import client from './client'
+import type { UserInfo } from '@/stores/user'
+
+export type { UserInfo }
 
 export interface ModelOption {
   label: string
   value: string
   isDefault: boolean
-}
-
-/** 用户信息（匹配后端 UserResponse schema） */
-export interface UserInfo {
-  id: number
-  username: string
-  email?: string | null
-  role: string
-  is_active: boolean
-  organization?: string | null
-  created_at?: string | null
 }
 
 /** 用户列表响应（匹配后端 UserListResponse） */

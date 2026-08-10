@@ -97,20 +97,27 @@ const model = computed({
 })
 
 const textareaRef = ref<HTMLTextAreaElement>()
+const modelsLoading = ref(false)
 const availableModels = ref<ModelOption[]>([
   { label: 'DeepSeek V4 Flash', value: 'deepseek-v4-flash', isDefault: true },
-  { label: 'DeepSeek V4 Pro', value: 'deepseek-v4-pro', isDefault: false }
+  { label: 'DeepSeek V4 Pro', value: 'deepseek-v4-pro', isDefault: false },
 ])
 
+const MAX_FILE_SIZE = 200 * 1024 * 1024  // 200MB
+
 async function loadAvailableModels() {
+  modelsLoading.value = true
   try {
     const { data } = await adminApi.getAvailableModels()
-    if (data && data.models && data.models.length > 0) {
+    if (data?.models?.length) {
       availableModels.value = data.models
+    } else {
+      console.warn('[ChatInputArea] API returned empty models, using defaults')
     }
   } catch (err) {
     console.error('[ChatInputArea] Failed to load models:', err)
-    // 使用默认模型列表
+  } finally {
+    modelsLoading.value = false
   }
 }
 

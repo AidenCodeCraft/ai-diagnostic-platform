@@ -1,8 +1,9 @@
 # AI Diagnostic Platform — 代码库全面审查报告
 
-> **审查日期**: 2026-07-27  
+> **审查日期**: 2026-07-27（初版），2026-08-10（更新）  
 > **审查范围**: 全项目代码库（前端 `apps/web/`、后端 `backend/`、插件 `plugins/`、部署 `deploy/`、文档 `docs/`）  
 > **项目版本**: v1.0.0 企业版  
+> **测试状态**: 417 passed, 0 failed, 0 errors
 
 ---
 
@@ -486,13 +487,66 @@ Users.vue (暂不可用，见 4.1 节)
 
 ---
 
+## 6. 深度代码质量分析（2026-08-10 更新）
+
+本轮对前后端代码进行了全面深度扫描，发现并修复了以下问题：
+
+### 6.1 🔴 严重 Bug（已修复）
+
+| # | 文件 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | `Overview.vue:92-103` | **语法错误**：`storagePercent` computed 被嵌套在 `maxTrendCount` 内部（缺少 `})` 闭合），代码无法编译 | 拆分为两个独立的 `computed` |
+| 2 | `ChatLayout.vue:265` | **Bug**：`userStore.userInfo` 属性不存在（store 导出 `user`，不是 `userInfo`），密码修改功能完全失效 | 改为 `userStore.user` |
+
+### 6.2 🟠 高优先级（已修复）
+
+| # | 文件 | 问题 | 修复 |
+|---|------|------|------|
+| 3 | `client.ts:19` | `config._startTime` 使用非标准属性污染 Axios 对象 | 改用 `WeakMap` 存储请求时间戳 |
+| 4 | `client.ts:33` | URL 日志可能泄露查询参数中的敏感数据 | 仅记录路径部分 `url.split('?')[0]` |
+| 5 | `client.ts:53` | 401 使用 `window.location.href` 硬跳转，破坏 SPA | 改为 `window.location.replace('/login')` |
+| 6 | `stores/user.ts:42` | `login()` 无 try-catch，错误直接向上抛出 | 添加错误封装 `throw new Error(detail)` |
+| 7 | `stores/user.ts:48` | `logout()` 不调用后端 API 使 token 失效 | 添加 `POST /auth/logout` 调用（静默忽略 404） |
+| 8 | `stores/user.ts` / `admin.ts` | `UserInfo` 接口重复定义（两处字段不完全一致） | 统一为 `stores/user.ts` 导出，`admin.ts` 重新导出 |
+
+### 6.3 🟡 代码质量优化（已修复）
+
+| # | 文件 | 问题 | 修复 |
+|---|------|------|------|
+| 9 | `ReportDialog.vue:105-106` | `selectedCount` 为独立 `ref`，需在多处手动同步（易遗漏） | 改为 `computed(() => selectedIds.value.size)` |
+| 10 | `chat_service.py:287` | `_get_provider()` 每次调用创建新 `ProviderRegistry()`（每次都读配置文件） | 改为模块级单例 `cls._provider_registry` |
+| 11 | `chat_service.py:123` | `_auto_title(content)` 参数未使用 | 改为 `_content: str = ""` 并添加 `-> None` |
+| 12 | `diagnostic_chat_agent.py:205` | `_sanitize()` 仅检查 `not text`，传入非 str 类型会崩溃 | 添加 `isinstance(text, str)` 检查 |
+| 13 | `diagnostic_chat_agent.py:421` | `analysis.get("topics")` 若 `analysis` 为 None 会崩溃 | 添加 `(analysis or {}).get(...)` 保护 |
+
+### 6.4 🔵 UX 与健壮性改进（已修复）
+
+| # | 文件 | 问题 | 修复 |
+|---|------|------|------|
+| 14 | `Overview.vue:121` | 加载失败静默忽略，用户看到全 0 数据 | 添加 `loading`/`loadError` 状态 + UI 提示 |
+| 15 | `ChatLayout.vue:485` | 无前端文件大小校验（200MB 限制） | 添加 `MAX_FILE_SIZE` 常量 + 跳过超大文件 + 提示 |
+| 16 | `ChatLayout.vue:294` | `sessionsLoading` 定义但模板未使用 | 传递给 `ChatSidebar` 的 `loading` prop |
+| 17 | `ChatInputArea.vue:105` | 模型加载无 loading 状态 | 添加 `modelsLoading` ref |
+| 18 | `ChatInputArea.vue:108` | 模型 API 返回空列表时无 fallback 提示 | 添加 `console.warn` 日志 |
+
+### 6.5 已知待处理问题（低优先级）
+
+| # | 文件 | 问题 | 建议 |
+|---|------|------|------|
+| 1 | `ChatMessageList.vue:41` | `v-html` 渲染 LLM 输出 | 建议使用 DOMPurify 对 HTML 进行清理 |
+| 2 | `markdown.ts:37` | 内联 `onclick` 违反 CSP 最佳实践 | 建议使用事件委托方式 |
+| 3 | `ChatMessageList.vue` | `_thinkOpen`/`_liked` 直接修改 prop 对象 | 建议使用独立 reactive map |
+| 4 | `ChatLayout.vue:592` | `processFiles` 145 行，职责过多 | 建议拆分为 `uploadFiles`/`runAnalyses`/`handleResult` |
+
+---
+
 ## 总结
 
 ### 按严重程度汇总
 
 | 严重程度 | 数量 | 类型分布 |
 |----------|------|----------|
-| 🔴 严重 | 4 | 前端 API 缺失导致功能崩溃、模板语法错误、死组件、生产调试端点 |
+| 🔴 严重 | 6 | 前端 API 缺失导致功能崩溃、模板语法错误、死组件、生产调试端点、语法错误导致编译失败、属性不存在导致功能失效 |
 | 🟠 高 | 7 | 按钮无事件绑定、功能仅 localStorage 存、假实现占位、修改密码不调 API |
 | 🟡 中 | 13 | 路由冲突、流水线未连接、正则解析风险、状态丢失、无测试覆盖等 |
 | 🔵 低 | 15+ | 静默异常、加载/空状态缺失、硬编码、版本不一致、调试日志等 |

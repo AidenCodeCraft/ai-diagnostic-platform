@@ -2,6 +2,11 @@
   <div class="overview-page">
     <h2 class="page-title">系统概览</h2>
 
+    <!-- 加载/错误状态 -->
+    <div v-if="loading" class="panel-empty">加载中...</div>
+    <div v-else-if="loadError" class="panel-empty" style="color:#dc2626">数据加载失败，请刷新重试</div>
+    <template v-else>
+
     <!-- 指标卡片 -->
     <div class="stat-cards">
       <div class="stat-card">
@@ -70,12 +75,13 @@
       </div>
       <div v-else class="panel-empty">暂无数据</div>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { adminApi, AdminStats } from '@/api/admin'
+import { adminApi, type AdminStats } from '@/api/admin'
 
 const stats = ref<AdminStats>({
   total_users: 0, total_projects: 0, total_logs: 0,
@@ -83,6 +89,9 @@ const stats = ref<AdminStats>({
   analysis_completed: 0, analysis_failed: 0,
   analysis_trend: [], total_log_size_bytes: 0, active_plugins: 0,
 })
+
+const loading = ref(true)
+const loadError = ref(false)
 
 const successRate = computed(() => {
   const total = stats.value.analysis_completed + stats.value.analysis_failed
@@ -92,14 +101,13 @@ const successRate = computed(() => {
 const maxTrendCount = computed(() => {
   if (!stats.value.analysis_trend.length) return 1
   return Math.max(...stats.value.analysis_trend.map(i => i.count), 1)
+})
 
 const storagePercent = computed(() => {
   const bytes = stats.value.total_log_size_bytes || 0
-  // 假设 10GB 为 100%
-  const maxBytes = 10 * 1024 * 1024 * 1024
+  const maxBytes = 10 * 1024 * 1024 * 1024  // 10GB 上限
   if (bytes <= 0) return 2
   return Math.min(100, Math.round((bytes / maxBytes) * 100))
-})
 })
 
 function formatBytes(bytes: number) {
@@ -115,10 +123,16 @@ function formatDate(d: string) {
 }
 
 onMounted(async () => {
+  loading.value = true
   try {
     const { data } = await adminApi.getStats()
-    stats.value = data
-  } catch { /* ignore */ }
+    stats.value = { ...stats.value, ...data }
+  } catch (e: any) {
+    loadError.value = true
+    console.error('[Overview] getStats failed:', e?.response?.data?.detail || e?.message || e)
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 

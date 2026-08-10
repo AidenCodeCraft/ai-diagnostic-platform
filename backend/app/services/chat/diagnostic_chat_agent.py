@@ -202,7 +202,7 @@ class DiagnosticChatAgent:
         - 规范化空白
         - 限制最大长度
         """
-        if not text:
+        if not text or not isinstance(text, str):
             return ""
 
         # 移除控制字符（保留换行和常用空白）
@@ -418,7 +418,7 @@ class DiagnosticChatAgent:
             terms.append(cleaned)
 
         # 优先级2：提取的主题实体组合
-        topics = analysis.get("topics", [])
+        topics = (analysis or {}).get("topics", []) if analysis else []
         if len(topics) >= 2:
             terms.append(" ".join(topics[:3]))
         elif len(topics) == 1:

@@ -3,17 +3,19 @@ import { ref, computed } from 'vue'
 import axios from 'axios'
 import { getLogger } from '@/logger'
 
-interface UserInfo {
+// 使用 sessionStorage → 浏览器关闭后自动清除
+const store = sessionStorage
+
+/** 与 api/admin.ts 保持一致的 UserInfo 类型 */
+export interface UserInfo {
   id: number
   username: string
-  email: string | null
+  email?: string | null
   role: string
   is_active: boolean
   organization?: string | null
+  created_at?: string | null
 }
-
-// Use sessionStorage → auth cleared when browser closes
-const store = sessionStorage
 
 function loadUserFromStorage(): UserInfo | null {
   const u = store.getItem('user')
@@ -40,12 +42,23 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function login(username: string, password: string) {
-    const { data } = await axios.post('/api/v1/auth/login', { username, password })
-    setAuth(data.access_token, data.user)
-    return data
+    try {
+      const { data } = await axios.post('/api/v1/auth/login', { username, password })
+      setAuth(data.access_token, data.user)
+      return data
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail || e?.message || '登录失败'
+      throw new Error(detail)
+    }
   }
 
-  function logout() {
+  async function logout() {
+    try {
+      // 尝试通知后端使 token 失效
+      await axios.post('/api/v1/auth/logout', {}, {
+        headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
+      }).catch(() => { /* 后端可能没有 /logout 端点，静默忽略 */ })
+    } catch { /* ignore */ }
     getLogger().info('User logged out', 'user', { action: 'logout', extra: { username: user.value?.username } })
     token.value = ''
     user.value = null

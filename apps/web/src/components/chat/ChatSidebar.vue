@@ -108,6 +108,7 @@ import type { ChatRecord } from './types'
 defineProps<{
   collapsed: boolean
   chats: ChatRecord[]
+  loading?: boolean
   activeChatId: number
   userName: string
   userInitial: string

@@ -103,45 +103,34 @@ const emit = defineEmits<{
 }>()
 
 const selectedIds = ref(new Set<string>())
-const selectedCount = ref(0)
+const selectedCount = computed(() => selectedIds.value.size)
 
 watch(() => props.visible, (v) => {
   if (v) {
-    // 默认全选
     selectedIds.value = new Set(props.messages.map(m => m.id))
-    selectedCount.value = props.messages.length
   }
 })
 
 function toggle(id: string) {
   const next = new Set(selectedIds.value)
-  if (next.has(id)) {
-    next.delete(id)
-  } else {
-    next.add(id)
-  }
+  if (next.has(id)) { next.delete(id) } else { next.add(id) }
   selectedIds.value = next
-  selectedCount.value = next.size
 }
 
 function selectAll() {
   selectedIds.value = new Set(props.messages.map(m => m.id))
-  selectedCount.value = props.messages.length
 }
 
 function deselectAll() {
   selectedIds.value = new Set()
-  selectedCount.value = 0
 }
 
 function selectUserOnly() {
   selectedIds.value = new Set(props.messages.filter(m => m.role === 'user').map(m => m.id))
-  selectedCount.value = selectedIds.value.size
 }
 
 function selectAssistantOnly() {
   selectedIds.value = new Set(props.messages.filter(m => m.role === 'assistant').map(m => m.id))
-  selectedCount.value = selectedIds.value.size
 }
 
 function generate(format: 'markdown' | 'pdf' = 'markdown') {

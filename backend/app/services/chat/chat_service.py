@@ -120,7 +120,7 @@ class ChatService:
         messages.extend(history_messages)
         return messages
 
-    def _auto_title(self, session_id: int, content: str):
+    def _auto_title(self, session_id: int, _content: str = "") -> None:
         """智能生成对话标题（基于 LLM 而非简单截取）。"""
         session = self.get_session(session_id)
         messages = self.get_messages(session_id)
@@ -284,7 +284,11 @@ class ChatService:
     # Helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _get_provider(name: str):
-        registry = ProviderRegistry()
-        return registry.get_provider(name)
+    # 模块级单例 ProviderRegistry（避免每次调用重新读取 system_config.json）
+    _provider_registry: ProviderRegistry | None = None
+
+    @classmethod
+    def _get_provider(cls, name: str):
+        if cls._provider_registry is None:
+            cls._provider_registry = ProviderRegistry()
+        return cls._provider_registry.get_provider(name)
