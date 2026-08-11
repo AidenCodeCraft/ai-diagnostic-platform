@@ -17,17 +17,17 @@
     <template v-else>
       <div v-for="msg in sorted" :key="msg.id" class="message-row" :class="msg.role">
         <div class="message-body">
-          <!-- AI 思考过程 -->
+          <!-- AI 思维链（默认展开，显示完整推理过程） -->
           <div v-if="msg.role === 'assistant' && msg.thinking && (msg.thinking.text || msg.thinking.active)" class="think-block">
             <div class="think-header">
               <button class="think-toggle" @click="toggleThink(msg)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                <span>{{ msg.thinking.active ? '正在思考' : `已思考（用时 ${msg.thinking.elapsed || 1} 秒）` }}</span>
-                <span class="think-action">{{ msg._thinkOpen ? '收起' : '展开' }}</span>
-                <svg class="think-arrow" :class="{ open: msg._thinkOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                <span>{{ msg.thinking.active ? '正在思考...' : `已思考（用时 ${msg.thinking.elapsed || 1} 秒）` }}</span>
+                <span class="think-action">{{ msg._thinkOpen === false ? '展开' : '收起' }}</span>
+                <svg class="think-arrow" :class="{ open: msg._thinkOpen !== false }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
             </div>
-            <div v-show="msg._thinkOpen" class="think-body">{{ msg.thinking.text || '正在准备回答…' }}</div>
+            <div v-show="msg._thinkOpen !== false" class="think-body">{{ msg.thinking.text || '正在准备回答…' }}</div>
           </div>
           <div v-if="msg.files && msg.files.length > 0" class="msg-files">
             <div v-for="(f, i) in msg.files" :key="i" class="msg-file-card" @click="$emit('previewFile', f)"
@@ -38,7 +38,13 @@
             </div>
           </div>
           <div class="message-bubble">
-            <div class="msg-content" v-html="renderContent(msg.content, msg.files && msg.files.length > 0, msg.sources, msg.id)"></div>
+            <div
+              class="msg-content"
+              v-html="renderContent(msg.content, msg.files && msg.files.length > 0, msg.sources, msg.id)"
+              @click="onMsgContentClick"
+              @mouseover="onMsgContentMouseOver"
+              @mouseout="onMsgContentMouseOut"
+            ></div>
           </div>
           <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active" class="message-actions">
             <button class="action-btn" :class="{ active: copiedId === msg.id }" @click="copyMessage(msg)" :title="copiedId === msg.id ? '已复制' : '复制回复'">
@@ -97,7 +103,7 @@
     <!-- 右侧文档预览面板 -->
     <Teleport to="body">
       <div v-if="docPanel.visible" class="doc-panel-overlay" @click="closeDocPanel"></div>
-      <div v-if="docPanel.visible" class="doc-panel" :class="{ 'doc-panel-loading': docPanel.loading }">
+      <div v-if="docPanel.visible" class="doc-panel">
         <div class="doc-panel-header">
           <span class="doc-panel-title">{{ docPanel.title }}</span>
           <button class="doc-panel-close" @click="closeDocPanel" title="关闭">
@@ -117,10 +123,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } from 'vue'
+import { ref, computed, watch, nextTick, onBeforeUnmount, reactive } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { useFormat } from '@/composables/useFormat'
-import { chatApi, type ChatSource } from '@/api/chat'
+import { chatApi } from '@/api/chat'
 import { knowledgeApi } from '@/api/knowledge'
 
 const { formatFileSize, fileIcon } = useFormat()
@@ -165,30 +171,6 @@ const docPanelContentRef = ref<HTMLElement>()
 // 缓存已获取的文档内容
 const docCache = new Map<number, { title: string; content: string; source: string; excerpt: string }>()
 
-// 鼠标事件处理：通过 data 属性获取引用信息
-function handleRefMouseEnter(e: MouseEvent) {
-  const target = e.target as HTMLElement
-  if (!target.classList.contains('ref-link')) return
-  const title = target.getAttribute('data-title') || ''
-  const source = target.getAttribute('data-source') || '知识库'
-  const excerpt = target.getAttribute('data-excerpt') || ''
-  if (!title && !excerpt) return
-
-  const rect = target.getBoundingClientRect()
-  tooltip.title = title
-  tooltip.source = source
-  tooltip.excerpt = excerpt
-  // 定位在链接上方
-  tooltip.x = rect.left + rect.width / 2
-  tooltip.y = rect.top - 8
-  tooltip.visible = true
-  cancelTooltipHide()
-}
-
-function handleRefMouseLeave(_e: MouseEvent) {
-  scheduleTooltipHide()
-}
-
 function cancelTooltipHide() {
   if (tooltipTimer) {
     clearTimeout(tooltipTimer)
@@ -201,24 +183,6 @@ function scheduleTooltipHide() {
   tooltipTimer = setTimeout(() => {
     tooltip.visible = false
   }, 200)
-}
-
-async function handleRefClick(e: MouseEvent) {
-  const target = e.target as HTMLElement
-  if (!target.classList.contains('ref-link')) return
-  e.preventDefault()
-
-  const docIdStr = target.getAttribute('data-doc-id')
-  const title = target.getAttribute('data-title') || ''
-  const anchorId = target.getAttribute('data-anchor') || ''
-
-  if (!docIdStr) return
-
-  const docId = parseInt(docIdStr, 10)
-  if (isNaN(docId)) return
-
-  tooltip.visible = false
-  openDocPanel(docId, title, anchorId)
 }
 
 async function openDocPanel(docId: number, title: string, anchorId: string) {
@@ -259,31 +223,36 @@ async function openDocPanel(docId: number, title: string, anchorId: string) {
 }
 
 function scrollToDocAnchor() {
-  if (!docPanel.anchorId || !docPanelContentRef.value) return
-  // 搜索锚点文本
+  if (!docPanelContentRef.value) return
   const body = docPanelContentRef.value
-  const decoded = decodeURIComponent(docPanel.anchorId)
-  // 尝试查找包含锚点文本的标题或段落
-  const headings = body.querySelectorAll('h1, h2, h3, h4, h5, h6')
-  for (const h of headings) {
-    if (h.textContent?.includes(decoded)) {
-      h.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      // 高亮效果
-      h.classList.add('doc-anchor-highlight')
-      setTimeout(() => h.classList.remove('doc-anchor-highlight'), 3000)
-      return
+
+  // 如果有明确的锚点名，先尝试精确定位
+  if (docPanel.anchorId) {
+    const decoded = decodeURIComponent(docPanel.anchorId)
+    // 优先查找标题
+    const headings = body.querySelectorAll('h1, h2, h3, h4, h5, h6')
+    for (const h of headings) {
+      if (h.textContent?.includes(decoded)) {
+        h.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        h.classList.add('doc-anchor-highlight')
+        setTimeout(() => h.classList.remove('doc-anchor-highlight'), 3000)
+        return
+      }
+    }
+    // 查找包含锚点文本的段落/表格
+    const elements = body.querySelectorAll('p, li, td, th, strong, em')
+    for (const el of elements) {
+      if (el.textContent?.includes(decoded)) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.classList.add('doc-anchor-highlight')
+        setTimeout(() => el.classList.remove('doc-anchor-highlight'), 3000)
+        return
+      }
     }
   }
-  // 尝试在段落中查找
-  const paragraphs = body.querySelectorAll('p, li, td, th')
-  for (const p of paragraphs) {
-    if (p.textContent?.includes(decoded)) {
-      p.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      p.classList.add('doc-anchor-highlight')
-      setTimeout(() => p.classList.remove('doc-anchor-highlight'), 3000)
-      return
-    }
-  }
+
+  // 无锚点时滚动到顶部
+  body.scrollTop = 0
 }
 
 function closeDocPanel() {
@@ -291,38 +260,77 @@ function closeDocPanel() {
   docPanel.anchorId = ''
 }
 
-// 全局事件委托：处理 ref:// 链接的 hover 和 click
-function onGlobalClick(e: Event) {
+// ── Vue 模板级事件委托（处理 v-html 中的 ref-link 元素） ──
+function findRefLink(el: HTMLElement): HTMLElement | null {
+  if (el.classList.contains('ref-link')) return el
+  // 向上查找父级 ref-link（处理序号链接内部可能的子元素）
+  let parent = el.parentElement
+  while (parent) {
+    if (parent.classList.contains('ref-link')) return parent
+    parent = parent.parentElement
+  }
+  return null
+}
+
+function onMsgContentClick(e: Event) {
   const target = e.target as HTMLElement
-  if (target.classList.contains('ref-link')) {
-    handleRefClick(e as MouseEvent)
+  const refLink = findRefLink(target)
+  if (refLink) {
+    handleRefClickFor(refLink)
   }
 }
 
-function onGlobalMouseOver(e: Event) {
+function onMsgContentMouseOver(e: Event) {
   const target = e.target as HTMLElement
-  if (target.classList.contains('ref-link')) {
-    handleRefMouseEnter(e as MouseEvent)
+  const refLink = findRefLink(target)
+  if (refLink) {
+    handleRefMouseEnterFor(refLink)
   }
 }
 
-function onGlobalMouseOut(e: Event) {
+function onMsgContentMouseOut(e: Event) {
   const target = e.target as HTMLElement
-  if (target.classList.contains('ref-link')) {
-    handleRefMouseLeave(e as MouseEvent)
+  const refLink = findRefLink(target)
+  if (refLink) {
+    handleRefMouseLeaveFor()
   }
 }
 
-onMounted(() => {
-  document.addEventListener('click', onGlobalClick)
-  document.addEventListener('mouseover', onGlobalMouseOver)
-  document.addEventListener('mouseout', onGlobalMouseOut)
-})
+function handleRefClickFor(el: HTMLElement) {
+  const docIdStr = el.getAttribute('data-doc-id')
+  const title = el.getAttribute('data-title') || ''
+  const anchorId = el.getAttribute('data-anchor') || ''
+
+  if (!docIdStr) return
+
+  const docId = parseInt(docIdStr, 10)
+  if (isNaN(docId)) return
+
+  tooltip.visible = false
+  openDocPanel(docId, title, anchorId)
+}
+
+function handleRefMouseEnterFor(el: HTMLElement) {
+  const title = el.getAttribute('data-title') || ''
+  const source = el.getAttribute('data-source') || '知识库'
+  const excerpt = el.getAttribute('data-excerpt') || ''
+  if (!title && !excerpt) return
+
+  const rect = el.getBoundingClientRect()
+  tooltip.title = title
+  tooltip.source = source
+  tooltip.excerpt = excerpt
+  tooltip.x = Math.min(rect.left + rect.width / 2, window.innerWidth - 200)
+  tooltip.y = rect.top - 8
+  tooltip.visible = true
+  cancelTooltipHide()
+}
+
+function handleRefMouseLeaveFor() {
+  scheduleTooltipHide()
+}
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', onGlobalClick)
-  document.removeEventListener('mouseover', onGlobalMouseOver)
-  document.removeEventListener('mouseout', onGlobalMouseOut)
   cancelTooltipHide()
 })
 
@@ -348,64 +356,69 @@ function renderContent(text: string, hasFiles?: boolean, sources: any[] = [], me
   }
   try {
     const content = renderMarkdown(display)
-    return processRefLinks(content, sources)
+    return processRefLinks(content, sources, messageId)
   } catch {
     return display.replace(/\n/g, '<br>')
   }
 }
 
 /**
- * 将 Markdown 中 ref:// 协议的链接转换为可点击的引用链接。
- * 支持格式：
- *   [来源：《文档标题》](ref://123)
- *   [来源：《文档标题》— 关键字解释表](ref://123#关键字解释表)
+ * 处理 ref:// 协议的引用链接：
+ * 1. 将正文中的序号链接（如 [1]）替换为可点击的蓝色序号
+ * 2. 将底部的管道符参考来源行替换为带链接的灰色文本
  */
-function processRefLinks(html: string, sources: any[]): string {
-  // 构建 sources 映射表 (title -> source info)
-  const sourceMap = new Map<string, { id: number; excerpt: string; source: string }>()
+function processRefLinks(html: string, sources: any[], _messageId?: string | number): string {
+  // 构建 sources 映射表（doc_id -> source info）
+  const sourceMap = new Map<string, { id: number; title: string; excerpt: string; source: string }>()
   for (const s of sources) {
     if (s.id && s.title) {
-      sourceMap.set(s.title, {
+      sourceMap.set(String(s.id), {
         id: s.id,
+        title: s.title,
         excerpt: s.excerpt || '',
         source: s.source || '知识库',
       })
     }
   }
 
-  // 替换 ref:// 协议的链接
-  return html.replace(
-    /<a\s+href="ref:\/\/(\d+)(?:#([^"]*))?"[^>]*>(.*?)<\/a>/gi,
-    (_match, docId: string, anchor: string, text: string) => {
-      // 从文本中提取标题（去掉"来源："前缀）
-      const displayTitle = text.replace(/^来源：/, '').replace(/^来源:/, '')
-      // 查找对应的 source 信息
-      let excerpt = ''
-      let sourceLabel = '知识库'
-      // 尝试用 displayTitle 中的文档标题部分匹配
-      for (const [title, info] of sourceMap) {
-        if (displayTitle.includes(title) || title.includes(displayTitle.replace(/—.*$/, '').trim())) {
-          excerpt = info.excerpt
-          sourceLabel = info.source
-          break
-        }
-      }
-      // 如果没匹配到，取第一个匹配的 source
-      if (!excerpt && sourceMap.size > 0) {
-        const first = sourceMap.values().next().value
-        if (first) {
-          excerpt = first.excerpt
-          sourceLabel = first.source
-        }
-      }
-
+  // 第一步：替换正文中的序号引用链接 [1], [2], [3]...
+  html = html.replace(
+    /<a\s+href="ref:\/\/(\d+)(?:#([^"]*))?"[^>]*>\[(\d+)\]<\/a>/gi,
+    (_match, docId: string, anchor: string, seqNum: string) => {
+      const info = sourceMap.get(docId)
+      const title = info?.title || ''
+      const excerpt = info?.excerpt || ''
+      const sourceLabel = info?.source || '知识库'
       const anchorAttr = anchor ? ` data-anchor="${escapeAttr(anchor)}"` : ''
       const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
-      return `<a class="ref-link" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(displayTitle)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${anchorAttr} href="javascript:void(0)" title="点击查看文档">${text}</a>`
+      const displayNum = seqNum || ''
+      return `<a class="ref-link ref-seq" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(title)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${anchorAttr} href="javascript:void(0)" title="点击查看文档">${displayNum}</a>`
     },
   )
 
-  // 不再添加 "相关参考：" 汇总行和 "参考出处" 列表
+  // 第二步：替换管道符参考来源行
+  // 格式：| 参考来源：知识库"[文档标题](ref://docId)"文档中"[章节](ref://docId#章节)"部分 |
+  // 或：  | 参考来源：知识库"[文档标题](ref://docId)"文档 |
+  html = html.replace(
+    /\|\s*参考来源：知识库"<a\s+href="ref:\/\/(\d+)"[^>]*>([^<]*)<\/a>"文档(?:中"<a\s+href="ref:\/\/(\d+)(?:#([^"]*))?"[^>]*>([^<]*)<\/a>"部分)?\s*\|/gi,
+    (_match, docId: string, docTitle: string, _sectionDocId: string, sectionAnchor: string, sectionTitle: string) => {
+      const info = sourceMap.get(docId)
+      const excerpt = info?.excerpt || ''
+      const sourceLabel = info?.source || '知识库'
+      const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
+
+      const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(docTitle)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr} href="javascript:void(0)">${escapeHtml(docTitle)}</a>`
+
+      if (sectionTitle && sectionAnchor) {
+        const sectionId = _sectionDocId || docId
+        const sectionLink = `<a class="ref-link ref-source-section" data-doc-id="${escapeAttr(sectionId)}" data-title="${escapeAttr(sectionTitle)}" data-source="${escapeAttr(sourceLabel)}" data-anchor="${escapeAttr(sectionAnchor)}"${excerptAttr} href="javascript:void(0)">${escapeHtml(sectionTitle)}</a>`
+        return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库"${docLink}"文档中"${sectionLink}"部分</span> |</span>`
+      }
+      return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库"${docLink}"文档</span> |</span>`
+    },
+  )
+
+  return html
 }
 
 function escapeAttr(value: string): string {
@@ -414,6 +427,15 @@ function escapeAttr(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+    .replace(/'/g, '&#39;')
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 }
 
@@ -429,9 +451,9 @@ watch(
   },
 )
 
-// 展开/折叠思考区块
+// 展开/折叠思维链区块（默认展开，只有显式设为 false 才折叠）
 function toggleThink(msg: any) {
-  msg._thinkOpen = !msg._thinkOpen
+  msg._thinkOpen = msg._thinkOpen === false ? true : false
 }
 
 const copiedId = ref<string | number | null>(null)
@@ -872,13 +894,12 @@ function scrollToBottom() {
 .think-arrow { transition: transform 0.2s; }
 .think-arrow.open { transform: rotate(180deg); }
 .think-body {
-  padding: 4px 12px 8px 14px;
+  padding: 4px 12px 12px 14px;
   font-size: 13px;
   color: var(--chat-think-body);
   line-height: 1.75;
   white-space: pre-wrap;
-  max-height: 200px;
-  overflow-y: auto;
+  overflow-y: visible;
 }
 
 .source-list { margin-top: 20px; padding: 12px 14px; border-radius: 10px; background: var(--chat-source-bg); border: 1px solid var(--chat-source-border); }
@@ -900,24 +921,57 @@ function scrollToBottom() {
   .source-open { display: none; }
 }
 
-/* ── 引用文档链接 ──────────────────────────────────────────── */
-.msg-content :deep(.ref-link) {
+/* ── 引用序号链接（正文中的 [1], [2], [3]） ────────────────── */
+.msg-content :deep(.ref-link.ref-seq) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  margin: 0 1px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: #fff;
+  background: #2563eb;
+  border-radius: 10px;
+  text-decoration: none;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: all 0.15s;
+}
+.msg-content :deep(.ref-link.ref-seq:hover) {
+  background: #1d4ed8;
+  transform: scale(1.1);
+}
+
+/* ── 参考来源行（管道符包裹的灰色文本） ────────────────────── */
+.msg-content :deep(.ref-source-line) {
+  display: block;
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #9ca3af;
+}
+.msg-content :deep(.ref-source-line .ref-link.ref-source-doc),
+.msg-content :deep(.ref-source-line .ref-link.ref-source-section) {
   display: inline;
-  color: #2563eb;
-  font-size: 12px;
+  color: #6b7280;
+  font-size: inherit;
   font-weight: 500;
   text-decoration: none;
-  border-bottom: 1px dashed #2563eb;
+  border-bottom: 1px dashed #6b7280;
   cursor: pointer;
-  padding: 1px 2px;
+  padding: 1px 0;
   transition: all 0.15s;
-  white-space: nowrap;
 }
-.msg-content :deep(.ref-link:hover) {
-  color: #1d4ed8;
+.msg-content :deep(.ref-source-line .ref-link.ref-source-doc:hover),
+.msg-content :deep(.ref-source-line .ref-link.ref-source-section:hover) {
+  color: #2563eb;
   background: #eff6ff;
   border-radius: 3px;
-  border-bottom-color: #1d4ed8;
+  border-bottom-color: #2563eb;
 }
 
 /* ── 引用浮框 Tooltip ──────────────────────────────────────── */
@@ -1032,9 +1086,6 @@ function scrollToBottom() {
   flex: 1;
   overflow-y: auto;
   padding: 18px;
-}
-.doc-panel-loading {
-  /* no extra style needed */;
 }
 .doc-panel-spinner {
   display: flex;
