@@ -356,14 +356,33 @@ class DiagnosticChatAgent:
         all_items: list[dict] = []
         seen_ids: set[int] = set()
 
-        for term in search_terms[:3]:  # 最多尝试 3 个搜索词
+        for term in search_terms[:5]:  # 最多尝试 5 个搜索词
             try:
                 result = self.knowledge.search(term, page=1, page_size=5)
                 items = result.get("items", [])
                 for item in items:
-                    if item.get("id") not in seen_ids:
-                        seen_ids.add(item["id"])
-                        all_items.append(item)
+                    doc_id = item.get("id")
+                    if doc_id in seen_ids:
+                        # 已见过：若新搜索词能提取到更相关的 snippet，则更新
+                        for existing in all_items:
+                            if existing.get("id") == doc_id:
+                                new_snip = self.knowledge._extract_snippet(
+                                    existing.get("_full_content", ""), term)
+                                if new_snip and len(new_snip) > len(existing.get("snippet", "")):
+                                    existing["snippet"] = new_snip
+                                break
+                        continue
+                    seen_ids.add(doc_id)
+                    # 拉取完整内容用于 snippet 重新提取（长文档关键段落定位）
+                    try:
+                        full_doc = self.knowledge.get(doc_id)
+                        item["_full_content"] = full_doc.content or ""
+                        # 用当前 term 重新提取 snippet（命中关键词周围）
+                        item["snippet"] = self.knowledge._extract_snippet(
+                            item["_full_content"], term)
+                    except Exception:
+                        pass
+                    all_items.append(item)
             except Exception:
                 continue
 
@@ -381,7 +400,8 @@ class DiagnosticChatAgent:
         lines = []
         for i, item in enumerate(items):
             title = item.get("title", "Untitled")
-            snippet = item.get("snippet", "")[:600]
+            # 扩大 snippet 到 1000 字符，确保长文档的相关段落进入上下文
+            snippet = item.get("snippet", "")[:1000]
             score = item.get("relevance_score", 0)
             if score >= 0.05:
                 lines.append(
@@ -438,6 +458,16 @@ class DiagnosticChatAgent:
         for token in alphanum:
             if len(token) >= 2 and token not in terms:
                 terms.append(token)
+
+        # 优先级0.5：连续中文词组（2-4字）作为独立搜索词
+        # 避免把整句当搜索词，也避免 n-gram 碎片
+        cn_phrases = re.findall(r'[\u4e00-\u9fff]{2,4}', text)
+        cn_stop = {"什么", "怎么", "为什么", "在日志", "日志中", "应该", "可以",
+                   "的", "了", "在", "是", "我", "有", "和", "就", "不", "搜索",
+                   "搜索什么", "关键字", "关键字呢", "什么呢", "什么关键"}
+        for phrase in cn_phrases:
+            if phrase not in cn_stop and phrase not in terms:
+                terms.append(phrase)
 
         # 优先级1：剥离后的完整 cleaned query（如果有意义）
         if len(cleaned) >= 2 and cleaned not in ("的", "了"):

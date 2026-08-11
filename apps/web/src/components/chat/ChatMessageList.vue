@@ -40,17 +40,6 @@
           <div class="message-bubble">
             <div class="msg-content" v-html="renderContent(msg.content, msg.files && msg.files.length > 0, msg.sources, msg.id)"></div>
           </div>
-          <div v-if="msg.role === 'assistant' && msg.sources?.length" class="source-list">
-            <div class="source-title">参考出处</div>
-            <blockquote v-for="(source, index) in msg.sources" :id="sourceTarget(index, msg.id)" :key="`${source.id ?? source.title ?? index}-${index}`" class="source-card">
-              <span class="source-index">{{ Number(index) + 1 }}</span>
-              <button class="source-detail" @click="$emit('openKnowledge', source)">
-                <strong>{{ source.title }}</strong>
-                <small>{{ source.source }}<template v-if="source.excerpt"> · {{ source.excerpt }}</template></small>
-              </button>
-              <button class="source-open" @click="$emit('openKnowledge', source)">查看来源 ↗</button>
-            </blockquote>
-          </div>
           <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active" class="message-actions">
             <button class="action-btn" :class="{ active: copiedId === msg.id }" @click="copyMessage(msg)" :title="copiedId === msg.id ? '已复制' : '复制回复'">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -89,14 +78,50 @@
         </div>
       </div>
     </template>
+
+    <!-- 引用文档 Tooltip -->
+    <Teleport to="body">
+      <div
+        v-if="tooltip.visible"
+        class="ref-tooltip"
+        :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px' }"
+        @mouseenter="cancelTooltipHide"
+        @mouseleave="scheduleTooltipHide"
+      >
+        <div class="ref-tooltip-title">{{ tooltip.title }}</div>
+        <div class="ref-tooltip-source">{{ tooltip.source }}</div>
+        <div class="ref-tooltip-excerpt">{{ tooltip.excerpt }}</div>
+      </div>
+    </Teleport>
+
+    <!-- 右侧文档预览面板 -->
+    <Teleport to="body">
+      <div v-if="docPanel.visible" class="doc-panel-overlay" @click="closeDocPanel"></div>
+      <div v-if="docPanel.visible" class="doc-panel" :class="{ 'doc-panel-loading': docPanel.loading }">
+        <div class="doc-panel-header">
+          <span class="doc-panel-title">{{ docPanel.title }}</span>
+          <button class="doc-panel-close" @click="closeDocPanel" title="关闭">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="doc-panel-body">
+          <div v-if="docPanel.loading" class="doc-panel-spinner">
+            <div class="spinner"></div>
+          </div>
+          <div v-else-if="docPanel.error" class="doc-panel-error">{{ docPanel.error }}</div>
+          <div v-else class="doc-panel-content" v-html="docPanel.renderedContent" ref="docPanelContentRef"></div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { useFormat } from '@/composables/useFormat'
-import { chatApi } from '@/api/chat'
+import { chatApi, type ChatSource } from '@/api/chat'
+import { knowledgeApi } from '@/api/knowledge'
 
 const { formatFileSize, fileIcon } = useFormat()
 
@@ -114,7 +139,194 @@ const emit = defineEmits<{
   (e: 'editMessage', msg: any): void
 }>()
 
-// 按 createdAt 升序排列
+// ── 引用文档 Tooltip ──────────────────────────────────────────
+const tooltip = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+  title: '',
+  source: '',
+  excerpt: '',
+})
+let tooltipTimer: ReturnType<typeof setTimeout> | null = null
+
+// ── 右侧文档预览面板 ──────────────────────────────────────────
+const docPanel = reactive({
+  visible: false,
+  loading: false,
+  error: '',
+  title: '',
+  content: '',
+  renderedContent: '',
+  anchorId: '',
+})
+const docPanelContentRef = ref<HTMLElement>()
+
+// 缓存已获取的文档内容
+const docCache = new Map<number, { title: string; content: string; source: string; excerpt: string }>()
+
+// 鼠标事件处理：通过 data 属性获取引用信息
+function handleRefMouseEnter(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (!target.classList.contains('ref-link')) return
+  const title = target.getAttribute('data-title') || ''
+  const source = target.getAttribute('data-source') || '知识库'
+  const excerpt = target.getAttribute('data-excerpt') || ''
+  if (!title && !excerpt) return
+
+  const rect = target.getBoundingClientRect()
+  tooltip.title = title
+  tooltip.source = source
+  tooltip.excerpt = excerpt
+  // 定位在链接上方
+  tooltip.x = rect.left + rect.width / 2
+  tooltip.y = rect.top - 8
+  tooltip.visible = true
+  cancelTooltipHide()
+}
+
+function handleRefMouseLeave(_e: MouseEvent) {
+  scheduleTooltipHide()
+}
+
+function cancelTooltipHide() {
+  if (tooltipTimer) {
+    clearTimeout(tooltipTimer)
+    tooltipTimer = null
+  }
+}
+
+function scheduleTooltipHide() {
+  cancelTooltipHide()
+  tooltipTimer = setTimeout(() => {
+    tooltip.visible = false
+  }, 200)
+}
+
+async function handleRefClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (!target.classList.contains('ref-link')) return
+  e.preventDefault()
+
+  const docIdStr = target.getAttribute('data-doc-id')
+  const title = target.getAttribute('data-title') || ''
+  const anchorId = target.getAttribute('data-anchor') || ''
+
+  if (!docIdStr) return
+
+  const docId = parseInt(docIdStr, 10)
+  if (isNaN(docId)) return
+
+  tooltip.visible = false
+  openDocPanel(docId, title, anchorId)
+}
+
+async function openDocPanel(docId: number, title: string, anchorId: string) {
+  docPanel.visible = true
+  docPanel.title = title
+  docPanel.anchorId = anchorId
+  docPanel.error = ''
+
+  // 检查缓存
+  const cached = docCache.get(docId)
+  if (cached) {
+    docPanel.content = cached.content
+    docPanel.renderedContent = renderMarkdown(cached.content)
+    docPanel.loading = false
+    nextTick(() => scrollToDocAnchor())
+    return
+  }
+
+  docPanel.loading = true
+  try {
+    const { data } = await knowledgeApi.get(docId)
+    const content = data.content || ''
+    docCache.set(docId, {
+      title: data.title,
+      content,
+      source: data.category || '知识库',
+      excerpt: content.slice(0, 200),
+    })
+    docPanel.content = content
+    docPanel.renderedContent = renderMarkdown(content)
+    docPanel.loading = false
+    await nextTick()
+    scrollToDocAnchor()
+  } catch (err: any) {
+    docPanel.error = '加载文档失败: ' + (err.response?.data?.detail || err.message)
+    docPanel.loading = false
+  }
+}
+
+function scrollToDocAnchor() {
+  if (!docPanel.anchorId || !docPanelContentRef.value) return
+  // 搜索锚点文本
+  const body = docPanelContentRef.value
+  const decoded = decodeURIComponent(docPanel.anchorId)
+  // 尝试查找包含锚点文本的标题或段落
+  const headings = body.querySelectorAll('h1, h2, h3, h4, h5, h6')
+  for (const h of headings) {
+    if (h.textContent?.includes(decoded)) {
+      h.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      // 高亮效果
+      h.classList.add('doc-anchor-highlight')
+      setTimeout(() => h.classList.remove('doc-anchor-highlight'), 3000)
+      return
+    }
+  }
+  // 尝试在段落中查找
+  const paragraphs = body.querySelectorAll('p, li, td, th')
+  for (const p of paragraphs) {
+    if (p.textContent?.includes(decoded)) {
+      p.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      p.classList.add('doc-anchor-highlight')
+      setTimeout(() => p.classList.remove('doc-anchor-highlight'), 3000)
+      return
+    }
+  }
+}
+
+function closeDocPanel() {
+  docPanel.visible = false
+  docPanel.anchorId = ''
+}
+
+// 全局事件委托：处理 ref:// 链接的 hover 和 click
+function onGlobalClick(e: Event) {
+  const target = e.target as HTMLElement
+  if (target.classList.contains('ref-link')) {
+    handleRefClick(e as MouseEvent)
+  }
+}
+
+function onGlobalMouseOver(e: Event) {
+  const target = e.target as HTMLElement
+  if (target.classList.contains('ref-link')) {
+    handleRefMouseEnter(e as MouseEvent)
+  }
+}
+
+function onGlobalMouseOut(e: Event) {
+  const target = e.target as HTMLElement
+  if (target.classList.contains('ref-link')) {
+    handleRefMouseLeave(e as MouseEvent)
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', onGlobalClick)
+  document.addEventListener('mouseover', onGlobalMouseOver)
+  document.addEventListener('mouseout', onGlobalMouseOut)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onGlobalClick)
+  document.removeEventListener('mouseover', onGlobalMouseOver)
+  document.removeEventListener('mouseout', onGlobalMouseOut)
+  cancelTooltipHide()
+})
+
+// ── 消息排序 ─────────────────────────────────────────────────
 const sorted = computed(() => {
   return [...props.messages].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
 })
@@ -136,56 +348,73 @@ function renderContent(text: string, hasFiles?: boolean, sources: any[] = [], me
   }
   try {
     const content = renderMarkdown(display)
-    return addInlineCitations(content, sources, messageId)
+    return processRefLinks(content, sources)
   } catch {
     return display.replace(/\n/g, '<br>')
   }
 }
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character] || character)
-}
-
-function sourceTarget(index: number | string, messageId?: string | number) {
-  return `reference-${messageId ?? 'message'}-${Number(index) + 1}`
-}
-
-function addInlineCitations(content: string, sources: any[], messageId?: string | number) {
-  if (!sources?.length) return content
-
-  let output = content
-  const unlinked: number[] = []
-
-  sources.forEach((source, index) => {
-    const label = `[${index + 1}]`
-    const title = escapeHtml(String(source.title || '参考出处'))
-    const reference = `<a class="inline-citation" href="#${sourceTarget(index, messageId)}" title="查看出处：${title}">${label}</a>`
-    const matchText = [source.title, source.excerpt]
-      .filter((value: string | undefined) => value && value.length > 4)
-      .sort((left: string, right: string) => right.length - left.length)[0]
-
-    if (matchText && !output.includes(reference)) {
-      const matcher = new RegExp(escapeRegExp(matchText), 'i')
-      if (matcher.test(output)) {
-        output = output.replace(matcher, (value) => `${value}${reference}`)
-        return
-      }
+/**
+ * 将 Markdown 中 ref:// 协议的链接转换为可点击的引用链接。
+ * 支持格式：
+ *   [来源：《文档标题》](ref://123)
+ *   [来源：《文档标题》— 关键字解释表](ref://123#关键字解释表)
+ */
+function processRefLinks(html: string, sources: any[]): string {
+  // 构建 sources 映射表 (title -> source info)
+  const sourceMap = new Map<string, { id: number; excerpt: string; source: string }>()
+  for (const s of sources) {
+    if (s.id && s.title) {
+      sourceMap.set(s.title, {
+        id: s.id,
+        excerpt: s.excerpt || '',
+        source: s.source || '知识库',
+      })
     }
-    unlinked.push(index)
-  })
-
-  if (unlinked.length) {
-    const references = unlinked
-      .map((index) => `<a class="inline-citation" href="#${sourceTarget(index, messageId)}" title="查看出处：${escapeHtml(String(sources[index].title || '参考出处'))}">[${index + 1}]</a>`)
-      .join('')
-    output += `<p class="citation-summary">相关参考：${references}</p>`
   }
 
-  return output
+  // 替换 ref:// 协议的链接
+  return html.replace(
+    /<a\s+href="ref:\/\/(\d+)(?:#([^"]*))?"[^>]*>(.*?)<\/a>/gi,
+    (_match, docId: string, anchor: string, text: string) => {
+      // 从文本中提取标题（去掉"来源："前缀）
+      const displayTitle = text.replace(/^来源：/, '').replace(/^来源:/, '')
+      // 查找对应的 source 信息
+      let excerpt = ''
+      let sourceLabel = '知识库'
+      // 尝试用 displayTitle 中的文档标题部分匹配
+      for (const [title, info] of sourceMap) {
+        if (displayTitle.includes(title) || title.includes(displayTitle.replace(/—.*$/, '').trim())) {
+          excerpt = info.excerpt
+          sourceLabel = info.source
+          break
+        }
+      }
+      // 如果没匹配到，取第一个匹配的 source
+      if (!excerpt && sourceMap.size > 0) {
+        const first = sourceMap.values().next().value
+        if (first) {
+          excerpt = first.excerpt
+          sourceLabel = first.source
+        }
+      }
+
+      const anchorAttr = anchor ? ` data-anchor="${escapeAttr(anchor)}"` : ''
+      const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
+      return `<a class="ref-link" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(displayTitle)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${anchorAttr} href="javascript:void(0)" title="点击查看文档">${text}</a>`
+    },
+  )
+
+  // 不再添加 "相关参考：" 汇总行和 "参考出处" 列表
+}
+
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/'/g, '&#39;')
 }
 
 // Auto-scroll when new messages arrive
@@ -662,16 +891,6 @@ function scrollToBottom() {
 .source-detail strong { font-size: 12px; font-weight: 600; }
 .source-detail small { font-size: 11px; color: var(--chat-source-muted); }
 .source-open { margin-left: auto; border: 0; padding: 4px; background: transparent; color: var(--chat-source-link); font-size: 12px; cursor: pointer; white-space: nowrap; }
-.message-actions { display: flex; gap: 4px; margin-top: 10px; opacity: 0.7; transition: opacity 0.2s; }
-.message-row:hover .message-actions { opacity: 1; }
-.action-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--chat-copy-text); background: transparent; border: 0; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
-.action-btn:hover { background: var(--chat-copy-hover-bg); color: var(--chat-copy-hover-text); }
-.action-btn.active { color: #2563eb; background: #eff6ff; }
-.action-btn svg { flex-shrink: 0; }
-
-.msg-content :deep(.inline-citation) { display: inline-flex; align-items: center; justify-content: center; min-width: 19px; height: 19px; margin-left: 3px; padding: 0 4px; border-radius: 5px; background: var(--chat-citation-bg); color: var(--chat-citation-text); font-size: 11px; font-weight: 600; line-height: 1; text-decoration: none; vertical-align: middle; }
-.msg-content :deep(.inline-citation:hover) { background: var(--chat-citation-hover-bg); color: var(--chat-citation-hover-text); }
-.msg-content :deep(.citation-summary) { margin-top: 12px; color: var(--chat-source-muted); font-size: 13px; }
 
 @media (max-width: 640px) {
   .chat-messages { padding: 28px 16px 16px; }
@@ -680,4 +899,233 @@ function scrollToBottom() {
   .source-card { align-items: flex-start; }
   .source-open { display: none; }
 }
+
+/* ── 引用文档链接 ──────────────────────────────────────────── */
+.msg-content :deep(.ref-link) {
+  display: inline;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  border-bottom: 1px dashed #2563eb;
+  cursor: pointer;
+  padding: 1px 2px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.msg-content :deep(.ref-link:hover) {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-radius: 3px;
+  border-bottom-color: #1d4ed8;
+}
+
+/* ── 引用浮框 Tooltip ──────────────────────────────────────── */
+.ref-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 360px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  transform: translate(-50%, -100%);
+  pointer-events: auto;
+  animation: tooltipIn 0.15s ease;
+}
+@keyframes tooltipIn {
+  from { opacity: 0; transform: translate(-50%, calc(-100% + 6px)); }
+  to   { opacity: 1; transform: translate(-50%, -100%); }
+}
+.ref-tooltip-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 4px;
+}
+.ref-tooltip-source {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-bottom: 6px;
+}
+.ref-tooltip-excerpt {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.55;
+  max-height: 120px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+}
+
+/* ── 右侧文档预览面板 ──────────────────────────────────────── */
+.doc-panel-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  background: rgba(0, 0, 0, 0.15);
+  animation: overlayIn 0.2s ease;
+}
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.doc-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 30%;
+  min-width: 380px;
+  max-width: 600px;
+  height: 100vh;
+  z-index: 9991;
+  background: #fff;
+  border-left: 1px solid #e5e7eb;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  animation: panelIn 0.25s ease;
+}
+@keyframes panelIn {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.doc-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+.doc-panel-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2937;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin-right: 12px;
+}
+.doc-panel-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: #9ca3af;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.doc-panel-close:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+.doc-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+}
+.doc-panel-loading {
+  /* no extra style needed */;
+}
+.doc-panel-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e5e7eb;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.doc-panel-error {
+  color: #ef4444;
+  font-size: 13px;
+  padding: 16px;
+  text-align: center;
+}
+.doc-panel-content {
+  font-size: 14px;
+  line-height: 1.75;
+  color: #374151;
+}
+.doc-panel-content :deep(h1),
+.doc-panel-content :deep(h2),
+.doc-panel-content :deep(h3) {
+  margin: 16px 0 8px;
+  font-weight: 600;
+  color: #1f2937;
+}
+.doc-panel-content :deep(h1) { font-size: 18px; }
+.doc-panel-content :deep(h2) { font-size: 16px; }
+.doc-panel-content :deep(h3) { font-size: 14px; }
+.doc-panel-content :deep(p) { margin: 4px 0; }
+.doc-panel-content :deep(ul),
+.doc-panel-content :deep(ol) { padding-left: 20px; margin: 6px 0; }
+.doc-panel-content :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 13px;
+}
+.doc-panel-content :deep(th),
+.doc-panel-content :deep(td) {
+  border: 1px solid #e5e7eb;
+  padding: 8px 10px;
+  text-align: left;
+}
+.doc-panel-content :deep(th) {
+  background: #f9fafb;
+  font-weight: 600;
+}
+.doc-panel-content :deep(pre) {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+.doc-panel-content :deep(code) {
+  background: #f3f4f6;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.doc-panel-content :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+
+/* 锚点定位高亮 */
+.doc-panel-content :deep(.doc-anchor-highlight) {
+  animation: anchorFlash 1.5s ease;
+}
+@keyframes anchorFlash {
+  0%, 100% { background: transparent; }
+  30% { background: #fef3c7; }
+}
+
+/* 消息操作按钮 */
+.message-actions { display: flex; gap: 4px; margin-top: 10px; opacity: 0.7; transition: opacity 0.2s; }
+.message-row:hover .message-actions { opacity: 1; }
+.action-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--chat-copy-text); background: transparent; border: 0; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+.action-btn:hover { background: var(--chat-copy-hover-bg); color: var(--chat-copy-hover-text); }
+.action-btn.active { color: #2563eb; background: #eff6ff; }
+.action-btn svg { flex-shrink: 0; }
 </style>

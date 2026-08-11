@@ -400,8 +400,13 @@ class KnowledgeService:
     def _extract_snippet(content: str, query: str, window: int = 300) -> str:
         """提取包含搜索关键词的上下文片段。
 
-        优先匹配完整搜索词，如果找不到则尝试匹配搜索词中的
-        数字/字母数字 token（如 "1078"、"CJT1078"）。
+        提取策略（按优先级）：
+        1. 按 Markdown 章节边界提取：找到关键词所在的 ### / ## / # 小节，
+           返回该小节的完整内容（从当前标题到下一个同级或更高级标题）。
+           —— 适用于结构化知识库文档，避免表格/解释被截断。
+        2. 章节过大（>1500 字符）或无章节结构 → 回退到固定窗口（window）。
+        3. 完整匹配失败 → 尝试匹配数字/字母数字 token（如 "1078"、"CJT1078"）。
+        4. 所有匹配失败 → 返回开头。
         """
         if not content or not query:
             return content[:300] if content else ""
@@ -420,6 +425,12 @@ class KnowledgeService:
         if idx == -1:
             return content[:300]
 
+        # 策略1：按 Markdown 章节边界提取
+        section = KnowledgeService._extract_markdown_section(content, idx)
+        if section:
+            return section
+
+        # 策略2：固定窗口回退
         start = max(0, idx - window // 2)
         end = min(len(content), idx + window // 2)
         snippet = content[start:end]
@@ -428,3 +439,54 @@ class KnowledgeService:
         if end < len(content):
             snippet = snippet + "..."
         return snippet
+
+    @staticmethod
+    def _extract_markdown_section(content: str, keyword_idx: int) -> Optional[str]:
+        """提取关键词所在的 Markdown 小节完整内容。
+
+        小节定义：从最近的 ### / ## / # 标题行开始，
+        到下一个同级或更高级标题（或文档结尾）结束。
+
+        Returns:
+            小节完整文本（含标题），或 None（无章节结构/章节过大）。
+        """
+        if keyword_idx < 0 or keyword_idx >= len(content):
+            return None
+
+        # 向前查找最近的标题行（### / ## / #，行首）
+        # 标题等级：#=1, ##=2, ###=3，数字越小级别越高
+        before = content[:keyword_idx]
+        # 匹配行首的 1-3 个 # 后跟空格
+        heading_pattern = re.compile(r'(?m)^(\#{1,3})\s+.+$')
+        headings = list(heading_pattern.finditer(before))
+        if not headings:
+            return None  # 前面没有任何标题，不算结构化文档
+
+        last_heading = headings[-1]
+        heading_level = len(last_heading.group(1))
+        section_start = last_heading.start()
+
+        # 向后查找下一个同级或更高级标题（level <= 当前 level）
+        after = content[keyword_idx:]
+        next_heading = None
+        for m in heading_pattern.finditer(after):
+            if len(m.group(1)) <= heading_level:
+                next_heading = m
+                break
+
+        if next_heading:
+            section_end = keyword_idx + next_heading.start()
+        else:
+            section_end = len(content)
+
+        section = content[section_start:section_end].strip()
+
+        # 章节过大 → 返回 None，让调用方回退到固定窗口
+        # （避免把整篇大文档当 snippet 塞进上下文）
+        if len(section) > 1500:
+            return None
+
+        # 标记边界（若非文档开头/结尾）
+        prefix = "..." if section_start > 0 else ""
+        suffix = "..." if section_end < len(content) else ""
+        return prefix + section + suffix
