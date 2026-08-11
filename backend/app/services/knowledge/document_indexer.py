@@ -219,10 +219,9 @@ class DocumentIndexer:
         # 向量搜索
         vector_results = self.vector_service.search(query, top_k=vector_top_k)
 
-        # 关键词搜索
+        # 关键词搜索（纯关键词通路，不走向量——避免与上面的向量结果重复）
         ks = KnowledgeService(self.db)
-        keyword_results_raw = ks.search(query, page_size=keyword_top_k)
-        keyword_results = keyword_results_raw.get("items", [])
+        keyword_results = ks.keyword_search(query, limit=keyword_top_k)
 
         # 融合结果
         fused = []

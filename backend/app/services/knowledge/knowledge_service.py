@@ -154,6 +154,23 @@ class KnowledgeService:
 
         return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
+    def keyword_search(
+        self,
+        query_text: str,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """纯关键词搜索（不做向量检索）——供混合检索调用。
+
+        两阶段：先完整短语匹配，无结果则分词 OR 匹配。
+        """
+        items = self._keyword_search_phrase(query_text, limit)
+        if items:
+            return items
+        tokens = self._tokenize_query(query_text)
+        if tokens:
+            return self._keyword_search_tokens(tokens, limit)
+        return []
+
     def _keyword_search_phrase(self, query_text: str, limit: int) -> list:
         """Exact phrase ILIKE search."""
         if not query_text.strip():
@@ -200,12 +217,11 @@ class KnowledgeService:
                 or_(or_(*title_conditions), or_(*content_conditions)),
             )
             .order_by(KnowledgeDocument.updated_at.desc())
-            .limit(limit)
+            .limit(limit * 4)  # 先多取候选，按相关度排序后再截断
             .all()
         )
         # Re-score based on how many tokens matched
-        query_lower = " ".join(tokens).lower()
-        return [
+        scored = [
             {
                 "id": doc.id, "title": doc.title,
                 "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
@@ -214,6 +230,8 @@ class KnowledgeService:
             }
             for doc in docs
         ]
+        scored.sort(key=lambda x: x["relevance_score"], reverse=True)
+        return scored[:limit]
 
     @staticmethod
     def _tokenize_query(query_text: str) -> list[str]:
@@ -237,11 +255,11 @@ class KnowledgeService:
                         for i in range(len(phrase) - 2):
                             tokens.add(phrase[i:i + 3])
 
-        # Extract English/technical tokens
-        en_tokens = re.findall(r"[a-zA-Z_]\w{1,}", query_text)
+        # Extract English/technical tokens (ASCII 字母数字，含纯数字如 "1078"、"808")
+        # 注意不能用 \w——Python re 的 \w 会匹配中文字符，导致整句被吞成一个 token
+        en_tokens = re.findall(r"[A-Za-z0-9_]{2,}", query_text)
         for t in en_tokens:
-            if len(t) >= 2:
-                tokens.add(t)
+            tokens.add(t)
 
         # Filter common stop words
         stop_words = {"的", "了", "在", "是", "我", "有", "和", "就", "不",
@@ -254,15 +272,23 @@ class KnowledgeService:
 
     @staticmethod
     def _token_relevance(doc: KnowledgeDocument, tokens: list[str]) -> float:
-        """Score based on how many tokens match in title vs content."""
+        """Score based on how many tokens match in title vs content.
+
+        含数字的 token（如 "1078"、"CJT1078"）是强区分度关键词，
+        命中时给予 3 倍权重，避免被大量中文 n-gram 噪声稀释。
+        """
         title_lower = (doc.title or "").lower()
         content_lower = (doc.content or "").lower()
-        total_tokens = len(tokens)
-        if total_tokens == 0:
+        if not tokens:
             return 0
-        title_hits = sum(1 for t in tokens if t.lower() in title_lower)
-        content_hits = sum(1 for t in tokens if t.lower() in content_lower)
-        return min(1.0, (title_hits * 0.4 + content_hits * 0.15) / max(1, total_tokens))
+
+        def _weight(token: str) -> float:
+            return 3.0 if re.search(r"\d", token) else 1.0
+
+        total_weight = sum(_weight(t) for t in tokens)
+        title_hits = sum(_weight(t) for t in tokens if t.lower() in title_lower)
+        content_hits = sum(_weight(t) for t in tokens if t.lower() in content_lower)
+        return min(1.0, (title_hits * 0.4 + content_hits * 0.15) / max(1.0, total_weight))
 
     # ------------------------------------------------------------------
     # Update

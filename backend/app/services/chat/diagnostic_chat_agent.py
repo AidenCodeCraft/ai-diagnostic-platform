@@ -431,7 +431,9 @@ class DiagnosticChatAgent:
         terms: list[str] = []
 
         # 优先级0：数字/字母数字组合关键词（如"1078"、"CJT1078"、"808"）
-        alphanum = re.findall(r'\b[A-Za-z]*\d+[A-Za-z]*\b', text)
+        # 注意：不能用 \b 词边界——Python re 中中文字符也是 \w，
+        # "1078协" 之间没有词边界，会导致纯数字关键词提取失败
+        alphanum = re.findall(r'[A-Za-z]*\d+[A-Za-z]*', text)
         for token in alphanum:
             if len(token) >= 2 and token not in terms:
                 terms.append(token)
