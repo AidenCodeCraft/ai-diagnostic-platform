@@ -68,7 +68,7 @@ class RuleEngine:
         return len(self.rules) < before
 
     def list_rules(self) -> List[Dict[str, object]]:
-        return list(self.rules)
+        return list(self.rules)  # type: ignore[return-value]
 
     @staticmethod
     def _get_classification(event: Union[ParsedEvent, Dict[str, object]]) -> str:

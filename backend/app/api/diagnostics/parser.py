@@ -17,6 +17,8 @@ def parse_log_text(text: str = Form(...)) -> List[Dict[str, object]]:
 @router.post("/parse-file")
 def parse_log_file(file: UploadFile = File(...)) -> List[Dict[str, object]]:
     """Parse an uploaded log file into structured events."""
+    if not file.filename:
+        raise ValueError("文件名不能为空")
     temp_path = Path("/tmp") / file.filename
     temp_path.write_bytes(file.file.read())
     try:

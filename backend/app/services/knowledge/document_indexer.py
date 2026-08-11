@@ -59,7 +59,7 @@ class DocumentIndexer:
         self,
         doc_id: int,
         content: Optional[str] = None,
-        force: bool = False,
+        force: bool = False,  # noqa: ARG002 — reserved for future force reindex logic
     ) -> int:
         """索引单个文档。
 
@@ -142,7 +142,7 @@ class DocumentIndexer:
             .all()
         )
 
-        doc_ids = [d.id for d in docs]
+        doc_ids = [int(d.id) for d in docs]  # type: ignore[arg-type]
         logger.info("[DocumentIndexer] Reindex all: %d documents", len(doc_ids))
 
         stats = self.index_documents_batch(doc_ids)
@@ -193,10 +193,14 @@ class DocumentIndexer:
             KnowledgeDocument.id == doc_id
         ).first()
 
-        if not doc or not doc.content:
+        if not doc:
             return None
 
-        return doc.content
+        content_raw: Optional[str] = doc.content  # type: ignore[assignment]
+        if not content_raw:
+            return None
+
+        return content_raw
 
     def search_with_hybrid(
         self,

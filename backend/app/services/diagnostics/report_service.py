@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
@@ -59,12 +59,13 @@ class ReportService:
             )
             self.db.add(report)
         else:
-            report.content = json.dumps(report_data)
-            report.title = title
+            setattr(report, 'content', json.dumps(report_data))
+            setattr(report, 'title', title)
 
         self.db.commit()
         self.db.refresh(report)
 
+        created_at_raw = report.created_at  # type: ignore[assignment]
         return {
             "report_id": report.id,
             "analysis_id": analysis.id,
@@ -76,13 +77,13 @@ class ReportService:
             "next_steps": next_steps,
             "model": model,
             "format": report.format,
-            "created_at": report.created_at.isoformat() if report.created_at else None,
+            "created_at": created_at_raw.isoformat() if created_at_raw is not None else None,
         }
 
     def export_markdown(self, report_id: int) -> str:
         """Export a report as Markdown text."""
         report = self.get_report(report_id)
-        content = self._decode_content(report.content)
+        content = self._decode_content(str(report.content))
         return self._to_markdown(content)
 
     # ------------------------------------------------------------------
@@ -97,8 +98,9 @@ class ReportService:
 
     def get_report_detail(self, report_id: int) -> Dict[str, Any]:
         report = self.get_report(report_id)
-        content = self._decode_content(report.content)
+        content = self._decode_content(str(report.content))
 
+        created_at_raw = report.created_at  # type: ignore[assignment]
         return {
             "id": report.id,
             "log_id": report.log_id,
@@ -110,7 +112,7 @@ class ReportService:
             "confidence": content.get("confidence"),
             "next_steps": self._parse_next_steps(content.get("next_steps")),
             "model": content.get("model", "mock"),
-            "created_at": report.created_at.isoformat() if report.created_at else None,
+            "created_at": created_at_raw.isoformat() if created_at_raw is not None else None,
         }
 
     def list_reports(
@@ -129,7 +131,8 @@ class ReportService:
 
         results = []
         for report in items:
-            content = self._decode_content(report.content)
+            content = self._decode_content(str(report.content))
+            created_at_raw = report.created_at  # type: ignore[assignment]
             results.append({
                 "id": report.id,
                 "log_id": report.log_id,
@@ -141,7 +144,7 @@ class ReportService:
                 "confidence": content.get("confidence"),
                 "next_steps": self._parse_next_steps(content.get("next_steps")),
                 "model": content.get("model", "mock"),
-                "created_at": report.created_at.isoformat() if report.created_at else None,
+                "created_at": created_at_raw.isoformat() if created_at_raw is not None else None,
             })
 
         return {

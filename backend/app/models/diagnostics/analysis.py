@@ -34,5 +34,5 @@ class Analysis(Base):
     )
 
     def can_transition_to(self, target_status: str) -> bool:
-        allowed = ANALYSIS_STATUS_TRANSITIONS.get(self.status, set())
+        allowed = ANALYSIS_STATUS_TRANSITIONS.get(self.status, set())  # type: ignore[arg-type]
         return target_status in allowed

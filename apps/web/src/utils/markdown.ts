@@ -8,8 +8,7 @@ import { marked } from 'marked'
 // 配置 marked 选项
 marked.setOptions({
   breaks: true, // 支持 GFM 换行
-  gfm: true, // 启用 GitHub Flavored Markdown
-  tables: true, // 支持表格
+  gfm: true, // 启用 GitHub Flavored Markdown（已内置表格支持）
   pedantic: false,
 })
 
@@ -17,19 +16,18 @@ marked.setOptions({
 const renderer = new marked.Renderer()
 
 // 增强代码块渲染 - 添加语言标签和复制按钮
-const originalCode = renderer.code.bind(renderer)
-renderer.code = function (code: string, language: string | undefined) {
-  const lang = language || 'text'
-  const langLabel = lang.toUpperCase()
-  
+renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
+  const language = lang || 'text'
+  const langLabel = language.toUpperCase()
+
   // 转义 HTML 字符
-  const escaped = code
+  const escaped = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
-  
+
   return `
     <div class="code-block-wrapper">
       <div class="code-block-header">
@@ -41,21 +39,26 @@ renderer.code = function (code: string, language: string | undefined) {
           </svg>
         </button>
       </div>
-      <pre><code class="language-${lang}">${escaped}</code></pre>
+      <pre><code class="language-${language}">${escaped}</code></pre>
     </div>
   `
 }
 
 // 增强表格渲染 - 添加滚动容器
-const originalTable = renderer.table.bind(renderer)
-renderer.table = function (header: string, body: string) {
-  const table = originalTable(header, body)
-  return `<div class="table-wrapper">${table}</div>`
+// marked v18+ renderer.table 接收 Table token，手动构建 HTML 以包裹 wrapper
+renderer.table = function (token) {
+  const align = token.align || []
+  const headerHtml = token.header
+    .map((cell, i) => `<th${align[i] ? ` align="${align[i]}"` : ''}>${cell.text}</th>`)
+    .join('')
+  const bodyHtml = token.rows
+    .map(row => `<tr>${row.map((cell, i) => `<td${align[i] ? ` align="${align[i]}"` : ''}>${cell.text}</td>`).join('')}</tr>`)
+    .join('')
+  return `<div class="table-wrapper"><table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`
 }
 
 // 增强链接渲染 - 外部链接新窗口打开
-const originalLink = renderer.link.bind(renderer)
-renderer.link = function (href: string, title: string | null | undefined, text: string) {
+renderer.link = function ({ href, title, text }: { href: string; title?: string | null; text: string }) {
   const isExternal = href.startsWith('http://') || href.startsWith('https://')
   const titleAttr = title ? ` title="${title}"` : ''
   const targetAttr = isExternal ? ' target="_blank" rel="noopener noreferrer"' : ''

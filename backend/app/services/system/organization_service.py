@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
-
 from sqlalchemy.orm import Session
 
 from app.models import Organization, OrganizationMember, User
@@ -46,7 +44,7 @@ class OrganizationService:
             OrganizationMember.user_id == user_id,
         ).first()
         if existing:
-            existing.role = role
+            setattr(existing, 'role', role)
         else:
             existing = OrganizationMember(organization_id=org_id, user_id=user_id, role=role)
             self.db.add(existing)

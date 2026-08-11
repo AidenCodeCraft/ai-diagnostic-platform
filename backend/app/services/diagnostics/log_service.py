@@ -107,7 +107,7 @@ class LogService:
 
     def delete_log(self, log_id: int) -> None:
         log = self._get_or_raise(log_id)
-        self._remove_file(log.file_path)
+        self._remove_file(str(log.file_path))
         self.db.delete(log)
         self.db.commit()
 

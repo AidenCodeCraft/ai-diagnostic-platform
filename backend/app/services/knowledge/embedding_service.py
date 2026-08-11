@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -137,11 +137,11 @@ class EmbeddingService:
             provider = ProviderRegistry().get_provider(self.provider_name)
 
             # 如果 provider 支持 embedding
-            if hasattr(provider, 'embed'):
-                return provider.embed(texts)
+            if hasattr(provider, 'embed') and callable(getattr(provider, 'embed', None)):
+                return getattr(provider, 'embed')(texts)  # type: ignore[no-any-return]
 
-            if hasattr(provider, 'embedding'):
-                return [provider.embedding(t) for t in texts]
+            if hasattr(provider, 'embedding') and callable(getattr(provider, 'embedding', None)):
+                return [getattr(provider, 'embedding')(t) for t in texts]  # type: ignore[return-value]
 
         except Exception as exc:
             logger.debug("[EmbeddingService] Provider embedding not available: %s", exc)

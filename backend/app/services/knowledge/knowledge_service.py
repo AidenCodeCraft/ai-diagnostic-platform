@@ -120,7 +120,7 @@ class KnowledgeService:
                     KnowledgeDocument.id.in_(doc_ids),
                     KnowledgeDocument.status == "active",
                 ).all()
-                doc_map = {d.id: d for d in docs}
+                doc_map = {int(d.id): d for d in docs}  # type: ignore[arg-type]
                 results = []
                 for vr in vector_results:
                     doc = doc_map.get(vr["id"])
@@ -129,7 +129,7 @@ class KnowledgeService:
                             "id": doc.id, "title": doc.title,
                             "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
                             "relevance_score": round(vr.get("score", 0), 2),
-                            "snippet": self._extract_snippet(doc.content, query_text),
+                            "snippet": self._extract_snippet(str(doc.content), query_text),
                         })
                 return {"items": results, "total": len(results), "page": page, "page_size": page_size}
         except Exception as exc:
@@ -194,7 +194,7 @@ class KnowledgeService:
                 "id": doc.id, "title": doc.title,
                 "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
                 "relevance_score": round(self._relevance_score(doc, query_text), 2),
-                "snippet": self._extract_snippet(doc.content, query_text),
+                "snippet": self._extract_snippet(str(doc.content), query_text),
             }
             for doc in docs
         ]
@@ -226,7 +226,7 @@ class KnowledgeService:
                 "id": doc.id, "title": doc.title,
                 "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
                 "relevance_score": round(self._token_relevance(doc, tokens), 2),
-                "snippet": self._extract_snippet(doc.content, tokens[0]) if tokens else "",
+                "snippet": self._extract_snippet(str(doc.content), tokens[0]) if tokens else "",
             }
             for doc in docs
         ]
@@ -327,7 +327,7 @@ class KnowledgeService:
             .all()
         )
         for child in children:
-            self._delete_children(child.id)  # 递归删除孙节点
+            self._delete_children(int(child.id))  # type: ignore[arg-type]  # 递归删除孙节点
             self.db.delete(child)
             self.db.flush()  # 每个子节点立即 flush，确保递归删除时序正确
 
@@ -348,20 +348,21 @@ class KnowledgeService:
         roots: List[Dict[str, Any]] = []
 
         for d in docs:
+            updated_at_raw = d.updated_at  # type: ignore[assignment]
             node = {
                 "id": d.id,
                 "title": d.title,
                 "doc_type": d.doc_type,
                 "category": d.category,
-                "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+                "updated_at": updated_at_raw.isoformat() if updated_at_raw is not None else None,
                 "children": [],
             }
-            doc_map[d.id] = node
+            doc_map[int(d.id)] = node  # type: ignore[arg-type]
 
         for d in docs:
-            node = doc_map[d.id]
-            if d.parent_id and d.parent_id in doc_map:
-                doc_map[d.parent_id]["children"].append(node)
+            node = doc_map[int(d.id)]  # type: ignore[arg-type]
+            if d.parent_id and int(d.parent_id) in doc_map:  # type: ignore[arg-type]
+                doc_map[int(d.parent_id)]["children"].append(node)  # type: ignore[arg-type]
             else:
                 roots.append(node)
 
@@ -388,8 +389,10 @@ class KnowledgeService:
     @staticmethod
     def _relevance_score(doc: KnowledgeDocument, query: str) -> float:
         query_lower = query.lower()
-        title_hits = doc.title.lower().count(query_lower) if doc.title else 0
-        content_hits = doc.content.lower().count(query_lower) if doc.content else 0
+        title_raw: Optional[str] = doc.title  # type: ignore[assignment]
+        content_raw: Optional[str] = doc.content  # type: ignore[assignment]
+        title_hits = title_raw.lower().count(query_lower) if title_raw else 0
+        content_hits = content_raw.lower().count(query_lower) if content_raw else 0
         # Title matches weighted 3x vs content
         return min(1.0, (title_hits * 0.3 + content_hits * 0.1))
 

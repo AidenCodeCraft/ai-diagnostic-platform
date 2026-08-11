@@ -125,7 +125,7 @@ class DeepSeekProvider(BaseProvider):
         except Exception:
             return "[DeepSeek API unavailable]"
 
-    def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[str | Dict[str, str], None, None]:
+    def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[Any, None, None]:
         """Stream chat via DeepSeek SSE."""
         if not self.api_key:
             yield (
@@ -160,7 +160,7 @@ class DeepSeekProvider(BaseProvider):
             url += "/v1/chat/completions"
         return url
 
-    def _call_api_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
+    def _call_api_stream(self, messages: List[Dict[str, str]]) -> Generator[Any, None, None]:
         """Stream tokens from DeepSeek API."""
         with httpx.Client(timeout=60.0) as client:
             with client.stream(

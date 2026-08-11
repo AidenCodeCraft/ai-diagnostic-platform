@@ -9,8 +9,6 @@ from app.agents.core.agent import BaseAgent, AgentResult
 from app.agents.tools.builtin import (
     ParseLogTool,
     RuleCheckTool,
-    LLMAnalyzeTool,
-    GenerateReportTool,
     create_default_registry,
 )
 from app.agents.planner.simple_planner import SimplePlanner
@@ -67,7 +65,7 @@ def test_tool_registry_execute_nonexistent():
     registry = ToolRegistry()
     result = registry.execute("nonexistent")
     assert result.success is False
-    assert "not found" in result.error
+    assert result.error is not None and "not found" in result.error
 
 
 def test_tool_registry_list_specs():
@@ -224,7 +222,7 @@ def test_parse_log_tool_missing_path():
     tool = ParseLogTool()
     result = tool.execute()
     assert result.success is False
-    assert "log_file_path" in result.error
+    assert result.error is not None and "log_file_path" in result.error
 
 
 def test_rule_check_tool_empty_events():

@@ -38,5 +38,5 @@ class Log(Base):
     )
 
     def can_transition_to(self, target_status: str) -> bool:
-        allowed = LOG_STATUS_TRANSITIONS.get(self.status, set())
+        allowed = LOG_STATUS_TRANSITIONS.get(self.status, set())  # type: ignore[arg-type]
         return target_status in allowed

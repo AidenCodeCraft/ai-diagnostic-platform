@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 
 # ═══════════════════════════════════════════════════════════
@@ -226,12 +226,11 @@ def apply_all_bugfixes():
         from app.services.chat import diagnostic_chat_agent as dca
         original_sanitize = dca.DiagnosticChatAgent._sanitize
 
-        @staticmethod
-        def safe_sanitize(text):
+        def safe_sanitize(self, text: str) -> str:  # type: ignore[no-redef]
             cleaned = enhanced_sanitize(text)
-            return original_sanitize(cleaned)
+            return original_sanitize(self, cleaned)  # type: ignore[arg-type]
 
-        dca.DiagnosticChatAgent._sanitize = safe_sanitize
+        dca.DiagnosticChatAgent._sanitize = safe_sanitize  # type: ignore[assignment]
         fixes_applied += 1
     except Exception as e:
         logger.warning("Fix 6 (sanitize) not applied: %s", e)

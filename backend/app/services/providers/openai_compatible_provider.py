@@ -87,7 +87,7 @@ class OpenAICompatibleProvider(BaseProvider):
         except Exception:
             return f"[{self._provider_name} API unavailable]"
 
-    def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[str | Dict[str, str], None, None]:
+    def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[Any, None, None]:
         """Stream chat via OpenAI-compatible API."""
         if not self.api_key:
             yield f"[{self._provider_name} API key not configured]"
@@ -114,7 +114,7 @@ class OpenAICompatibleProvider(BaseProvider):
             resp.raise_for_status()
             return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
 
-    def _call_api_stream(self, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
+    def _call_api_stream(self, messages: List[Dict[str, str]]) -> Generator[Any, None, None]:
         with httpx.Client(timeout=60.0) as client:
             with client.stream(
                 "POST", self.base_url,

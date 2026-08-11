@@ -8,15 +8,12 @@ Provides:
 
 import importlib
 import os
-import sys
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from app.database import session as session_module
 
 
 def _setup_in_memory_db(tmp_path):
@@ -50,9 +47,9 @@ def _setup_in_memory_db(tmp_path):
 
 
 @pytest.fixture(scope="function")
-def client(monkeypatch, tmp_path):
+def client(tmp_path):
     """Create an isolated test client with in-memory SQLite database."""
-    SessionLocal = _setup_in_memory_db(tmp_path)
+    _ = _setup_in_memory_db(tmp_path)
 
     # Reload main app with fresh state
     import app.main
@@ -63,7 +60,7 @@ def client(monkeypatch, tmp_path):
 
 
 @pytest.fixture(scope="function")
-def db_session(tmp_path) -> Session:
+def db_session(tmp_path):
     """Direct SQLAlchemy session for unit tests that need DB access."""
     SessionLocal = _setup_in_memory_db(tmp_path)
     session = SessionLocal()

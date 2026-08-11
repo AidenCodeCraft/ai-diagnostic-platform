@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.models import Log
-from app.schemas import ParseResult, ParsedEventSchema
+from app.schemas import ParseResult
 from app.services.diagnostics.log_service import LogService
 from app.services.diagnostics.parser_service import LogParserService
 from app.services.system.rule_engine import RuleEngine
@@ -27,14 +27,14 @@ class ParsingService:
         """Parse a stored log by ID and return structured events."""
         log = self._get_log(log_id)
 
-        events = self._parser.parse_file(log.file_path, force_source=force_source)
+        events = self._parser.parse_file(str(log.file_path), force_source=force_source)
         return events
 
     def parse_log_structured(self, log_id: int, force_source: Optional[str] = None) -> ParseResult:
         """Parse a stored log and return a structured ParseResult."""
         log = self._get_log(log_id)
 
-        raw_events = self._parser.parse_structured(log.file_path, force_source=force_source)
+        raw_events = self._parser.parse_structured(str(log.file_path), force_source=force_source)
         return ParseResult.from_events(raw_events, log_id=log_id, status="completed")
 
     # ------------------------------------------------------------------
@@ -47,7 +47,7 @@ class ParsingService:
         self._transition_status(log, "parsing")
 
         try:
-            raw_events = self._parser.parse_structured(log.file_path)
+            raw_events = self._parser.parse_structured(str(log.file_path))
             result = ParseResult.from_events(raw_events, log_id=log_id, status="completed")
             suggestions = self.rule_engine.generate_suggestions(raw_events)
 
@@ -89,6 +89,6 @@ class ParsingService:
     def _transition_status(self, log: Log, status: str) -> None:
         """Update the log status using the status machine."""
         try:
-            LogService(self.db).update_status(log.id, status)
+            LogService(self.db).update_status(int(log.id), status)  # type: ignore[arg-type]
         except ValueError:
             pass  # Allow transitions that may already be in target state

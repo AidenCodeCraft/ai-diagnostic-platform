@@ -120,7 +120,7 @@ def update_user(
             raise HTTPException(status_code=400, detail="密码不能与用户名相同")
         if len(pw) < 12:
             raise HTTPException(status_code=400, detail="密码至少12位")
-        user.password_hash = AuthService._hash_password(pw)
+        user.password_hash = AuthService._hash_password(pw)  # type: ignore[assignment]
 
     db.commit()
     db.refresh(user)

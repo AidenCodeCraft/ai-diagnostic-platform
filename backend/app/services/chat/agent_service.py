@@ -7,8 +7,7 @@ from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
-from app.agents.core.agent import AgentResult, BaseAgent
-from app.agents.core.state import AgentState
+from app.agents.core.agent import BaseAgent
 from app.agents.planner.simple_planner import SimplePlanner
 from app.agents.tools.builtin import create_default_registry
 from app.agents.core.tool import ToolRegistry
@@ -44,7 +43,8 @@ class AgentService:
             raise ValueError("log not found")
 
         # Build context
-        with open(log.file_path, "r", encoding="utf-8", errors="ignore") as f:
+        file_path = str(log.file_path)  # resolve Column[str] → str for type safety
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             log_content = f.read()
 
         context = {

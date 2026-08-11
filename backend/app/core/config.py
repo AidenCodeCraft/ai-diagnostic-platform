@@ -85,7 +85,9 @@ class Settings(BaseSettings):
             return v
         if isinstance(v, str):
             return int(v.strip())
-        return int(v)
+        if isinstance(v, float):
+            return int(v)
+        return int(bool(v))
 
 
 settings = Settings()

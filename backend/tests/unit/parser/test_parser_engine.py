@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.services.parser.base import BaseParser, ParsedEvent
+from app.services.parser.base import ParsedEvent
 from app.services.parser.generic_parser import GenericParser
 from app.services.parser.kernel_parser import KernelLogParser
 from app.services.parser.linux_parser import LinuxSyslogParser
@@ -388,7 +388,7 @@ def test_rule_engine_with_parsed_events():
         ParsedEvent(raw="e1", classification="timeout", module="usb"),
         ParsedEvent(raw="e2", classification="filesystem", module="ext4"),
     ]
-    suggestions = engine.generate_suggestions(events)
+    suggestions = engine.generate_suggestions(events)  # type: ignore[arg-type]
     assert len(suggestions) == 2
     assert suggestions[0]["rule"] == "usb-timeout"
     assert suggestions[1]["rule"] == "filesystem-failure"
@@ -400,7 +400,7 @@ def test_rule_engine_with_dict_events():
         {"classification": "timeout", "module": "usb"},
         {"classification": "panic", "module": "kernel"},
     ]
-    suggestions = engine.generate_suggestions(events)
+    suggestions = engine.generate_suggestions(events)  # type: ignore[arg-type]
     assert len(suggestions) == 2
     assert suggestions[1]["rule"] == "kernel-panic"
 
@@ -408,5 +408,5 @@ def test_rule_engine_with_dict_events():
 def test_rule_engine_no_match():
     engine = RuleEngine()
     events = [ParsedEvent(raw="e1", classification="normal", module="system")]
-    suggestions = engine.generate_suggestions(events)
+    suggestions = engine.generate_suggestions(events)  # type: ignore[arg-type]
     assert suggestions == []

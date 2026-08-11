@@ -577,7 +577,7 @@ onMounted(() => {
       textarea.setSelectionRange(newPos, newPos)
     }
 
-    textarea.addEventListener('paste', pasteHandler, true) // 捕获阶段
+    textarea.addEventListener('paste', pasteHandler as EventListener, true) // 捕获阶段
   })
 })
 
@@ -585,7 +585,7 @@ onBeforeUnmount(() => {
   if (pasteHandler) {
     const textarea = document.querySelector('.v-md-textarea-editor textarea')
     if (textarea) {
-      textarea.removeEventListener('paste', pasteHandler, true)
+      textarea.removeEventListener('paste', pasteHandler as EventListener, true)
     }
     pasteHandler = null
   }

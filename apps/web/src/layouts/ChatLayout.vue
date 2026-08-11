@@ -3,7 +3,7 @@
     <!-- 左侧边栏 -->
     <ChatSidebar v-model:collapsed="sidebarCollapsed" :chats="filteredChats" :loading="sessionsLoading"
       :activeChatId="isChatRoute ? currentChatId : 0"
-      :userName="userName" :userInitial="userInitial" :isAdmin="userStore.isAdmin" @toggleSearch="toggleSearch"
+      :userName="userName" :userInitial="userInitial" :isAdmin="isAdmin" @toggleSearch="toggleSearch"
       @newChat="newChat" @navigate="navigateTo" @selectChat="selectChat" @chatMenu="openChatMenu"
       @toggleUserMenu="showUserMenu = !showUserMenu" @searchChats="onSearchChats" />
 
@@ -228,10 +228,12 @@ const isUploading = computed(() => attachedFiles.value.some(f => f.status === 'u
 const analysisMode = computed<'chat' | 'diagnose'>(() => attachedFiles.value.length > 0 ? 'diagnose' : 'chat')
 const userName = computed(() => userStore.userName)
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
+const isAdmin = computed(() => userStore.isAdmin)
 
 // ── UI Actions ────────────────────────────────────────────────
 
 function onSearchChats(query: string) { searchChatQuery.value = query }
+function toggleSearch() { /* 搜索框切换由 ChatSidebar 内部处理 */ }
 function navigateTo(path: string) { router.push(path) }
 function openKnowledge(source: { id?: number }) {
   router.push(source.id ? `/knowledge?document=${source.id}` : '/knowledge')

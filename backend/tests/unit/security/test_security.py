@@ -5,12 +5,9 @@ from __future__ import annotations
 import re
 import time
 
-import pytest
-
 from app.security.log_desensitizer import (
     SensitiveDataFilter,
     DesensitizeLevel,
-    apply_log_desensitization,
     AuditLogger,
     SENSITIVE_PATTERNS,
 )
@@ -132,7 +129,8 @@ def test_replay_duplicate():
         "X-Request-Timestamp": str(int(time.time())),
     }
     assert rp.validate(request) is None
-    assert "duplicate_nonce" not in rp.validate(request)  # 可能返回错误
+    second_result = rp.validate(request)
+    assert second_result is not None and "duplicate_nonce" not in second_result  # 可能返回错误
 
 
 def test_replay_expired_timestamp():

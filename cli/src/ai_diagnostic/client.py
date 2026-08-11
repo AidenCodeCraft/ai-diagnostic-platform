@@ -22,10 +22,9 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import httpx
 
@@ -92,7 +91,7 @@ class DiagnosticClient:
         data = resp.json()
         self._token = data.get("access_token", "")
         self._client.headers["Authorization"] = f"Bearer {self._token}"
-        return self._token
+        return self._token  # type: ignore[return-type]
 
     def set_token(self, token: str):
         """手动设置 token"""

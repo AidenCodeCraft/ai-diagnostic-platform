@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import ChatSession, ChatMessage
 from app.services.chat.diagnostic_chat_agent import DiagnosticChatAgent
 from app.services.chat.context_manager import ContextManager
-from app.services.chat.title_generator import generate_chat_title, should_generate_title
+from app.services.chat.title_generator import should_generate_title
 from app.services.knowledge.provider_registry import ProviderRegistry
 
 
@@ -47,11 +47,11 @@ class ChatService:
     def update_session(self, session_id: int, title: Optional[str] = None, context: Optional[Dict[str, Any]] = None) -> ChatSession:
         s = self.get_session(session_id)
         if title is not None:
-            s.title = title
+            setattr(s, 'title', title)
         if context is not None:
             existing = s.context or {}
             existing.update(context)
-            s.context = existing
+            setattr(s, 'context', existing)
         self.db.commit()
         self.db.refresh(s)
         return s
@@ -120,12 +120,13 @@ class ChatService:
         messages.extend(history_messages)
         return messages
 
-    def _auto_title(self, session_id: int, _content: str = "") -> None:
+    def _auto_title(self, session_id: int, content: str = "") -> None:
         """智能生成对话标题（基于 LLM 而非简单截取）。"""
         session = self.get_session(session_id)
         messages = self.get_messages(session_id)
         
-        if not should_generate_title(session.title, len(messages)):
+        session_title_raw: Optional[str] = session.title  # type: ignore[assignment]
+        if not should_generate_title(session_title_raw, len(messages)):
             return
         
         try:
@@ -135,20 +136,22 @@ class ChatService:
                 history_messages.append({"role": m.role, "content": m.content})
             
             # 使用同步方式生成标题
+            provider_name_raw = str(session.model or "deepseek")
             title = self._generate_title_sync(
                 history_messages,
-                provider_name=session.model or "deepseek"
+                provider_name=provider_name_raw
             )
             
-            session.title = title
+            setattr(session, 'title', title)
             self.db.commit()
         except Exception:
             # 失败回退：使用简单截取
-            if not session.title or session.title == "新对话":
+            current_title: Optional[str] = session.title  # type: ignore[assignment]
+            if not current_title or current_title == "新对话":
                 title = content[:30].strip()
                 if len(content) > 30:
                     title += "…"
-                session.title = title
+                setattr(session, 'title', title)
                 self.db.commit()
 
     def _generate_title_sync(
@@ -208,7 +211,7 @@ class ChatService:
     ) -> Dict[str, Any]:
         """Send a user message and get an AI reply (non-streaming, with diagnostic context)."""
         session = self.get_session(session_id)
-        provider_name = model or session.model or "mock"
+        provider_name = str(model or session.model or "mock")
         self.add_message(session_id, "user", content)
         messages = self._build_messages(session_id)
 
@@ -244,7 +247,7 @@ class ChatService:
         Subsequent messages in the same session will auto-inherit via session.context.last_analysis.
         """
         session = self.get_session(session_id)
-        provider_name = model or session.model or "mock"
+        provider_name = str(model or session.model or "mock")
         # 用户消息由前端 saveMessage 统一持久化，后端不再重复保存
         messages = self._build_messages(session_id)
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import List
 
 import pytest
 
@@ -99,7 +98,8 @@ def test_manager_register_plugin():
     plugin = PluginBase(manifest)
     manager.register(plugin)
     assert manager.get("p1") is plugin
-    assert manager.get("p1").is_running() is True
+    p1 = manager.get("p1")
+    assert p1 is not None and p1.is_running() is True
 
 
 def test_manager_register_duplicate():
@@ -131,10 +131,12 @@ def test_manager_disable_enable():
     manager.register(PluginBase(m))
 
     manager.disable("toggle")
-    assert not manager.get("toggle").is_running()
+    toggle = manager.get("toggle")
+    assert toggle is not None and not toggle.is_running()
 
     manager.enable("toggle")
-    assert manager.get("toggle").is_running()
+    toggle = manager.get("toggle")
+    assert toggle is not None and toggle.is_running()
 
 
 def test_manager_uninstall():
@@ -274,12 +276,12 @@ def test_plugin_manager_integrates_with_parser_registry():
 
     # Register a plugin-based parser (via the existing register method)
     # The registry already supports external registration
-    registry.register(GenericParserStub())
+    registry.register(GenericParserStub())  # type: ignore[arg-type]
     assert len(registry.registered_sources) == initial_count + 1
 
 
 class GenericParserStub:
     source_type = "plugin_stub"
 
-    def can_parse(self, line: str) -> bool:
+    def can_parse(self, _line: str) -> bool:
         return False

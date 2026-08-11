@@ -7,9 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
 from app.models import Analysis, Log
-from app.services.infrastructure.llm_service import LLMService
-from app.services.diagnostics.log_service import LogService
-from app.services.diagnostics.parser_service import LogParserService
 
 logger = get_logger(__name__)
 
@@ -65,20 +62,20 @@ class AnalysisTaskService:
             analysis = self.create_analysis(log_id, model)
 
         # Set status to running
-        analysis.status = "running"
+        setattr(analysis, 'status', "running")
         self.db.commit()
         self.db.refresh(analysis)
 
         try:
             result = self._execute_analysis(analysis, user_query=user_query or "")
-            analysis.status = "completed"
+            setattr(analysis, 'status', "completed")
             self.db.commit()
             self.db.refresh(analysis)
             result["status"] = analysis.status
             return result
         except Exception as exc:
-            analysis.status = "failed"
-            analysis.error_message = str(exc)
+            setattr(analysis, 'status', "failed")
+            setattr(analysis, 'error_message', str(exc))
             self.db.commit()
             raise
 
@@ -86,34 +83,35 @@ class AnalysisTaskService:
         self, analysis: Analysis, user_query: str = "",
     ) -> Dict[str, Any]:
         """Core analysis: verify → pipeline(parse → rules → RAG → LLM) → persist."""
-        log = self._get_log(analysis.log_id)
+        log = self._get_log(int(analysis.log_id))  # type: ignore[arg-type]
 
         from pathlib import Path
-        file_path = Path(log.file_path)
+        file_path = Path(str(log.file_path))
         if not file_path.exists():
             raise FileNotFoundError(f"Log file not found: {log.file_path}")
 
         if log.status in ("uploaded", "parsing", "parsed"):
-            log.status = "analyzing"
+            setattr(log, 'status', "analyzing")
             self.db.commit()
 
         # Run full diagnostic pipeline (Rule Engine + RAG + LLM)
         from app.services.diagnostics.diagnosis_pipeline import DiagnosisPipeline
-        pipeline = DiagnosisPipeline(self.db, model=analysis.model)
+        pipeline = DiagnosisPipeline(self.db, model=str(analysis.model or "mock"))
         result = pipeline.run(str(file_path), user_query=user_query or "")
 
         # Persist
-        analysis.result = json.dumps(result)
-        analysis.summary = result.get("summary", "")
-        analysis.root_cause = result.get("root_cause", "")
-        analysis.confidence = float(result.get("confidence", 0.5) or 0.5)
+        setattr(analysis, 'result', json.dumps(result))
+        setattr(analysis, 'summary', result.get("summary", ""))
+        setattr(analysis, 'root_cause', result.get("root_cause", ""))
+        setattr(analysis, 'confidence', float(result.get("confidence", 0.5) or 0.5))
         next_steps = result.get("next_steps", [])
-        analysis.next_steps = json.dumps(self._normalize_next_steps(next_steps))
-        analysis.model = str(analysis.model or "diagnosis-pipeline")
+        setattr(analysis, 'next_steps', json.dumps(self._normalize_next_steps(next_steps)))
+        setattr(analysis, 'model', str(analysis.model or "diagnosis-pipeline"))
 
         self.db.commit()
         self.db.refresh(analysis)
 
+        created_at_raw = analysis.created_at  # type: ignore[assignment]
         return {
             "id": analysis.id,
             "log_id": analysis.log_id,
@@ -123,7 +121,7 @@ class AnalysisTaskService:
             "confidence": analysis.confidence,
             "next_steps": self._normalize_next_steps(analysis.next_steps),
             "model": analysis.model,
-            "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
+            "created_at": created_at_raw.isoformat() if created_at_raw is not None else None,
         }
 
     # ------------------------------------------------------------------
@@ -172,26 +170,33 @@ class AnalysisTaskService:
         analysis = self.get_analysis(analysis_id)
         confidence_pct = ((analysis.confidence or 0) * 100)
         confidence_str = f"{confidence_pct:.0f}%"
-        summary = analysis.summary or ""
-        root_cause = analysis.root_cause or ""
+        summary = str(analysis.summary or "")
+        root_cause = str(analysis.root_cause or "")
         next_steps = self._normalize_next_steps(analysis.next_steps)
 
         # Pre-compute the Markdown representation on backend
-        diagnosis_markdown = "\n".join([
-            f"## 诊断结果",
-            "",
-            "### 诊断摘要",
-            summary or "分析完成",
-            "",
-            "### 根因分析",
-            root_cause or "根因待确认",
-            "",
-            f"诊断置信度：**{confidence_str}**",
-            "",
-            "### 建议措施",
-            *[f"{i + 1}. {s}" for i, s in enumerate(next_steps)],
-        ]) if summary or root_cause else ""
+        if summary or root_cause:
+            markdown_lines: List[str] = [
+                "## 诊断结果",
+                "",
+                "### 诊断摘要",
+                summary or "分析完成",
+                "",
+                "### 根因分析",
+                root_cause or "根因待确认",
+                "",
+                f"诊断置信度：**{confidence_str}**",
+                "",
+                "### 建议措施",
+            ]
+            for i, s in enumerate(next_steps):
+                markdown_lines.append(f"{i + 1}. {s}")
+            diagnosis_markdown = "\n".join(markdown_lines)
+        else:
+            diagnosis_markdown = ""
 
+        created_at_raw = analysis.created_at  # type: ignore[assignment]
+        updated_at_raw = analysis.updated_at  # type: ignore[assignment]
         return {
             "id": analysis.id,
             "log_id": analysis.log_id,
@@ -203,8 +208,8 @@ class AnalysisTaskService:
             "diagnosis_markdown": diagnosis_markdown,
             "model": analysis.model or "mock",
             "error_message": analysis.error_message,
-            "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
-            "updated_at": analysis.updated_at.isoformat() if analysis.updated_at else None,
+            "created_at": created_at_raw.isoformat() if created_at_raw is not None else None,
+            "updated_at": updated_at_raw.isoformat() if updated_at_raw is not None else None,
         }
 
     # ------------------------------------------------------------------

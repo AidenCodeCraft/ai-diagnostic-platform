@@ -44,64 +44,12 @@ def get_session(session_id: int, db: Session = Depends(get_db_session)):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.put("/{session_id}/messages/{message_id}/feedback")
-def update_message_feedback(
-    session_id: int,
-    message_id: int,
-    body: Dict[str, Any],
-    db: Session = Depends(get_db_session),
-):
-    """Update message feedback: { "feedback": "like" | "dislike" | null }"""
-    from app.models.chat.chat_session import ChatMessage
-
-    msg = db.query(ChatMessage).filter(
-        ChatMessage.id == message_id,
-        ChatMessage.session_id == session_id,
-    ).first()
-    if not msg:
-        raise HTTPException(status_code=404, detail="消息不存在")
-
-    fb = body.get("feedback")
-    if fb not in ("like", "dislike", None, ""):
-        raise HTTPException(status_code=400, detail="feedback 必须为 like / dislike / null")
-
-    msg.feedback = fb or None
-    db.commit()
-    return {"ok": True, "feedback": msg.feedback}
-
-
 @router.put("/{session_id}")
 def update_session(session_id: int, body: Dict[str, Any], db: Session = Depends(get_db_session)):
     try:
         return ChatService(db).update_session(session_id, title=body.get("title"))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.put("/{session_id}/messages/{message_id}/feedback")
-def update_message_feedback(
-    session_id: int,
-    message_id: int,
-    body: Dict[str, Any],
-    db: Session = Depends(get_db_session),
-):
-    """Update message feedback: { "feedback": "like" | "dislike" | null }"""
-    from app.models.chat.chat_session import ChatMessage
-
-    msg = db.query(ChatMessage).filter(
-        ChatMessage.id == message_id,
-        ChatMessage.session_id == session_id,
-    ).first()
-    if not msg:
-        raise HTTPException(status_code=404, detail="消息不存在")
-
-    fb = body.get("feedback")
-    if fb not in ("like", "dislike", None, ""):
-        raise HTTPException(status_code=400, detail="feedback 必须为 like / dislike / null")
-
-    msg.feedback = fb or None
-    db.commit()
-    return {"ok": True, "feedback": msg.feedback}
 
 
 @router.delete("/{session_id}", status_code=204)
@@ -111,32 +59,6 @@ def delete_session(session_id: int, db: Session = Depends(get_db_session)):
         return Response(status_code=204)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.put("/{session_id}/messages/{message_id}/feedback")
-def update_message_feedback(
-    session_id: int,
-    message_id: int,
-    body: Dict[str, Any],
-    db: Session = Depends(get_db_session),
-):
-    """Update message feedback: { "feedback": "like" | "dislike" | null }"""
-    from app.models.chat.chat_session import ChatMessage
-
-    msg = db.query(ChatMessage).filter(
-        ChatMessage.id == message_id,
-        ChatMessage.session_id == session_id,
-    ).first()
-    if not msg:
-        raise HTTPException(status_code=404, detail="消息不存在")
-
-    fb = body.get("feedback")
-    if fb not in ("like", "dislike", None, ""):
-        raise HTTPException(status_code=400, detail="feedback 必须为 like / dislike / null")
-
-    msg.feedback = fb or None
-    db.commit()
-    return {"ok": True, "feedback": msg.feedback}
 
 
 # Messages
@@ -174,32 +96,6 @@ def chat(
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.put("/{session_id}/messages/{message_id}/feedback")
-def update_message_feedback(
-    session_id: int,
-    message_id: int,
-    body: Dict[str, Any],
-    db: Session = Depends(get_db_session),
-):
-    """Update message feedback: { "feedback": "like" | "dislike" | null }"""
-    from app.models.chat.chat_session import ChatMessage
-
-    msg = db.query(ChatMessage).filter(
-        ChatMessage.id == message_id,
-        ChatMessage.session_id == session_id,
-    ).first()
-    if not msg:
-        raise HTTPException(status_code=404, detail="消息不存在")
-
-    fb = body.get("feedback")
-    if fb not in ("like", "dislike", None, ""):
-        raise HTTPException(status_code=400, detail="feedback 必须为 like / dislike / null")
-
-    msg.feedback = fb or None
-    db.commit()
-    return {"ok": True, "feedback": msg.feedback}
 
 
 @router.post("/{session_id}/stream")
@@ -258,6 +154,6 @@ def update_message_feedback(
     if fb not in ("like", "dislike", None, ""):
         raise HTTPException(status_code=400, detail="feedback 必须为 like / dislike / null")
 
-    msg.feedback = fb or None
+    msg.feedback = fb or None  # type: ignore[assignment]
     db.commit()
     return {"ok": True, "feedback": msg.feedback}

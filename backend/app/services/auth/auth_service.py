@@ -51,12 +51,12 @@ class AuthService:
 
         # 2. Verify credentials
         user = self.db.query(User).filter(User.username == username).first()
-        if not user or not self._verify_password(password, user.password_hash or ""):
+        if not user or not self._verify_password(password, user.password_hash or ""):  # type: ignore[arg-type]
             self._record_failure(mac_address, username, now)
             logger.warning("Login failed: username=%s mac=%s", username, mac_address[:8])
             raise ValueError("用户名或密码错误")
 
-        if not user.is_active:
+        if not user.is_active:  # type: ignore[truthy-function]
             logger.warning("Login rejected: user=%s is inactive", username)
             raise ValueError("账户已禁用")
 
@@ -116,15 +116,15 @@ class AuthService:
             .first()
         )
 
-        if not record or not record.locked_until:
+        if not record or not record.locked_until:  # type: ignore[truthy-function]
             return None
 
         # Ensure locked_until is timezone-aware for comparison
-        locked = record.locked_until
+        locked: datetime = record.locked_until  # type: ignore[assignment]
         if locked.tzinfo is None:
             locked = locked.replace(tzinfo=timezone.utc)
 
-        if now < locked:
+        if now < locked:  # type: ignore[operator]
             remaining = int((locked - now).total_seconds() / 60)
             return f"登录已被锁定，请在 {remaining} 分钟后重试"
 
@@ -151,27 +151,27 @@ class AuthService:
             self.db.add(record)
         else:
             # If previously locked and now expired, this is the "1 attempt" in cycle phase
-            locked = record.locked_until
-            if locked and locked.tzinfo is None:
+            locked: Optional[datetime] = record.locked_until  # type: ignore[assignment]
+            if locked is not None and locked.tzinfo is None:
                 locked = locked.replace(tzinfo=timezone.utc)
-            was_locked = locked and locked <= now
+            was_locked = locked is not None and locked <= now
 
-            if was_locked and record.cycle_phase > 0:
+            if was_locked and record.cycle_phase > 0:  # type: ignore[operator]
                 # Cycle phase: this was the 1 allowed attempt — failed → lock again
-                record.attempt_count = 1
-                record.locked_until = now + timedelta(minutes=self.CYCLE_LOCK_MINUTES)
-                record.last_attempt_at = now
+                setattr(record, 'attempt_count', 1)
+                setattr(record, 'locked_until', now + timedelta(minutes=self.CYCLE_LOCK_MINUTES))
+                setattr(record, 'last_attempt_at', now)
             else:
-                record.attempt_count += 1
-                record.last_attempt_at = now
+                record.attempt_count += 1  # type: ignore[assignment]
+                record.last_attempt_at = now  # type: ignore[assignment]
 
-                if record.cycle_phase == 0 and record.attempt_count >= self.INITIAL_MAX_ATTEMPTS:
+                if record.cycle_phase == 0 and record.attempt_count >= self.INITIAL_MAX_ATTEMPTS:  # type: ignore[operator]
                     # Initial phase: 5th failure → lock 20 min, enter cycle phase
-                    record.locked_until = now + timedelta(minutes=self.INITIAL_LOCK_MINUTES)
-                    record.cycle_phase = 1
-                elif record.cycle_phase > 0 and record.attempt_count >= self.CYCLE_ATTEMPTS:
+                    setattr(record, 'locked_until', now + timedelta(minutes=self.INITIAL_LOCK_MINUTES))
+                    setattr(record, 'cycle_phase', 1)
+                elif record.cycle_phase > 0 and record.attempt_count >= self.CYCLE_ATTEMPTS:  # type: ignore[operator]
                     # Already in cycle: re-lock for 1 hour
-                    record.locked_until = now + timedelta(minutes=self.CYCLE_LOCK_MINUTES)
+                    setattr(record, 'locked_until', now + timedelta(minutes=self.CYCLE_LOCK_MINUTES))
 
         self.db.commit()
 

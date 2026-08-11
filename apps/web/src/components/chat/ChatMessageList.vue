@@ -42,8 +42,8 @@
           </div>
           <div v-if="msg.role === 'assistant' && msg.sources?.length" class="source-list">
             <div class="source-title">参考出处</div>
-            <blockquote v-for="(source, index) in msg.sources" :id="sourceTarget(index, msg.id)" :key="`${source.id || source.title}-${index}`" class="source-card">
-              <span class="source-index">{{ index + 1 }}</span>
+            <blockquote v-for="(source, index) in msg.sources" :id="sourceTarget(index, msg.id)" :key="`${source.id ?? source.title ?? index}-${index}`" class="source-card">
+              <span class="source-index">{{ Number(index) + 1 }}</span>
               <button class="source-detail" @click="$emit('openKnowledge', source)">
                 <strong>{{ source.title }}</strong>
                 <small>{{ source.source }}<template v-if="source.excerpt"> · {{ source.excerpt }}</template></small>
@@ -150,8 +150,8 @@ function escapeHtml(value: string) {
   return value.replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character] || character)
 }
 
-function sourceTarget(index: number, messageId?: string | number) {
-  return `reference-${messageId ?? 'message'}-${index + 1}`
+function sourceTarget(index: number | string, messageId?: string | number) {
+  return `reference-${messageId ?? 'message'}-${Number(index) + 1}`
 }
 
 function addInlineCitations(content: string, sources: any[], messageId?: string | number) {

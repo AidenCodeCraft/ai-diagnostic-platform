@@ -148,7 +148,7 @@ class VectorService:
         self,
         query: str,
         top_k: int = 5,
-        collection: Optional[str] = None,
+        _collection: Optional[str] = None,  # reserved for future multi-collection support
         filter_expr: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """向量相似度搜索。
@@ -171,6 +171,9 @@ class VectorService:
             return []
 
         try:
+            if self._collection is None:
+                return []
+
             # 1. 生成查询嵌入向量
             start_time = time.time()
             query_embedding = self._embedding.embed(query)
@@ -237,6 +240,9 @@ class VectorService:
             return 0
 
         try:
+            if self._collection is None:
+                return 0
+
             # 1. 删除旧向量（如果存在）
             self.delete_document(doc_id)
 
@@ -308,6 +314,9 @@ class VectorService:
             是否成功删除
         """
         if not self.available:
+            return False
+
+        if self._collection is None:
             return False
 
         try:

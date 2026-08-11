@@ -82,26 +82,26 @@ export const chatApi = {
       body: JSON.stringify({ content, model, log_analysis: logAnalysis }),
     })
     if (!resp.ok) {
-      onError(`HTTP ${resp.status}`)
+      onError?.(`HTTP ${resp.status}`)
       return
     }
     const reader = resp.body?.getReader()
-    if (!reader) { onError('No response body'); return }
+    if (!reader) { onError?.('No response body'); return }
     const decoder = new TextDecoder()
     let pending = ''
     const handleEvent = (line: string) => {
       if (!line.startsWith('data: ')) return
       try {
         const data = JSON.parse(line.slice(6))
-        if (data.token) onToken(data.token)
+        if (data.token) onToken?.(data.token)
         if (data.reasoning) onReasoning?.(data.reasoning)
         if (data.sources) onSources?.(data.sources)
-        if (data.done) onDone(data.model)
+        if (data.done) onDone?.(data.model)
       } catch { /* ignore incomplete or invalid SSE payloads */ }
     }
     while (true) {
       const { done, value } = await reader.read()
-      pending += decoder.decode(value, { stream: !done })
+      if (value) pending += decoder.decode(value, { stream: !done })
       const events = pending.split('\n\n')
       pending = done ? '' : events.pop() || ''
       for (const event of events) {

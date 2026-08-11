@@ -110,7 +110,7 @@ class DiagnosisPipeline:
         # Stage 3: 规则引擎 — 确定性模式匹配
         # ═══════════════════════════════════════════════════════════
         logger.info("[Pipeline] Stage 3 — 规则引擎")
-        rule_suggestions = self.rule_engine.generate_suggestions(raw_events)  # type: ignore[arg-type]
+        rule_suggestions = self.rule_engine.generate_suggestions(raw_events)
         rule_summary = self._format_rule_results(rule_suggestions)
         logger.info("[Pipeline] Stage 3 完成: %d 条规则命中", len(rule_suggestions))
 

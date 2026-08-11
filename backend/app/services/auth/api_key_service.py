@@ -35,14 +35,14 @@ class ApiKeyService:
         key = self.db.query(ApiKey).filter(ApiKey.id == key_id).first()
         if not key:
             raise ValueError("api key not found")
-        key.is_active = False
+        key.is_active = False  # type: ignore[assignment]
         self.db.commit()
 
     def verify(self, raw_key: str) -> Optional[int]:
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
         key = self.db.query(ApiKey).filter(ApiKey.key_hash == key_hash, ApiKey.is_active == True).first()
         if key:
-            key.last_used_at = datetime.now(timezone.utc)
+            key.last_used_at = datetime.now(timezone.utc)  # type: ignore[assignment]
             self.db.commit()
-            return key.user_id
+            return key.user_id  # type: ignore[return-value]
         return None

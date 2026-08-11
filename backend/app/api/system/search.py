@@ -97,12 +97,12 @@ def unified_search(
     def search_reports():
         items = (
             db.query(Report)
-            .filter(Report.summary.ilike(pattern))
+            .filter(Report.title.ilike(pattern))
             .limit(limit)
             .all()
         )
         return [
-            {"id": r.id, "log_id": r.log_id, "analysis_id": r.analysis_id, "summary": (r.summary or "")[:200]}
+            {"id": r.id, "log_id": r.log_id, "analysis_id": r.analysis_id, "title": r.title, "summary": (r.title or "")[:200]}
             for r in items
         ]
 

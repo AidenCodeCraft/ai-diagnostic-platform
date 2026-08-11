@@ -32,13 +32,13 @@ class AgentTaskService:
         ).first()
 
         if existing:
-            existing.log_id = log_id
-            existing.status = status
-            existing.state = state
-            existing.steps = json.dumps(steps)
-            existing.tool_plan = json.dumps(tool_plan)
-            existing.summary = summary
-            existing.error_message = error_message
+            setattr(existing, 'log_id', log_id)
+            setattr(existing, 'status', status)
+            setattr(existing, 'state', state)
+            setattr(existing, 'steps', json.dumps(steps))
+            setattr(existing, 'tool_plan', json.dumps(tool_plan))
+            setattr(existing, 'summary', summary)
+            setattr(existing, 'error_message', error_message)
         else:
             task = AgentTask(
                 task_id=task_id,
@@ -99,16 +99,20 @@ class AgentTaskService:
 
     @staticmethod
     def _to_dict(task: AgentTask) -> Dict[str, Any]:
+        steps_raw = str(task.steps or "[]")
+        tool_plan_raw = str(task.tool_plan or "[]")
+        created_at_raw = task.created_at  # type: ignore[assignment]
+        updated_at_raw = task.updated_at  # type: ignore[assignment]
         return {
             "id": task.id,
             "task_id": task.task_id,
             "log_id": task.log_id,
             "status": task.status,
             "state": task.state,
-            "steps": json.loads(task.steps or "[]"),
-            "tool_plan": json.loads(task.tool_plan or "[]"),
+            "steps": json.loads(steps_raw),
+            "tool_plan": json.loads(tool_plan_raw),
             "summary": task.summary,
             "error_message": task.error_message,
-            "created_at": task.created_at.isoformat() if task.created_at else None,
-            "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+            "created_at": created_at_raw.isoformat() if created_at_raw is not None else None,
+            "updated_at": updated_at_raw.isoformat() if updated_at_raw is not None else None,
         }

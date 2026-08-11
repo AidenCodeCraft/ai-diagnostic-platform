@@ -117,19 +117,20 @@ def vector_search(
             # 转换为标准格式
             results = []
             for item in hybrid_result.get("fused", [])[:body.top_k]:
-                doc_id = item.get("id")
-                title = None
-                category = None
+                doc_id: int | None = item.get("id")
+                title: str | None = None
+                category: str | None = None
 
-                try:
-                    doc = KnowledgeService(db).get(doc_id)
-                    title = doc.title
-                    category = doc.category
-                except Exception:
-                    pass
+                if doc_id is not None:
+                    try:
+                        doc = KnowledgeService(db).get(doc_id)
+                        title = str(doc.title) if doc.title is not None else None  # type: ignore[arg-type]
+                        category = str(doc.category) if doc.category is not None else None  # type: ignore[arg-type]
+                    except Exception:
+                        pass
 
                 results.append(VectorSearchResult(
-                    id=doc_id,
+                    id=doc_id or 0,
                     title=title,
                     score=item.get("score", 0),
                     source=item.get("source", "keyword"),
@@ -151,17 +152,18 @@ def vector_search(
 
             results = []
             for vr in vector_results:
-                doc_id = vr.get("id")
-                title = None
-                try:
-                    doc = KnowledgeService(db).get(doc_id)
-                    title = doc.title
-                except Exception:
-                    pass
+                v_doc_id: int | None = vr.get("id")
+                v_title: str | None = None
+                if v_doc_id is not None:
+                    try:
+                        doc = KnowledgeService(db).get(v_doc_id)
+                        v_title = str(doc.title) if doc.title is not None else None  # type: ignore[arg-type]
+                    except Exception:
+                        pass
 
                 results.append(VectorSearchResult(
-                    id=doc_id,
-                    title=title,
+                    id=v_doc_id or 0,
+                    title=v_title,
                     score=vr.get("score", 0),
                     source="vector",
                     snippet=vr.get("content", "")[:200],
