@@ -347,15 +347,15 @@ async function selectChat(id: number) {
         sources: m.sources || [],
       }
       
-      // 恢复持久化的思维链数据（默认展开显示）
+      // 恢复持久化的思维链数据（短内容默认展开，长内容折叠）
       if (m.role === 'assistant' && m.thinking) {
         msg.thinking = {
           text: m.thinking.text || '',
           elapsed: m.thinking.elapsed || 0,
           active: false
         }
-        // 有思维链内容时默认展开
-        msg._thinkOpen = !!(m.thinking.text)
+        // 短思维链（<500字符）默认展开，长思维链折叠
+        msg._thinkOpen = !!(m.thinking.text) && (m.thinking.text || '').length < 500
       }
       
       return msg
@@ -799,9 +799,9 @@ async function streamChat(text: string) {
       replyMsg.thinking.text += reasoning
       replyMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - thinkStart) / 1000))
       replyMsg.thinking.active = true
-      // 思维链流式输出时默认展开
+      // 思维链短时默认展开，超过 500 字符自动折叠（太啰嗦）
       if (replyMsg._thinkOpen === undefined) {
-        replyMsg._thinkOpen = true
+        replyMsg._thinkOpen = replyMsg.thinking.text.length < 500
       }
     },
     (sources: ChatSource[]) => { replyMsg.sources = sources },

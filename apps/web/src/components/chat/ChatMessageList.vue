@@ -46,7 +46,7 @@
               @mouseout="onMsgContentMouseOut"
             ></div>
             <div
-              v-if="msg._renderedSources"
+              v-if="msg._renderedSources && !isNoMatchResponse(msg.content)"
               class="msg-sources"
               v-html="msg._renderedSources"
               @click="onMsgContentClick"
@@ -54,7 +54,7 @@
               @mouseout="onMsgContentMouseOut"
             ></div>
           </div>
-          <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active" class="message-actions">
+          <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active && !loading" class="message-actions">
             <button class="action-btn" :class="{ active: copiedId === msg.id }" @click="copyMessage(msg)" :title="copiedId === msg.id ? '已复制' : '复制回复'">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
@@ -352,11 +352,19 @@ function handleRefMouseEnterFor(el: HTMLElement) {
   tooltip.title = title
   tooltip.source = source
   tooltip.excerpt = excerpt
-  // 将 excerpt 用 Markdown 渲染以保留格式（标题、列表、粗体等）
+
+  // 只提取 excerpt 中的标题行（# ~ #####），过滤掉正文段落
+  const headingLines = excerpt
+    .split('\n')
+    .filter(line => /^#{1,5}\s/.test(line.trim()))
+  const excerptDisplay = headingLines.length > 0
+    ? headingLines.join('\n')
+    : excerpt.slice(0, 200) // 无标题时截取前200字符作为摘要
+
   try {
-    tooltip.excerptRendered = renderMarkdown(excerpt)
+    tooltip.excerptRendered = renderMarkdown(excerptDisplay)
   } catch {
-    tooltip.excerptRendered = excerpt.replace(/\n/g, '<br>')
+    tooltip.excerptRendered = excerptDisplay.replace(/\n/g, '<br>')
   }
   tooltip.x = Math.min(rect.left + rect.width / 2, window.innerWidth - 200)
   tooltip.y = rect.top - 8
@@ -387,15 +395,20 @@ function formatSize(bytes: number) {
   return formatFileSize(bytes)
 }
 
+// ── 判断是否为无匹配响应 ────────────────────────────────────
+function isNoMatchResponse(content: string): boolean {
+  if (!content) return false
+  return /知识库中暂无.*相关信息/.test(content)
+}
+
 // ── 分离参考来源行 ──────────────────────────────────────────
 // 从 LLM 输出中提取底部参考来源行，返回 { body, sources } 两部分
 function splitSourcesFromContent(text: string): { body: string; sourcesText: string } {
-  // 匹配末尾的管道符参考来源行（可能有多行，在内容最后）
   const lines = text.split('\n')
   const sourceLines: string[] = []
   const bodyLines: string[] = []
 
-  // 从末尾向前扫描，收集连续的管道符参考来源行
+  // 从末尾向前扫描，收集连续的参考来源行
   for (let i = lines.length - 1; i >= 0; i--) {
     const trimmed = lines[i].trim()
     if (/^\|?\s*参考来源：/.test(trimmed)) {
@@ -574,9 +587,10 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
   //   4. 先处理"有 Markdown 链接"的情况，再兜底"无链接"的情况
 
   // 情况A：LLM 使用了 Markdown 链接语法 [文档名](ref://id)
-  // 格式：| 参考来源：知识库"<a href="ref://id">文档名</a>"文档中"<a href="ref://id#章节">章节</a>"部分 |
+  // 兼容管道符（旧格式）和无管道符（新格式）
+  // 兼容 marked 渲染后的 <p> 标签包裹
   html = html.replace(
-    /\|?\s*参考来源：知识库(?:&quot;|"|\u201C|\u201D)<a\s+href="ref:\/\/([^\s"#]+)"[^>]*>([^<]*)<\/a>(?:&quot;|"|\u201C|\u201D)文档(?:中(?:&quot;|"|\u201C|\u201D)<a\s+href="ref:\/\/([^\s"#]+)(?:#([^"]*))?"[^>]*>([^<]*)<\/a>(?:&quot;|"|\u201C|\u201D)部分)?\s*\|/gi,
+    /(?:<p>)?\|?\s*参考来源：知识库(?:&quot;|"|\u201C|\u201D)<a\s+href="ref:\/\/([^\s"#]+)"[^>]*>([^<]*)<\/a>(?:&quot;|"|\u201C|\u201D)文档(?:中(?:&quot;|"|\u201C|\u201D)<a\s+href="ref:\/\/([^\s"#]+)(?:#([^"]*))?"[^>]*>([^<]*)<\/a>(?:&quot;|"|\u201C|\u201D)部分)?\s*\|?(?:<\/p>)?/gi,
     (_match, rawDocId: string, docTitle: string, rawSectionId: string, sectionAnchor: string, sectionTitle: string) => {
       const resolved = resolveDocId(rawDocId)
       const docId = resolved?.docId || rawDocId
@@ -592,25 +606,26 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
         const sectionId = sectionResolved?.docId || rawSectionId
         const sectionAnchorAttr = sectionAnchor ? ` data-anchor="${escapeAttr(sectionAnchor)}"` : ''
         const sectionLink = `<a class="ref-link ref-source-section" data-doc-id="${escapeAttr(sectionId)}" data-title="${escapeAttr(sectionTitle)}" data-source="${escapeAttr(sourceLabel)}"${sectionAnchorAttr}${excerptAttr} href="javascript:void(0)">${escapeHtml(sectionTitle)}</a>`
-        return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档中\u201C${sectionLink}\u201D部分</span> |</span>`
+        return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档中\u201C${sectionLink}\u201D部分</span></span>`
       }
-      return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span> |</span>`
+      return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span></span>`
     },
   )
 
   // 情况B（兜底）：LLM 没有使用 Markdown 链接，纯文本格式
-  // 格式：| 参考来源：知识库"FAQ"文档中"搜索协议启动的类型"部分 |
+  // 格式：参考来源：知识库"FAQ"文档中"搜索协议启动的类型"部分
   // 从 sourceMap 中按标题查找对应的 docId，自动添加可点击链接
   //
   // 注意：用 new RegExp 构建，避免 &quot; 在字符组中分解为 &,q,u,o,t,; 导致匹配异常
   // 引号匹配兼容：&quot;（英文转义）、"（英文）、\u201C（中文左）、\u201D（中文右）
+  // 同时兼容 marked 渲染后的 <p> 标签包裹
   {
     const Q = '(?:&quot;|"|\\u201C|\\u201D)' // 引号 alternation
     const CONTENT = '([^<>\\u201C\\u201D\\u0022]+?)' // 非贪婪匹配内容（排除尖括号和所有引号）
     const pattern = new RegExp(
-      '\\|?\\s*参考来源：知识库' + Q + CONTENT + Q + '文档' +
+      '(?:<p>)?\\|?\\s*参考来源：知识库' + Q + CONTENT + Q + '文档' +
       '(?:中' + Q + CONTENT + Q + '部分)?' +
-      '\\s*\\|',
+      '\\s*\\|?(?:</p>)?',
       'gi',
     )
     html = html.replace(pattern, (_match, docTitleRaw: string, sectionTitleRaw: string) => {
@@ -641,9 +656,9 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
         const sectionResolved = resolveDocId(sectionTitle)
         const sectionId = sectionResolved?.docId || docId
         const sectionLink = `<a class="ref-link ref-source-section" data-doc-id="${escapeAttr(sectionId)}" data-title="${escapeAttr(sectionTitle)}" data-source="${escapeAttr(sourceLabel)}" data-anchor="${escapeAttr(encodeURIComponent(sectionTitle))}"${excerptAttr} href="javascript:void(0)">${escapeHtml(sectionTitle)}</a>`
-        return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档中\u201C${sectionLink}\u201D部分</span> |</span>`
+        return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档中\u201C${sectionLink}\u201D部分</span></span>`
       }
-      return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span> |</span>`
+      return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span></span>`
     })
   }
 
@@ -682,11 +697,11 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
   )
 
   // 如果 sources 有数据但回答中没有任何 ref-link 或 ref:// 链接，
-  // 且不在流式输出中（避免过早追加），在末尾追加兜底参考来源
-  if (sourceMap.size > 0 && !isStreaming && !html.includes('class="ref-link') && !html.includes('href="ref://') && html.trim().length > 0) {
+  // 且不在流式输出中（避免过早追加），且不是无匹配响应，在末尾追加兜底参考来源
+  if (sourceMap.size > 0 && !isStreaming && !html.includes('class="ref-link') && !html.includes('href="ref://') && html.trim().length > 0 && !/知识库中暂无/.test(html)) {
     const sourceLines = Array.from(sourceMap.values()).map((info) => {
       const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(String(info.id))}" data-title="${escapeAttr(info.title)}" data-source="${escapeAttr(info.source)}" data-excerpt="${escapeAttr(info.excerpt)}" href="javascript:void(0)">${escapeHtml(info.title)}</a>`
-      return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span> |</span>`
+      return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span></span>`
     })
     html += `<br>${sourceLines.join('<br>')}`
   }
@@ -712,7 +727,7 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
-// Auto-scroll when new messages arrive
+// Auto-scroll when new messages arrive or content grows (streaming)
 watch(
   () => props.messages.length,
   () => {
@@ -722,6 +737,24 @@ watch(
       }
     })
   },
+)
+
+// Auto-scroll during streaming: watch message content and thinking text changes
+watch(
+  () => props.messages.map((m: any) => ({
+    id: m.id,
+    contentLen: (m.content || '').length,
+    thinkingLen: (m.thinking?.text || '').length,
+    thinkingActive: m.thinking?.active || false,
+  })),
+  () => {
+    nextTick(() => {
+      if (container.value) {
+        container.value.scrollTop = container.value.scrollHeight
+      }
+    })
+  },
+  { deep: false },
 )
 
 // 展开/折叠思维链区块（默认展开，只有显式设为 false 才折叠）

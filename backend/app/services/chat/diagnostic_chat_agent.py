@@ -14,7 +14,9 @@
 
 from __future__ import annotations
 
+import math
 import re
+import logging
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -29,6 +31,8 @@ from app.services.chat.proactive_questioning import (
     ProactiveQuestioning,
     UserExpertiseLevel,
 )
+
+logger = logging.getLogger(__name__)
 
 # 输入长度限制
 MAX_INPUT_LENGTH = 4000
@@ -49,6 +53,9 @@ KEYWORD_CATEGORIES = [
         "无响应", "没反应", "不亮", "不显示", "没声音", "没画面",
         "发热", "过热", "烫手", "耗电快", "掉电", "电池鼓包",
         "重启循环", "bootloop", "freeze", "stuck", "hang",
+        # 车辆/设备相关症状
+        "未上线", "不上线", "未看到", "看不到", "不在线", "离线",
+        "未连接", "连不上", "无法连接", "连接失败",
     ]),
     # 故障类关键词（权重 2）—— 用户描述了技术性问题
     (2, [
@@ -71,6 +78,8 @@ KEYWORD_CATEGORIES = [
         "dmesg", "syslog", "串口", "serial", "寄存器", "register",
         "中断", "interrupt", "dma", "pcie", "sata",
         "录像", "编码", "解码", "码流", "帧率", "分辨率",
+        # 车辆/平台相关组件
+        "车辆", "上线", "平台", "云控", "设备",
     ]),
     # 诊断意图关键词（权重 1）—— 用户明确请求诊断/分析
     (1, [
@@ -342,6 +351,7 @@ class DiagnosticChatAgent:
           1. 从用户输入中剥离冗余指令（"帮我搜一下""查找知识库"等）
           2. 用提取的主题实体 + 匹配关键词构建搜索词
           3. 多个关键词轮流尝试，取最佳匹配
+          4. 搜索词数量和兜底轮数按输入长度动态缩放
         """
         if not text.strip():
             return "", []
@@ -352,20 +362,41 @@ class DiagnosticChatAgent:
         if not search_terms:
             return "", []
 
+        logger.info("[知识检索] 查询: %s", text[:80])
+        logger.info("[知识检索] 搜索词: %s", search_terms[:15])
+
+        # 按输入长度对数缩放：覆盖 1 字符 ~ 300 万字符（≈1M tokens）
+        # 公式：base + scale * log10(max(text_len, 10) / 10)
+        # 短文本（50字）→ ~5 词；中等（500字）→ ~10 词；长（5000字）→ ~15 词；
+        # 超大（5万字）→ ~20 词；极端（100万字）→ ~30 词
+        text_len = len(text)
+        log_scale = math.log10(max(text_len, 10) / 10)  # 0.0 ~ 5.0
+        max_primary = min(30, int(5 + 5 * log_scale))     # 5 ~ 30
+        max_fallback = min(50, int(10 + 8 * log_scale))   # 10 ~ 50
+
         # 尝试多个搜索词的组合
+        # ── 关键改进：不提前中断！所有搜索词都尝试，确保子词（如"车辆""上线"）
+        #    也有机会被搜索，而非在前5个词找到5条不相关结果就放弃 ──
         all_items: list[dict] = []
         seen_ids: set[int] = set()
+        high_score_ids: set[int] = set()  # 高分文档 ID（score >= 0.3）
 
-        for term in search_terms[:5]:  # 最多尝试 5 个搜索词
+        for term in search_terms[:max_primary]:
             try:
                 result = self.knowledge.search(term, page=1, page_size=5)
                 items = result.get("items", [])
                 for item in items:
                     doc_id = item.get("id")
+                    score = float(item.get("relevance_score", 0) or 0)
+                    if score >= 0.3:
+                        high_score_ids.add(doc_id)
                     if doc_id in seen_ids:
-                        # 已见过：若新搜索词能提取到更相关的 snippet，则更新
+                        # 对已存在的文档，更新 snippet（取更长的匹配片段）
                         for existing in all_items:
                             if existing.get("id") == doc_id:
+                                # 更新最高分数
+                                if score > float(existing.get("relevance_score", 0) or 0):
+                                    existing["relevance_score"] = score
                                 new_snip = self.knowledge._extract_snippet(
                                     existing.get("_full_content", ""), term)
                                 if new_snip and len(new_snip) > len(existing.get("snippet", "")):
@@ -373,11 +404,9 @@ class DiagnosticChatAgent:
                                 break
                         continue
                     seen_ids.add(doc_id)
-                    # 拉取完整内容用于 snippet 重新提取（长文档关键段落定位）
                     try:
                         full_doc = self.knowledge.get(doc_id)
                         item["_full_content"] = full_doc.content or ""
-                        # 用当前 term 重新提取 snippet（命中关键词周围）
                         item["snippet"] = self.knowledge._extract_snippet(
                             item["_full_content"], term)
                     except Exception:
@@ -385,25 +414,68 @@ class DiagnosticChatAgent:
                     all_items.append(item)
             except Exception:
                 continue
-
-            if len(all_items) >= 5:
+            # 只有找到高分匹配时才提前中断，避免低分结果阻断后续搜索词
+            if high_score_ids and len(all_items) >= 3:
                 break
 
+        # 兜底：如果主搜索词没找到高分结果，用短关键词重试
+        if not high_score_ids and len(search_terms) > max_primary:
+            short_terms = [
+                t for t in search_terms[max_primary:]
+                if 2 <= len(t) <= 4
+            ]
+            for term in short_terms[:max_fallback]:
+                try:
+                    result = self.knowledge.search(term, page=1, page_size=3)
+                    items = result.get("items", [])
+                    for item in items:
+                        doc_id = item.get("id")
+                        score = float(item.get("relevance_score", 0) or 0)
+                        if score >= 0.3:
+                            high_score_ids.add(doc_id)
+                        if doc_id in seen_ids:
+                            continue
+                        seen_ids.add(doc_id)
+                        try:
+                            full_doc = self.knowledge.get(doc_id)
+                            item["_full_content"] = full_doc.content or ""
+                            item["snippet"] = self.knowledge._extract_snippet(
+                                item["_full_content"], term)
+                        except Exception:
+                            pass
+                        all_items.append(item)
+                except Exception:
+                    continue
+                if high_score_ids and len(all_items) >= 3:
+                    break
+
         if not all_items:
+            logger.info("[知识检索] 未找到任何结果")
             return "", []
 
         # 去重并按相关度排序
         all_items.sort(key=lambda d: float(d.get("relevance_score", 0) or 0), reverse=True)
-        items = all_items[:5]
+
+        # 日志：汇总搜索结果
+        top_scores = [f"{it.get('title','?')}={float(it.get('relevance_score',0) or 0):.2f}" for it in all_items[:8]]
+        logger.info("[知识检索] 结果: %s (高分=%d)", top_scores, len(high_score_ids))
+
+        # snippet 大小和结果条数也按输入长度对数缩放
+        # 短文本→800字符/5条；中等→1500/5；超大→4000/8
+        snippet_max = min(4000, int(800 + 600 * log_scale))
+        max_items = min(8, 5 + int(log_scale / 1.5))  # 5 ~ 8
+
+        items = all_items[:max_items]
 
         self.references = []
         lines = []
         for i, item in enumerate(items):
             title = item.get("title", "Untitled")
-            # 扩大 snippet 到 1000 字符，确保长文档的相关段落进入上下文
-            snippet = item.get("snippet", "")[:1000]
+            snippet = item.get("snippet", "")[:snippet_max]
             score = item.get("relevance_score", 0)
-            if score >= 0.05:
+            # 降低阈值：向量搜索对长句子的语义匹配分数可能偏低
+            # 但能返回结果说明有一定相关性，不应过度过滤
+            if score >= 0.01:
                 lines.append(
                     f"{i + 1}. **{title}** (相关度: {score:.0%})\n   {snippet}"
                 )
@@ -427,6 +499,9 @@ class DiagnosticChatAgent:
 
           "L13C设备不录像是什么原因"
           → ["L13C 不录像", "L13C", "不录像", "L13C 录像 原因"]
+
+          "启迪云控平台未看到车辆上线，我应该在日志中搜索什么呢？"
+          → ["启迪云控 未看到", "车辆上线", "车辆", "上线", "启迪云控", "云控平台", ...]
         """
         cleaned = text.strip()
 
@@ -468,6 +543,84 @@ class DiagnosticChatAgent:
         for phrase in cn_phrases:
             if phrase not in cn_stop and phrase not in terms:
                 terms.append(phrase)
+
+        # ── 优先级0.55：子词拆分策略 ──
+        # 对 4 字中文词组（如"车辆上线"）拆分为 2 字子词（如"车辆"+"上线"）
+        # 文档中可能用"车辆"而非"车辆上线"，拆分后能扩大匹配范围
+        sub_terms: list[str] = []
+        for phrase in cn_phrases:
+            if len(phrase) == 4 and phrase not in cn_stop:
+                left = phrase[:2]
+                right = phrase[2:]
+                # 过滤无意义子词（如"什么""应该"）
+                if left not in cn_stop and len(left) >= 2:
+                    sub_terms.append(left)
+                if right not in cn_stop and len(right) >= 2:
+                    sub_terms.append(right)
+        # 子词插入到 cn_phrases 之后、combo 之前
+        for st in sub_terms:
+            if st not in terms:
+                terms.append(st)
+
+        # 优先级0.6：智能提取"专有名词+故障现象"组合词
+        # 例："启迪云控平台未看到车辆上线" → 提取"启迪云控"+"车辆上线"
+        # 故障现象关键词列表
+        fault_indicators = [
+            r'未(?:看到|连接|上线|录像|启动|响应|收到|检测到)',
+            r'(?:无法|不能|没有)(?:连接|上线|录像|启动|工作|通信)',
+            r'(?:连接|通信|录像|启动)(?:失败|异常|中断|断开)',
+            r'不(?:录像|上线|工作|启动|连接|通信)',
+            r'(?:车辆|设备)(?:未|不)(?:上线|连接|录像)',
+        ]
+        # 提取中文专有名词（2-6字连续非停用词片段，不含数字）
+        proper_nouns = re.findall(
+            r'(?:[\u4e00-\u9fff]{2,6}平台|[\u4e00-\u9fff]{2,6}系统|[\u4e00-\u9fff]{2,6}设备)',
+            text,
+        )
+        if not proper_nouns:
+            # 更宽松：取前8个中文字符作为可能的专有名词
+            cn_only = re.sub(r'[\s\d\w]', '', text)
+            if len(cn_only) >= 3:
+                proper_nouns = [cn_only[:min(8, len(cn_only))]]
+
+        # 从 text 中提取故障现象描述
+        for fi in fault_indicators:
+            fault_match = re.search(fi, text)
+            if fault_match:
+                fault_phrase = fault_match.group()
+                # 将专有名词和故障现象组合
+                for pn in proper_nouns[:2]:
+                    # 提取专有名词的核心部分（2-4字）
+                    core = pn[:4] if len(pn) >= 4 else pn
+                    combo = f"{core} {fault_phrase}"
+                    if combo not in terms:
+                        terms.insert(0, combo)  # 插入到最前面，优先尝试
+                    # 也单独添加故障现象
+                    if fault_phrase not in terms:
+                        terms.append(fault_phrase)
+                break  # 只取第一个匹配的故障现象
+
+        # 优先级0.7：故障现象的反向/变体表达
+        # 文档中可能用"未上线"而非"未看到上线"，或用"不上线"而非"未上线"
+        # 提取核心故障词（去掉"未""不""无法"等否定词），生成变体
+        fault_core_terms: list[str] = []
+        for fi in fault_indicators:
+            fault_match = re.search(fi, text)
+            if fault_match:
+                fault_phrase = fault_match.group()
+                # 去掉否定前缀，提取核心动词/状态词
+                core = re.sub(r'^(?:未|不|无法|不能|没有)', '', fault_phrase)
+                if core and len(core) >= 2 and core not in cn_stop:
+                    fault_core_terms.append(core)
+                    # 生成"否定词+核心"的变体组合
+                    for neg in ["未", "不", "无法"]:
+                        variant = f"{neg}{core}"
+                        if variant != fault_phrase and variant not in terms:
+                            fault_core_terms.append(variant)
+                break  # 只处理第一个匹配
+        for ft in fault_core_terms:
+            if ft not in terms:
+                terms.append(ft)
 
         # 优先级1：剥离后的完整 cleaned query（如果有意义）
         if len(cleaned) >= 2 and cleaned not in ("的", "了"):

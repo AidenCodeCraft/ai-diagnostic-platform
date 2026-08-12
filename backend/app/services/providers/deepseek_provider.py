@@ -58,7 +58,7 @@ class DeepSeekProvider(BaseProvider):
             file_cfg.get("base_url") or "https://api.deepseek.com/v1/chat/completions",
         )
         self.model = model or os.getenv("DEEPSEEK_MODEL", file_cfg.get("model") or self.default_model)
-        self.timeout = timeout
+        self.timeout = max(timeout, 60.0)  # 至少 60 秒，确保长思维链不会超时
         self.max_retries = max_retries
 
     # ------------------------------------------------------------------
@@ -162,7 +162,7 @@ class DeepSeekProvider(BaseProvider):
 
     def _call_api_stream(self, messages: List[Dict[str, str]]) -> Generator[Any, None, None]:
         """Stream tokens from DeepSeek API."""
-        with httpx.Client(timeout=60.0) as client:
+        with httpx.Client(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
             with client.stream(
                 "POST",
                 self._api_url,
