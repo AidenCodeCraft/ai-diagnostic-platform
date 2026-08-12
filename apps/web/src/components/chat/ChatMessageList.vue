@@ -40,7 +40,7 @@
           <div class="message-bubble">
             <div
               class="msg-content"
-              v-html="renderContent(msg.content, msg, msg.files && msg.files.length > 0, msg.sources)"
+              v-html="renderContent(msg.content, msg, msg.files && msg.files.length > 0, msg.sources, msg.thinking?.active)"
               @click="onMsgContentClick"
               @mouseover="onMsgContentMouseOver"
               @mouseout="onMsgContentMouseOut"
@@ -417,7 +417,7 @@ function splitSourcesFromContent(text: string): { body: string; sourcesText: str
   }
 }
 
-function renderContent(text: string, msg: any, hasFiles?: boolean, sources: any[] = []): string {
+function renderContent(text: string, msg: any, hasFiles?: boolean, sources: any[] = [], isStreaming = false): string {
   let display = text
   if (hasFiles) {
     display = display.replace(/\n?\[上传文件:.*?\]/g, '')
@@ -434,7 +434,7 @@ function renderContent(text: string, msg: any, hasFiles?: boolean, sources: any[
     }
     // 合并处理 ref:// 链接
     const combined = bodyHtml + (sourcesHtml ? '\n<!--REF_SOURCES_SEPARATOR-->\n' + sourcesHtml : '')
-    const processed = processRefLinks(combined, sources, msg.id)
+    const processed = processRefLinks(combined, sources, msg.id, isStreaming)
 
     // 拆分为正文和参考来源两部分
     const sepIdx = processed.indexOf('<!--REF_SOURCES_SEPARATOR-->')
@@ -473,7 +473,7 @@ function renderContent(text: string, msg: any, hasFiles?: boolean, sources: any[
  * 兼容非数字 ID（LLM 可能输出 ref://FAQ 而非 ref://123）：
  *   通过 sourceMap 按标题反查数字 ID
  */
-function processRefLinks(html: string, sources: any[], _messageId?: string | number): string {
+function processRefLinks(html: string, sources: any[], _messageId?: string | number, isStreaming = false): string {
   // 构建双重映射表
   // sourceMap: doc_id → source info
   // titleMap: doc_title → source info（用于 LLM 输出 ref://FAQ 时的反查）
@@ -568,13 +568,16 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
 
   // ── 第二步：替换参考来源行中的文档链接 ──
   // ⚠️ 关键：
-  //   1. marked 会将双引号 " 转义为 HTML 实体 &quot;
-  //   2. 多条参考来源可能在同一 <p> 中用 <br> 分隔，不能匹配 <p> 边界
-  //   3. 只匹配单行：管道符 + 参考来源 + 管道符
-  //   4. 参考来源只显示文档标题，不含章节名
+  //   1. LLM 可能用 Markdown 链接语法 [标题](ref://id)，也可能用纯文本
+  //   2. 有 Markdown 链接时 marked 生成 <a> 标签，无链接时是纯文本
+  //   3. 中文引号 \u201C\u201D 在 marked 中不会被转义
+  //   4. 先处理"有 Markdown 链接"的情况，再兜底"无链接"的情况
+
+  // 情况A：LLM 使用了 Markdown 链接语法 [文档名](ref://id)
+  // 格式：| 参考来源：知识库"<a href="ref://id">文档名</a>"文档中"<a href="ref://id#章节">章节</a>"部分 |
   html = html.replace(
-    /\|?\s*参考来源：知识库(?:&quot;|")<a\s+href="ref:\/\/([^\s"#]+)"[^>]*>([^<]*)<\/a>(?:&quot;|")文档\s*\|/gi,
-    (_match, rawDocId: string, docTitle: string) => {
+    /\|?\s*参考来源：知识库(?:&quot;|"|\u201C|\u201D)<a\s+href="ref:\/\/([^\s"#]+)"[^>]*>([^<]*)<\/a>(?:&quot;|"|\u201C|\u201D)文档(?:中(?:&quot;|"|\u201C|\u201D)<a\s+href="ref:\/\/([^\s"#]+)(?:#([^"]*))?"[^>]*>([^<]*)<\/a>(?:&quot;|"|\u201C|\u201D)部分)?\s*\|/gi,
+    (_match, rawDocId: string, docTitle: string, rawSectionId: string, sectionAnchor: string, sectionTitle: string) => {
       const resolved = resolveDocId(rawDocId)
       const docId = resolved?.docId || rawDocId
       const info = resolved?.info
@@ -583,9 +586,66 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
       const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
 
       const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(docTitle)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr} href="javascript:void(0)">${escapeHtml(docTitle)}</a>`
-      return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库"${docLink}"文档</span> |</span>`
+
+      if (sectionTitle && rawSectionId) {
+        const sectionResolved = resolveDocId(rawSectionId)
+        const sectionId = sectionResolved?.docId || rawSectionId
+        const sectionAnchorAttr = sectionAnchor ? ` data-anchor="${escapeAttr(sectionAnchor)}"` : ''
+        const sectionLink = `<a class="ref-link ref-source-section" data-doc-id="${escapeAttr(sectionId)}" data-title="${escapeAttr(sectionTitle)}" data-source="${escapeAttr(sourceLabel)}"${sectionAnchorAttr}${excerptAttr} href="javascript:void(0)">${escapeHtml(sectionTitle)}</a>`
+        return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档中\u201C${sectionLink}\u201D部分</span> |</span>`
+      }
+      return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span> |</span>`
     },
   )
+
+  // 情况B（兜底）：LLM 没有使用 Markdown 链接，纯文本格式
+  // 格式：| 参考来源：知识库"FAQ"文档中"搜索协议启动的类型"部分 |
+  // 从 sourceMap 中按标题查找对应的 docId，自动添加可点击链接
+  //
+  // 注意：用 new RegExp 构建，避免 &quot; 在字符组中分解为 &,q,u,o,t,; 导致匹配异常
+  // 引号匹配兼容：&quot;（英文转义）、"（英文）、\u201C（中文左）、\u201D（中文右）
+  {
+    const Q = '(?:&quot;|"|\\u201C|\\u201D)' // 引号 alternation
+    const CONTENT = '([^<>\\u201C\\u201D\\u0022]+?)' // 非贪婪匹配内容（排除尖括号和所有引号）
+    const pattern = new RegExp(
+      '\\|?\\s*参考来源：知识库' + Q + CONTENT + Q + '文档' +
+      '(?:中' + Q + CONTENT + Q + '部分)?' +
+      '\\s*\\|',
+      'gi',
+    )
+    html = html.replace(pattern, (_match, docTitleRaw: string, sectionTitleRaw: string) => {
+      const docTitle = (docTitleRaw || '').trim()
+      const sectionTitle = (sectionTitleRaw || '').trim()
+      if (!docTitle) return _match
+
+      // 按标题从 sourceMap 反查 docId
+      let resolved = resolveDocId(docTitle)
+      if (!resolved) {
+        for (const [id, info] of sourceMap) {
+          if (info.title.includes(docTitle) || docTitle.includes(info.title)) {
+            resolved = { docId: id, info }
+            break
+          }
+        }
+      }
+
+      const docId = resolved?.docId || '0'
+      const info = resolved?.info
+      const excerpt = info?.excerpt || ''
+      const sourceLabel = info?.source || '知识库'
+      const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
+
+      const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(docTitle)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr} href="javascript:void(0)">${escapeHtml(docTitle)}</a>`
+
+      if (sectionTitle) {
+        const sectionResolved = resolveDocId(sectionTitle)
+        const sectionId = sectionResolved?.docId || docId
+        const sectionLink = `<a class="ref-link ref-source-section" data-doc-id="${escapeAttr(sectionId)}" data-title="${escapeAttr(sectionTitle)}" data-source="${escapeAttr(sourceLabel)}" data-anchor="${escapeAttr(encodeURIComponent(sectionTitle))}"${excerptAttr} href="javascript:void(0)">${escapeHtml(sectionTitle)}</a>`
+        return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档中\u201C${sectionLink}\u201D部分</span> |</span>`
+      }
+      return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span> |</span>`
+    })
+  }
 
   // ── 第三步（兜底）：处理所有剩余的 ref:// 链接 ──
   // 将所有未被前两步处理的 ref:// 链接的 href 改为 javascript:void(0)，
@@ -621,11 +681,12 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
     },
   )
 
-  // 如果 sources 有数据但回答中没有任何 ref-link 或 ref:// 链接，在末尾追加
-  if (sourceMap.size > 0 && !html.includes('class="ref-link') && !html.includes('href="ref://')) {
+  // 如果 sources 有数据但回答中没有任何 ref-link 或 ref:// 链接，
+  // 且不在流式输出中（避免过早追加），在末尾追加兜底参考来源
+  if (sourceMap.size > 0 && !isStreaming && !html.includes('class="ref-link') && !html.includes('href="ref://') && html.trim().length > 0) {
     const sourceLines = Array.from(sourceMap.values()).map((info) => {
       const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(String(info.id))}" data-title="${escapeAttr(info.title)}" data-source="${escapeAttr(info.source)}" data-excerpt="${escapeAttr(info.excerpt)}" href="javascript:void(0)">${escapeHtml(info.title)}</a>`
-      return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库"${docLink}"文档</span> |</span>`
+      return `<span class="ref-source-line">| <span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span> |</span>`
     })
     html += `<br>${sourceLines.join('<br>')}`
   }
