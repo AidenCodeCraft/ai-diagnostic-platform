@@ -31,6 +31,11 @@ from app.services.chat.proactive_questioning import (
     ProactiveQuestioning,
     UserExpertiseLevel,
 )
+from app.services.chat.query_preprocessor import (
+    QueryPreprocessor,
+    SearchResult,
+    get_preprocessor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +136,8 @@ class DiagnosticChatAgent:
         self.provider_name = provider_name
         self.knowledge = KnowledgeService(db)
         self.references: List[Dict[str, Any]] = []
+        self._last_search_partial: bool = False
+        self._last_search_layer: str = ""
 
     # ==================================================================
     # Pipeline Entry
@@ -345,127 +352,57 @@ class DiagnosticChatAgent:
     def _retrieve_knowledge(
         self, text: str, analysis: Dict[str, Any],
     ) -> tuple[str, List[Dict[str, Any]]]:
-        """搜索知识库——智能提取搜索关键词，而非用整句自然语言。
+        """搜索知识库——使用通用 QueryPreprocessor 模块。
 
         策略：
-          1. 从用户输入中剥离冗余指令（"帮我搜一下""查找知识库"等）
-          2. 用提取的主题实体 + 匹配关键词构建搜索词
-          3. 多个关键词轮流尝试，取最佳匹配
-          4. 搜索词数量和兜底轮数按输入长度动态缩放
+          1. QueryPreprocessor 自动分词：分离实体词（型号、平台名）和意图词（功能描述）
+          2. 分层搜索：组合搜索 → 意图搜索 → 实体搜索，逐级降级
+          3. 结果后校验：检查意图词匹配比例，标记部分匹配
+          4. 搜索结果按输入长度动态缩放 snippet 大小
         """
         if not text.strip():
             return "", []
 
-        # 提取搜索关键词：剥离指令前缀 + 用主题词构建查询
-        search_terms = self._extract_search_terms(text, analysis)
+        # 使用通用预处理器
+        preprocessor = get_preprocessor()
 
-        if not search_terms:
-            return "", []
+        def search_fn(term: str, page_size: int) -> dict:
+            return self.knowledge.search(term, page=1, page_size=page_size)
 
-        logger.info("[知识检索] 查询: %s", text[:80])
-        logger.info("[知识检索] 搜索词: %s", search_terms[:15])
+        search_result = preprocessor.process(
+            query=text,
+            search_fn=search_fn,
+            max_layers=4,
+            high_score_threshold=0.3,
+            min_intent_match_ratio=0.3,
+        )
 
-        # 按输入长度对数缩放：覆盖 1 字符 ~ 300 万字符（≈1M tokens）
-        # 公式：base + scale * log10(max(text_len, 10) / 10)
-        # 短文本（50字）→ ~5 词；中等（500字）→ ~10 词；长（5000字）→ ~15 词；
-        # 超大（5万字）→ ~20 词；极端（100万字）→ ~30 词
-        text_len = len(text)
-        log_scale = math.log10(max(text_len, 10) / 10)  # 0.0 ~ 5.0
-        max_primary = min(30, int(5 + 5 * log_scale))     # 5 ~ 30
-        max_fallback = min(50, int(10 + 8 * log_scale))   # 10 ~ 50
-
-        # 尝试多个搜索词的组合
-        # ── 关键改进：不提前中断！所有搜索词都尝试，确保子词（如"车辆""上线"）
-        #    也有机会被搜索，而非在前5个词找到5条不相关结果就放弃 ──
-        all_items: list[dict] = []
-        seen_ids: set[int] = set()
-        high_score_ids: set[int] = set()  # 高分文档 ID（score >= 0.3）
-
-        for term in search_terms[:max_primary]:
-            try:
-                result = self.knowledge.search(term, page=1, page_size=5)
-                items = result.get("items", [])
-                for item in items:
-                    doc_id = item.get("id")
-                    score = float(item.get("relevance_score", 0) or 0)
-                    if score >= 0.3:
-                        high_score_ids.add(doc_id)
-                    if doc_id in seen_ids:
-                        # 对已存在的文档，更新 snippet（取更长的匹配片段）
-                        for existing in all_items:
-                            if existing.get("id") == doc_id:
-                                # 更新最高分数
-                                if score > float(existing.get("relevance_score", 0) or 0):
-                                    existing["relevance_score"] = score
-                                new_snip = self.knowledge._extract_snippet(
-                                    existing.get("_full_content", ""), term)
-                                if new_snip and len(new_snip) > len(existing.get("snippet", "")):
-                                    existing["snippet"] = new_snip
-                                break
-                        continue
-                    seen_ids.add(doc_id)
-                    try:
-                        full_doc = self.knowledge.get(doc_id)
-                        item["_full_content"] = full_doc.content or ""
-                        item["snippet"] = self.knowledge._extract_snippet(
-                            item["_full_content"], term)
-                    except Exception:
-                        pass
-                    all_items.append(item)
-            except Exception:
-                continue
-            # 只有找到高分匹配时才提前中断，避免低分结果阻断后续搜索词
-            if high_score_ids and len(all_items) >= 3:
-                break
-
-        # 兜底：如果主搜索词没找到高分结果，用短关键词重试
-        if not high_score_ids and len(search_terms) > max_primary:
-            short_terms = [
-                t for t in search_terms[max_primary:]
-                if 2 <= len(t) <= 4
-            ]
-            for term in short_terms[:max_fallback]:
-                try:
-                    result = self.knowledge.search(term, page=1, page_size=3)
-                    items = result.get("items", [])
-                    for item in items:
-                        doc_id = item.get("id")
-                        score = float(item.get("relevance_score", 0) or 0)
-                        if score >= 0.3:
-                            high_score_ids.add(doc_id)
-                        if doc_id in seen_ids:
-                            continue
-                        seen_ids.add(doc_id)
-                        try:
-                            full_doc = self.knowledge.get(doc_id)
-                            item["_full_content"] = full_doc.content or ""
-                            item["snippet"] = self.knowledge._extract_snippet(
-                                item["_full_content"], term)
-                        except Exception:
-                            pass
-                        all_items.append(item)
-                except Exception:
-                    continue
-                if high_score_ids and len(all_items) >= 3:
-                    break
-
+        all_items = search_result.items
         if not all_items:
             logger.info("[知识检索] 未找到任何结果")
             return "", []
 
-        # 去重并按相关度排序
-        all_items.sort(key=lambda d: float(d.get("relevance_score", 0) or 0), reverse=True)
-
-        # 日志：汇总搜索结果
-        top_scores = [f"{it.get('title','?')}={float(it.get('relevance_score',0) or 0):.2f}" for it in all_items[:8]]
-        logger.info("[知识检索] 结果: %s (高分=%d)", top_scores, len(high_score_ids))
-
-        # snippet 大小和结果条数也按输入长度对数缩放
-        # 短文本→800字符/5条；中等→1500/5；超大→4000/8
+        # snippet 大小和结果条数按输入长度对数缩放
+        text_len = len(text)
+        log_scale = math.log10(max(text_len, 10) / 10)  # 0.0 ~ 5.0
         snippet_max = min(4000, int(800 + 600 * log_scale))
         max_items = min(8, 5 + int(log_scale / 1.5))  # 5 ~ 8
 
         items = all_items[:max_items]
+
+        # 获取完整文档内容（用于 snippet 提取）
+        for item in items:
+            doc_id = item.get("id")
+            if not item.get("_full_content"):
+                try:
+                    full_doc = self.knowledge.get(doc_id)
+                    item["_full_content"] = full_doc.content or ""
+                    # 用搜索词提取更好的 snippet
+                    item["snippet"] = self.knowledge._extract_snippet(
+                        item["_full_content"], search_result.matched_term,
+                    )
+                except Exception:
+                    pass
 
         self.references = []
         lines = []
@@ -473,8 +410,6 @@ class DiagnosticChatAgent:
             title = item.get("title", "Untitled")
             snippet = item.get("snippet", "")[:snippet_max]
             score = item.get("relevance_score", 0)
-            # 降低阈值：向量搜索对长句子的语义匹配分数可能偏低
-            # 但能返回结果说明有一定相关性，不应过度过滤
             if score >= 0.01:
                 lines.append(
                     f"{i + 1}. **{title}** (相关度: {score:.0%})\n   {snippet}"
@@ -485,6 +420,10 @@ class DiagnosticChatAgent:
                     "source": item.get("source") or "知识库",
                     "excerpt": snippet,
                 })
+
+        # 记录部分匹配状态（供 _assemble_rag_mode 使用）
+        self._last_search_partial = search_result.is_partial_match
+        self._last_search_layer = search_result.matched_layer
 
         return "\n\n".join(lines) if lines else "", self.references
 
@@ -535,14 +474,88 @@ class DiagnosticChatAgent:
                 terms.append(token)
 
         # 优先级0.5：连续中文词组（2-4字）作为独立搜索词
-        # 避免把整句当搜索词，也避免 n-gram 碎片
-        cn_phrases = re.findall(r'[\u4e00-\u9fff]{2,4}', text)
+        # 按非中文字符（字母、数字、标点、停用虚词）分割后提取完整中文段
+        # 避免滑窗导致的碎片化（如"的客流统"）
+        cn_phrases: list[str] = []
+        cn_segments = re.split(r'[a-zA-Z0-9\s，,。.？?！!：:；;、的之与和或是什么怎么]+', text)
         cn_stop = {"什么", "怎么", "为什么", "在日志", "日志中", "应该", "可以",
                    "的", "了", "在", "是", "我", "有", "和", "就", "不", "搜索",
-                   "搜索什么", "关键字", "关键字呢", "什么呢", "什么关键"}
+                   "搜索什么", "关键字", "关键字呢", "什么呢", "什么关键",
+                   "怎么样的", "样的呢", "怎么样", "呢", "吗", "吧", "啊", "呀",
+                   "是怎么", "是怎", "怎么", "么样", "样的",
+                   # 长段滑窗产生的无意义跨词碎片
+                   "我应", "我应该在", "应该在", "应该在日", "该在", "该在日", "该在日志",
+                   "在日", "志中", "志中搜", "志中搜索", "中搜", "中搜索",
+                   "迪云", "迪云控", "迪云控平", "控平", "控平台", "控平台未",
+                   "台未", "台未看", "台未看到", "到车", "到车辆", "到车辆上",
+                   "辆上", "未看", "未看到车", "看到车", "看到车辆"}
+        for seg in cn_segments:
+            seg = seg.strip()
+            if len(seg) < 2:
+                continue
+            if len(seg) <= 4:
+                # 短段直接取整段
+                if seg not in cn_phrases:
+                    cn_phrases.append(seg)
+            elif len(seg) <= 8:
+                # 中等段（5-8字）：按起始位置偏移 0,1,2 提取 3-4 字片段
+                for start in [0, 1, 2]:
+                    for w in [3, 4]:
+                        if start + w <= len(seg):
+                            phrase = seg[start:start + w]
+                            if phrase not in cn_phrases:
+                                cn_phrases.append(phrase)
+            else:
+                # 长段（>8字）：仅在头部和尾部各取 2 个 3-4 字片段
+                for start in [0, 1, 2]:
+                    for w in [3, 4]:
+                        if start + w <= len(seg):
+                            phrase = seg[start:start + w]
+                            if phrase not in cn_phrases:
+                                cn_phrases.append(phrase)
+                for offset in [3, 4, 5]:
+                    start = len(seg) - offset
+                    for w in [3, 4]:
+                        if start >= 0 and start + w <= len(seg):
+                            phrase = seg[start:start + w]
+                            if phrase not in cn_phrases:
+                                cn_phrases.append(phrase)
         for phrase in cn_phrases:
             if phrase not in cn_stop and phrase not in terms:
                 terms.append(phrase)
+
+        # ── 优先级0.51：专有名词（字母数字）+ 核心中文词组组合搜索 ──
+        # 例如 "L13C的客流统计是怎么样的呢？" → 组合 "L13C 客流统计" 优先搜索
+        # 核心中文词组 = 连续 3-4 字的中文片段，过滤停用词
+        core_cn = [p for p in cn_phrases if len(p) >= 3 and p not in cn_stop]
+        if alphanum and core_cn:
+            # 将每个字母数字词与每个核心中文词组组合
+            for an in alphanum[:2]:
+                for cn in core_cn[:3]:
+                    combo = f"{an} {cn}"
+                    if combo not in terms:
+                        terms.insert(0, combo)  # 插入最前面，优先尝试
+            # 同时把核心中文词组本身也提升到前面
+            for cn in core_cn[:3]:
+                if cn in terms:
+                    terms.remove(cn)
+                terms.insert(len(alphanum) + len(core_cn), cn)
+
+        # ── 优先级0.55：子词拆分策略 ──
+        # 对 4 字中文词组（如"车辆上线"）拆分为 2 字子词（如"车辆"+"上线"）
+        # 文档中可能用"车辆"而非"车辆上线"，拆分后能扩大匹配范围
+        sub_terms: list[str] = []
+        for phrase in cn_phrases:
+            if len(phrase) == 4 and phrase not in cn_stop:
+                left = phrase[:2]
+                right = phrase[2:]
+                if left not in cn_stop and len(left) >= 2:
+                    sub_terms.append(left)
+                if right not in cn_stop and len(right) >= 2:
+                    sub_terms.append(right)
+        for st in sub_terms:
+            if st not in terms:
+                terms.append(st)
 
         # ── 优先级0.55：子词拆分策略 ──
         # 对 4 字中文词组（如"车辆上线"）拆分为 2 字子词（如"车辆"+"上线"）
@@ -664,6 +677,18 @@ class DiagnosticChatAgent:
         调用前提：knowledge_context 非空（enrich_messages 中已判断）。
         """
         system_prompt = self.SYSTEM_BASE + "\n\n" + RAG_STRICT_SYSTEM_PROMPT
+
+        # 部分匹配时，在 prompt 中明确告知 LLM
+        if self._last_search_partial:
+            system_prompt += (
+                "\n\n> ⚠️ **重要提示**：当前检索结果为\"部分匹配\"——"
+                "即找到了包含用户提到的实体（设备型号/平台名）的文档，"
+                "但文档内容可能不完全对应用户的意图。"
+                "请仔细比对用户问题的核心意图与检索内容，"
+                "仅基于检索内容中真正相关的部分回答。"
+                "如果检索内容中的实体与用户问题不同（如用户问 L13C 但文档讲 FC09），"
+                "请在回答中明确说明差异。"
+            )
 
         analysis_context = self._build_analysis_context(log_analysis)
         if analysis_context:

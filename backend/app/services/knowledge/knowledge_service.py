@@ -237,26 +237,42 @@ class KnowledgeService:
     def _tokenize_query(query_text: str) -> list[str]:
         """Split query into meaningful tokens for individual matching.
 
-        Chinese: extract 2-4 character n-grams and full phrases.
+        Chinese: extract meaningful n-grams with sub-string priority.
         English: split by whitespace and punctuation.
+
+        改进：对于中文长词（如"启迪云控平台"），生成：
+          1. 完整词 "启迪云控平台"
+          2. 剥离后缀 "启迪云控"
+          3. 核心 n-grams "启迪云控"、"云控平台"
+        确保简称也能匹配到包含完整名称的文档。
         """
         tokens: set[str] = set()
 
-        # Extract Chinese phrases (2-4 chars) — most meaningful for search
+        # 常见中文后缀（可剥离以提高召回率）
+        _CN_SUFFIXES = {"平台", "系统", "设备", "模块", "服务", "终端",
+                         "服务器", "客户端", "管理端", "网关", "控制器"}
+
+        # Extract Chinese phrases
         cn_chars = re.findall(r"[\u4e00-\u9fff]+", query_text)
         for phrase in cn_chars:
             if len(phrase) >= 2:
                 tokens.add(phrase)  # full Chinese phrase
-                # Also add 2-3 char windows
-                if len(phrase) >= 2:
-                    for i in range(len(phrase) - 1):
-                        tokens.add(phrase[i:i + 2])
-                    if len(phrase) >= 3:
-                        for i in range(len(phrase) - 2):
-                            tokens.add(phrase[i:i + 3])
 
-        # Extract English/technical tokens (ASCII 字母数字，含纯数字如 "1078"、"808")
-        # 注意不能用 \w——Python re 的 \w 会匹配中文字符，导致整句被吞成一个 token
+                # 剥离后缀生成简称（如"启迪云控平台" → "启迪云控"）
+                for suffix in _CN_SUFFIXES:
+                    if phrase.endswith(suffix) and len(phrase) > len(suffix):
+                        short = phrase[:-len(suffix)]
+                        if len(short) >= 2:
+                            tokens.add(short)
+                        break  # 只剥离一个后缀
+
+                # 滑动窗口 2-4 字 n-gram（不重叠提取，减少碎片）
+                if len(phrase) >= 2:
+                    for w in [2, 3, 4]:
+                        for i in range(len(phrase) - w + 1):
+                            tokens.add(phrase[i:i + w])
+
+        # Extract English/technical tokens
         en_tokens = re.findall(r"[A-Za-z0-9_]{2,}", query_text)
         for t in en_tokens:
             tokens.add(t)
@@ -264,18 +280,23 @@ class KnowledgeService:
         # Filter common stop words
         stop_words = {"的", "了", "在", "是", "我", "有", "和", "就", "不",
                        "人", "都", "一", "个", "上", "也", "很", "到", "说",
-                       "要", "去", "你", "会", "着", "没有", "看", "好", "自己"}
+                       "要", "去", "你", "会", "着", "没有", "看", "好", "自己",
+                       "什么", "怎么", "为什么", "怎么样", "如何", "哪", "哪些"}
         tokens = {t for t in tokens if t.lower() not in stop_words and len(t) >= 2}
 
-        # Sort: longer tokens first (more specific)
+        # Sort: longer tokens first (more specific), 剥离后缀的简称优先
         return sorted(tokens, key=len, reverse=True)
 
     @staticmethod
     def _token_relevance(doc: KnowledgeDocument, tokens: list[str]) -> float:
         """Score based on how many tokens match in title vs content.
 
-        含数字的 token（如 "1078"、"CJT1078"）是强区分度关键词，
-        命中时给予 3 倍权重，避免被大量中文 n-gram 噪声稀释。
+        评分改进：
+        1. 含数字的 token（如 "1078"、"CJT1078"）命中时 3 倍权重
+        2. 长 token（≥4 字）命中时 2 倍权重（更具体的匹配）
+        3. **子串匹配奖励**：如果搜索词是文档标题/内容的子串，
+           说明搜索词被完整包含，给予额外加分
+        4. title 命中权重 0.4，content 命中权重 0.15
         """
         title_lower = (doc.title or "").lower()
         content_lower = (doc.content or "").lower()
@@ -283,11 +304,36 @@ class KnowledgeService:
             return 0
 
         def _weight(token: str) -> float:
-            return 3.0 if re.search(r"\d", token) else 1.0
+            w = 1.0
+            if re.search(r"\d", token):
+                w *= 3.0  # 含数字的强区分度 token
+            if len(token) >= 4:
+                w *= 2.0  # 长 token 更具体
+            return w
 
         total_weight = sum(_weight(t) for t in tokens)
-        title_hits = sum(_weight(t) for t in tokens if t.lower() in title_lower)
-        content_hits = sum(_weight(t) for t in tokens if t.lower() in content_lower)
+        title_hits = 0.0
+        content_hits = 0.0
+
+        for t in tokens:
+            w = _weight(t)
+            t_lower = t.lower()
+
+            # 标题匹配
+            if t_lower in title_lower:
+                title_hits += w
+                # 子串匹配奖励：如果搜索词是标题的子串（如"启迪云控"是"启迪云控平台"的子串）
+                # 说明搜索词被完整包含，是高质量匹配
+                if len(t) >= 2 and t_lower in title_lower:
+                    title_hits += w * 0.5
+
+            # 内容匹配
+            if t_lower in content_lower:
+                content_hits += w
+                # 同理：子串匹配奖励
+                if len(t) >= 2:
+                    content_hits += w * 0.25
+
         return min(1.0, (title_hits * 0.4 + content_hits * 0.15) / max(1.0, total_weight))
 
     # ------------------------------------------------------------------
