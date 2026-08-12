@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
-from app.services.knowledge.embedding_service import EmbeddingService
+from app.services.knowledge.embedding import get_embedder
 
 logger = get_logger(__name__)
 
@@ -56,7 +56,7 @@ class VectorService:
     def __init__(self):
         self._connected = False
         self._collection: Optional[Any] = None  # pymilvus.Collection
-        self._embedding = EmbeddingService()
+        self._embedding = get_embedder()
         self._connect()
 
     # ==================================================================

@@ -149,7 +149,7 @@ class DiagnosticChatAgent:
         user_message: str,
         existing_messages: List[Dict[str, str]],
         log_analysis: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, str]]:
+    ) -> tuple[List[Dict[str, str]], Optional[str]]:
         """完整预处理管道。
 
         核心原则：
@@ -157,11 +157,17 @@ class DiagnosticChatAgent:
           - 知识库有匹配 → 严格 RAG 模式（LLM 只能重组知识库内容）
           - 知识库无匹配 → 通用对话模式（LLM 自由回复）
           - 支持主动追问：检测缺失关键信息并引导用户
+
+        Returns:
+            (messages, direct_reply):
+              - messages: 增强后的消息列表（传给 LLM）
+              - direct_reply: 若非 None，表示已生成直接回复文本，
+                调用方应直接流式输出此文本而**不再调用 LLM**
         """
         # Stage 1: 输入清洗
         cleaned = self._sanitize(user_message)
         if self._should_refuse(cleaned):
-            return self._build_refusal_response(existing_messages, cleaned)
+            return self._build_refusal_response(existing_messages, cleaned), None
 
         # Stage 2: 问题分析（提取实体和子问题）
         analysis = self._analyze_question(cleaned)
@@ -177,11 +183,14 @@ class DiagnosticChatAgent:
                 try:
                     proactive_llm = analyze_and_ask_with_llm(cleaned, existing_messages)
                     if proactive_llm.get("should_ask") and proactive_llm.get("response"):
-                        return existing_messages + [
-                            {"role": "assistant", "content": proactive_llm["response"]}
-                        ]
+                        return (
+                            existing_messages + [
+                                {"role": "assistant", "content": proactive_llm["response"]}
+                            ],
+                            proactive_llm["response"],  # 直接回复，不调 LLM
+                        )
                 except Exception:
-                    pass
+                    logger.warning("[enrich_messages] analyze_and_ask_with_llm failed, falling back to rule-based", exc_info=True)
 
                 proactive_response = check_and_generate_proactive_questions(
                     cleaned,
@@ -189,23 +198,26 @@ class DiagnosticChatAgent:
                     use_llm=False,
                 )
                 if proactive_response:
-                    return existing_messages + [
-                        {"role": "assistant", "content": proactive_response}
-                    ]
+                    return (
+                        existing_messages + [
+                            {"role": "assistant", "content": proactive_response}
+                        ],
+                        proactive_response,  # 直接回复，不调 LLM
+                    )
 
-                # 无匹配也无追问 → 走无知识库模式
+                # 无匹配也无追问 → 走无知识库模式（需要 LLM 生成回复）
                 return self._assemble_chat_mode(
                     existing_messages, cleaned_input=cleaned,
                     analysis=analysis,
                     log_analysis=log_analysis,
-                )
+                ), None
             else:
-                # 知识库有匹配 → 直接走严格 RAG 模式（跳过追问）
+                # 知识库有匹配 → 直接走严格 RAG 模式（跳过追问，需要 LLM）
                 return self._assemble_rag_mode(
                     existing_messages, cleaned_input=cleaned,
                     knowledge_context=knowledge_context,
                     log_analysis=log_analysis,
-                )
+                ), None
 
         # Stage 3: 始终检索知识库（references 存入 self.references 供外层读取）
         knowledge_context, _ = self._retrieve_knowledge(cleaned, analysis)
@@ -217,13 +229,13 @@ class DiagnosticChatAgent:
                 existing_messages, cleaned_input=cleaned,
                 knowledge_context=knowledge_context,
                 log_analysis=log_analysis,
-            )
+            ), None
         else:
             return self._assemble_chat_mode(
                 existing_messages, cleaned_input=cleaned,
                 analysis=analysis,
                 log_analysis=log_analysis,
-            )
+            ), None
 
     # ==================================================================
     # Stage 1: 输入清洗
@@ -363,19 +375,23 @@ class DiagnosticChatAgent:
         if not text.strip():
             return "", []
 
-        # 使用通用预处理器
-        preprocessor = get_preprocessor()
+        try:
+            # 使用通用预处理器
+            preprocessor = get_preprocessor()
 
-        def search_fn(term: str, page_size: int) -> dict:
-            return self.knowledge.search(term, page=1, page_size=page_size)
+            def search_fn(term: str, page_size: int) -> dict:
+                return self.knowledge.search(term, page=1, page_size=page_size)
 
-        search_result = preprocessor.process(
-            query=text,
-            search_fn=search_fn,
-            max_layers=4,
-            high_score_threshold=0.3,
-            min_intent_match_ratio=0.3,
-        )
+            search_result = preprocessor.process(
+                query=text,
+                search_fn=search_fn,
+                max_layers=4,
+                high_score_threshold=0.3,
+                min_intent_match_ratio=0.3,
+            )
+        except Exception as e:
+            logger.error("[知识检索] 检索异常: %s\n%s", e, traceback.format_exc())
+            return "", []
 
         all_items = search_result.items
         if not all_items:

@@ -4,7 +4,7 @@ from app.services.diagnostics import LogService, LogParserService, ParsingServic
 from app.services.knowledge import (
     KnowledgeService, DocumentImporter,
     VectorService, get_vector_service, ProviderRegistry,
-    EmbeddingService, DocumentIndexer,
+    EmbeddingService, get_embedder, DocumentIndexer,
 )
 from app.services.system import OrganizationService, ProjectService, RuleEngine, BugCaseService
 from app.services.infrastructure import LLMService
@@ -15,7 +15,7 @@ __all__ = [
     "LogService", "LogParserService", "ParsingService", "AnalysisTaskService", "DiagnosisPipeline", "ReportService",
     "KnowledgeService", "DocumentImporter",
     "VectorService", "get_vector_service", "ProviderRegistry",
-    "EmbeddingService", "DocumentIndexer",
+    "EmbeddingService", "get_embedder", "DocumentIndexer",
     "OrganizationService", "ProjectService", "RuleEngine", "BugCaseService",
     "LLMService",
 ]

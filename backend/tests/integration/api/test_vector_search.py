@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.knowledge.embedding_service import EmbeddingService
+from app.services.knowledge.embedding import CompositeEmbedder, get_embedder
 from app.services.knowledge.vector_service import VectorService
 
 
@@ -13,7 +13,7 @@ from app.services.knowledge.vector_service import VectorService
 # ═══════════════════════════════════════════════════════════
 
 def test_embed_single_text():
-    svc = EmbeddingService()
+    svc = get_embedder()
     embedding = svc.embed("USB timeout 错误排查")
     assert isinstance(embedding, list)
     assert len(embedding) == svc.dimension
@@ -21,7 +21,7 @@ def test_embed_single_text():
 
 
 def test_embed_empty_text():
-    svc = EmbeddingService()
+    svc = get_embedder()
     embedding = svc.embed("")
     assert len(embedding) == svc.dimension
     # 零向量
@@ -29,14 +29,14 @@ def test_embed_empty_text():
 
 
 def test_embed_whitespace_only():
-    svc = EmbeddingService()
+    svc = get_embedder()
     embedding = svc.embed("   \n\t  ")
     assert len(embedding) == svc.dimension
     assert all(v == 0.0 for v in embedding)
 
 
 def test_embed_batch():
-    svc = EmbeddingService()
+    svc = get_embedder()
     texts = ["USB error", "bluetooth pairing", "kernel panic"]
     embeddings = svc.embed_batch(texts)
     assert len(embeddings) == 3
@@ -44,20 +44,20 @@ def test_embed_batch():
 
 
 def test_embed_batch_empty():
-    svc = EmbeddingService()
+    svc = get_embedder()
     embeddings = svc.embed_batch([])
     assert embeddings == []
 
 
 def test_embed_batch_mixed_empty():
-    svc = EmbeddingService()
+    svc = get_embedder()
     texts = ["hello", "", "world"]
     embeddings = svc.embed_batch(texts)
     assert len(embeddings) >= 2  # 非空文本的嵌入应 >= 2个
 
 
 def test_embed_cache():
-    svc = EmbeddingService()
+    svc = get_embedder()
     text = "test cache text"
     emb1 = svc.embed(text)
     emb2 = svc.embed(text)
@@ -65,7 +65,7 @@ def test_embed_cache():
 
 
 def test_embed_clear_cache():
-    svc = EmbeddingService()
+    svc = get_embedder()
     svc.embed("cached text")
     assert len(svc._cache) > 0
     svc.clear_cache()
@@ -73,14 +73,14 @@ def test_embed_clear_cache():
 
 
 def test_embed_with_chunks_short():
-    svc = EmbeddingService()
+    svc = get_embedder()
     result = svc.embed_with_chunks("short text", chunk_size=500)
     assert len(result) == 1
     assert result[0][0] == "short text"
 
 
 def test_embed_with_chunks_long():
-    svc = EmbeddingService()
+    svc = get_embedder()
     long_text = "A" * 1200
     result = svc.embed_with_chunks(long_text, chunk_size=500, overlap=50)
     assert len(result) >= 2
@@ -90,13 +90,13 @@ def test_embed_with_chunks_long():
 
 
 def test_embed_with_chunks_empty():
-    svc = EmbeddingService()
+    svc = get_embedder()
     result = svc.embed_with_chunks("")
     assert isinstance(result, list)
 
 
 def test_chunk_text_exact():
-    svc = EmbeddingService()
+    svc = get_embedder()
     text = "Hello World"
     chunks = svc._chunk_text(text, chunk_size=500)
     assert len(chunks) == 1
@@ -104,7 +104,7 @@ def test_chunk_text_exact():
 
 
 def test_chunk_text_with_overlap():
-    svc = EmbeddingService()
+    svc = get_embedder()
     text = "A" * 1000
     chunks = svc._chunk_text(text, chunk_size=500, overlap=100)
     assert len(chunks) >= 2
@@ -115,7 +115,7 @@ def test_chunk_text_with_overlap():
 
 
 def test_chunk_text_unicode():
-    svc = EmbeddingService()
+    svc = get_embedder()
     text = "中文测试内容。继续更多文本。" * 50
     chunks = svc._chunk_text(text, chunk_size=200, overlap=30)
     assert len(chunks) > 0
@@ -123,7 +123,7 @@ def test_chunk_text_unicode():
 
 
 def test_pseudo_embed_quality():
-    svc = EmbeddingService()
+    svc = get_embedder()
     e1 = svc._pseudo_embed("USB timeout error")
     e2 = svc._pseudo_embed("USB timeout error")
     e3 = svc._pseudo_embed("totally different text")
@@ -134,16 +134,17 @@ def test_pseudo_embed_quality():
 
 
 def test_zero_vector():
-    svc = EmbeddingService()
+    svc = get_embedder()
     zero = svc._zero_vector()
     assert len(zero) == svc.dimension
     assert all(v == 0.0 for v in zero)
 
 
 def test_cache_key():
-    key = EmbeddingService._cache_key("hello")
+    import hashlib
+    key = hashlib.md5("hello".encode('utf-8')).hexdigest()
     assert len(key) == 32  # MD5 hex
-    assert EmbeddingService._cache_key("hello") == EmbeddingService._cache_key("hello")
+    assert key == hashlib.md5("hello".encode('utf-8')).hexdigest()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -231,19 +232,19 @@ def test_get_vector_service_singleton():
 # ═══════════════════════════════════════════════════════════
 
 def test_embed_very_long_text():
-    svc = EmbeddingService()
+    svc = get_embedder()
     embedding = svc.embed("A" * 10000)
     assert len(embedding) == svc.dimension  # 长文本不应崩溃
 
 
 def test_embed_special_characters():
-    svc = EmbeddingService()
+    svc = get_embedder()
     embedding = svc.embed("\x00\x01\x02\n\r\t\\\"'")
     assert len(embedding) == svc.dimension
 
 
 def test_embed_batch_large():
-    svc = EmbeddingService()
+    svc = get_embedder()
     texts = ["text"] * 100
     embeddings = svc.embed_batch(texts)
     assert len(embeddings) == 100

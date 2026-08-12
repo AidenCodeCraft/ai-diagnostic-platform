@@ -7,14 +7,18 @@ that exposes a /v1/chat/completions endpoint.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import traceback
 from typing import Any, Dict, Generator, List, Optional
 
 import httpx
 
 from app.services.prompts.diagnostic_prompt import DiagnosticPrompt
 from app.services.providers.base import BaseProvider
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAICompatibleProvider(BaseProvider):
@@ -84,7 +88,8 @@ class OpenAICompatibleProvider(BaseProvider):
             return f"[{self._provider_name} API key not configured]"
         try:
             return self._call_api_messages(messages)
-        except Exception:
+        except Exception as e:
+            logger.error("[%s] chat failed: %s\n%s", self._provider_name, e, traceback.format_exc())
             return f"[{self._provider_name} API unavailable]"
 
     def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[Any, None, None]:
@@ -94,7 +99,10 @@ class OpenAICompatibleProvider(BaseProvider):
             return
         try:
             yield from self._call_api_stream(messages)
-        except Exception:
+        except GeneratorExit:
+            return
+        except Exception as e:
+            logger.error("[%s] chat_stream failed: %s\n%s", self._provider_name, e, traceback.format_exc())
             yield f"[{self._provider_name} API unavailable]"
 
     def health_check(self) -> bool:

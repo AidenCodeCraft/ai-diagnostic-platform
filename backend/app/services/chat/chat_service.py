@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import traceback
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -12,6 +14,8 @@ from app.services.chat.diagnostic_chat_agent import DiagnosticChatAgent
 from app.services.chat.context_manager import ContextManager
 from app.services.chat.title_generator import should_generate_title
 from app.services.knowledge.provider_registry import ProviderRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -223,12 +227,15 @@ class ChatService:
 
         # Enrich with diagnostic context
         agent = DiagnosticChatAgent(self.db, provider_name)
-        messages = agent.enrich_messages(session_id, content, messages, resolved_analysis)
+        messages, direct_reply = agent.enrich_messages(session_id, content, messages, resolved_analysis)
 
-        try:
-            reply = self._get_provider(provider_name).chat(messages)
-        except Exception as e:
-            reply = f"[AI 服务暂时不可用: {e}]"
+        if direct_reply is not None:
+            reply = direct_reply
+        else:
+            try:
+                reply = self._get_provider(provider_name).chat(messages)
+            except Exception as e:
+                reply = f"[AI 服务暂时不可用: {e}]"
 
         self.add_message(session_id, "assistant", reply)
         self._auto_title(session_id, content)
@@ -258,10 +265,34 @@ class ChatService:
             self.update_session(session_id, context={"last_analysis": log_analysis})
 
         # Enrich with diagnostic context (knowledge search + analysis)
-        agent = DiagnosticChatAgent(self.db, provider_name)
-        messages = agent.enrich_messages(session_id, content, messages, resolved_analysis)
-        if agent.references:
-            yield f"data: {json.dumps({'sources': agent.references}, ensure_ascii=False)}\n\n"
+        try:
+            agent = DiagnosticChatAgent(self.db, provider_name)
+            messages, direct_reply = agent.enrich_messages(session_id, content, messages, resolved_analysis)
+            if agent.references:
+                yield f"data: {json.dumps({'sources': agent.references}, ensure_ascii=False)}\n\n"
+
+            # 如果 enrich_messages 已生成直接回复（如主动追问），直接流式输出，不调 LLM
+            if direct_reply is not None:
+                logger.debug(
+                    "[send_message_stream] session_id=%s direct_reply from enrich_messages, skipping LLM",
+                    session_id,
+                )
+                # 模拟流式输出：逐字符发送
+                for char in direct_reply:
+                    yield f"data: {json.dumps({'token': char}, ensure_ascii=False)}\n\n"
+                try:
+                    self._auto_title(session_id, content)
+                except Exception as e:
+                    logger.warning("[send_message_stream] session_id=%s auto_title failed: %s", session_id, e)
+                yield f"data: {json.dumps({'done': True, 'model': provider_name})}\n\n"
+                return
+        except Exception as e:
+            logger.error(
+                "[send_message_stream] session_id=%s enrich_messages failed: %s\n%s",
+                session_id, e, traceback.format_exc(),
+            )
+            yield f"data: {json.dumps({'error': f'知识检索异常: {e}'})}\n\n"
+            return
 
         full_reply = ""
         try:
@@ -274,11 +305,23 @@ class ChatService:
                     continue
                 full_reply += chunk
                 yield f"data: {json.dumps({'token': chunk}, ensure_ascii=False)}\n\n"
+        except GeneratorExit:
+            # 客户端断开连接导致 generator 退出，正常流程
+            logger.debug("[send_message_stream] session_id=%s GeneratorExit (client disconnected)", session_id)
+            return
         except Exception as e:
+            logger.error(
+                "[send_message_stream] session_id=%s provider chat_stream failed: %s\n%s",
+                session_id, e, traceback.format_exc(),
+            )
             full_reply = f"[AI 服务暂时不可用: {e}]"
             yield f"data: {json.dumps({'token': full_reply})}\n\n"
 
-        self._auto_title(session_id, content)
+        try:
+            self._auto_title(session_id, content)
+        except Exception as e:
+            logger.warning("[send_message_stream] session_id=%s auto_title failed: %s", session_id, e)
+
         # 注意：assistant 消息由前端 saveMessage 统一持久化（含 thinking/sources），
         # 后端不再重复保存，避免 message 重复。
         yield f"data: {json.dumps({'done': True, 'model': provider_name})}\n\n"

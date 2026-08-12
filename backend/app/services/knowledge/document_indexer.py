@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
 from app.services.knowledge.vector_service import VectorService, get_vector_service
-from app.services.knowledge.embedding_service import EmbeddingService
+from app.services.knowledge.embedding import get_embedder
 
 logger = get_logger(__name__)
 
@@ -40,11 +40,11 @@ class DocumentIndexer:
         self,
         db: Session,
         vector_service: Optional[VectorService] = None,
-        embedding_service: Optional[EmbeddingService] = None,
+        embedding_service: Optional[Any] = None,
     ):
         self.db = db
         self.vector_service = vector_service or get_vector_service()
-        self.embedding = embedding_service or EmbeddingService()
+        self.embedding = embedding_service or get_embedder()
         self._index_stats: Dict[str, Any] = {
             "total_indexed": 0,
             "total_failed": 0,

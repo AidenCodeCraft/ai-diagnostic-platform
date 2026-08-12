@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import traceback
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -10,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.database import session as session_module
 from app.services import ChatService
+
+logger = logging.getLogger(__name__)
 
 
 def get_db_session():
@@ -116,9 +120,17 @@ def chat_stream(
             )
         except ValueError as e:
             # 会话不存在等可恢复错误 → 通过 SSE 返回错误
+            logger.warning("[chat_stream] session_id=%s ValueError: %s", session_id, e)
             import json
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        except GeneratorExit:
+            # 客户端断开连接，正常情况，不记录为错误
+            logger.debug("[chat_stream] session_id=%s client disconnected (GeneratorExit)", session_id)
         except Exception as e:
+            logger.error(
+                "[chat_stream] session_id=%s unhandled exception: %s\n%s",
+                session_id, e, traceback.format_exc(),
+            )
             import json
             yield f"data: {json.dumps({'error': 'Internal server error'})}\n\n"
 

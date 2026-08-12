@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.database import session as session_module
 from app.services.knowledge.vector_service import VectorService, get_vector_service
 from app.services.knowledge.document_indexer import DocumentIndexer
-from app.services.knowledge.embedding_service import EmbeddingService
+from app.services.knowledge.embedding import get_embedder
 from app.services.knowledge.knowledge_service import KnowledgeService
 
 router = APIRouter(prefix="/vector", tags=["vector-search"])
@@ -272,7 +272,7 @@ def vector_health():
             "milvus_available": vector_svc.available,
             "milvus_enabled": vector_svc._connected,
             "collection": collection_info,
-            "embedding_provider": EmbeddingService().provider_name,
+            "embedding_provider": get_embedder().__class__.__name__,
         }
     except Exception as exc:
         return {
@@ -289,7 +289,7 @@ def test_embedding(body: Dict[str, Any]):
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
-    embedding_svc = EmbeddingService()
+    embedding_svc = get_embedder()
     embedding = embedding_svc.embed(text)
 
     return {

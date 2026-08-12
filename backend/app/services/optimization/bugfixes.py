@@ -59,8 +59,8 @@ def safe_analyze_missing_info(user_query: Optional[str]) -> List[str]:
 # ═══════════════════════════════════════════════════════════
 
 EMBEDDING_LONG_TEXT_FIX = """
-修复位置: app/services/knowledge/embedding_service.py
-问题: _pseudo_embed 对超长文本（>100000 字符）遍历所有字符，O(n) 性能极差
+修复位置: app/services/knowledge/embedding.py (BGEEmbedder)
+问题: 超长文本（>100000 字符）可能导致 token 超限
 修复: 对文本进行采样截断
 """
 
@@ -209,7 +209,7 @@ def apply_all_bugfixes():
 
     # Fix 3: Embedding 长文本保护
     try:
-        from app.services.knowledge.embedding_service import EmbeddingService
+        from app.services.knowledge.embedding import EmbeddingService
         original_embed = EmbeddingService.embed
 
         def safe_embed(self, text):

@@ -136,21 +136,11 @@ class KnowledgeService:
             logger = __import__("app.core.logging_config", fromlist=["get_logger"]).get_logger(__name__)
             logger.debug("[KnowledgeService] Vector search unavailable, falling back to keyword: %s", exc)
 
-        # Fallback: two-phase keyword search
-        # Phase 1: exact phrase match
-        items = self._keyword_search_phrase(query_text, page_size)
+        # Fallback: BM25 关键词检索（替换旧的 ILIKE 回退）
+        items = self._keyword_search_bm25(query_text, page_size)
         if items:
             total = len(items)
-            paged = items[:page_size]
-            return {"items": paged, "total": total, "page": page, "page_size": page_size}
-
-        # Phase 2: token-based OR match (分词回退)
-        tokens = self._tokenize_query(query_text)
-        if tokens:
-            items = self._keyword_search_tokens(tokens, page_size)
-            total = len(items)
-            paged = items[:page_size]
-            return {"items": paged, "total": total, "page": page, "page_size": page_size}
+            return {"items": items[:page_size], "total": total, "page": page, "page_size": page_size}
 
         return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
@@ -159,17 +149,62 @@ class KnowledgeService:
         query_text: str,
         limit: int = 5,
     ) -> List[Dict[str, Any]]:
-        """纯关键词搜索（不做向量检索）——供混合检索调用。
+        """纯关键词搜索 — 使用 BM25 替换旧的 ILIKE 回退"""
+        return self._keyword_search_bm25(query_text, limit)
 
-        两阶段：先完整短语匹配，无结果则分词 OR 匹配。
+    def _keyword_search_bm25(
+        self, query_text: str, limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """BM25 关键词检索 — 替换旧的 ILIKE 短语+分词回退。
+
+        使用 BM25 算法做精确关键词匹配，比 SQL ILIKE 更快更准。
         """
-        items = self._keyword_search_phrase(query_text, limit)
-        if items:
+        if not query_text.strip():
+            return []
+
+        try:
+            # 获取所有活跃文档
+            docs = (
+                self.db.query(KnowledgeDocument)
+                .filter(KnowledgeDocument.status == "active")
+                .order_by(KnowledgeDocument.updated_at.desc())
+                .limit(1000)
+                .all()
+            )
+            if not docs:
+                return []
+
+            from app.services.knowledge.retrievers import BM25Retriever
+            bm25 = BM25Retriever()
+            bm25.index([
+                (int(doc.id), f"{doc.title or ''}\n{doc.content or ''}")
+                for doc in docs
+            ])
+
+            results = bm25.retrieve(query_text, top_k=limit)
+            doc_map = {int(d.id): d for d in docs}
+
+            items = []
+            for r in results:
+                doc = doc_map.get(r.chunk.doc_id)
+                if doc:
+                    items.append({
+                        "id": doc.id,
+                        "title": doc.title,
+                        "category": doc.category,
+                        "doc_type": doc.doc_type,
+                        "source": doc.source,
+                        "relevance_score": round(r.score, 2),
+                        "snippet": self._extract_snippet(
+                            str(doc.content), query_text,
+                        ),
+                    })
             return items
-        tokens = self._tokenize_query(query_text)
-        if tokens:
-            return self._keyword_search_tokens(tokens, limit)
-        return []
+        except Exception as e:
+            logger = __import__("app.core.logging_config", fromlist=["get_logger"]).get_logger(__name__)
+            logger.debug("[KnowledgeService] BM25 search failed, falling back to ILIKE: %s", e)
+            # 最终回退到旧的 ILIKE
+            return self._keyword_search_phrase(query_text, limit) or []
 
     def _keyword_search_phrase(self, query_text: str, limit: int) -> list:
         """Exact phrase ILIKE search."""

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from app.services.knowledge.embedding_service import EmbeddingService as _BaseEmbedding
+from app.services.knowledge.embedding import EmbeddingService as _BaseEmbedding
 from app.services.optimization.cache_manager import EmbeddingCache
 from app.services.optimization.connection_pool import (
     embedding_throttle,
@@ -115,7 +115,7 @@ def apply_optimizations():
     if _patch_applied:
         return
 
-    import app.services.knowledge.embedding_service as mod
+    import app.services.knowledge.embedding as mod
     mod.EmbeddingService = OptimizedEmbeddingService
     _patch_applied = True
     logger.info("[Optimization] EmbeddingService 已替换为 OptimizedEmbeddingService")

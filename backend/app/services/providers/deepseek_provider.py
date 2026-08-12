@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import traceback
 from pathlib import Path
 from typing import Any, Dict, Generator, List
 
@@ -10,6 +12,8 @@ import httpx
 
 from app.services.prompts.diagnostic_prompt import DiagnosticPrompt
 from app.services.providers.base import BaseProvider
+
+logger = logging.getLogger(__name__)
 
 
 def _load_admin_llm_config() -> Dict[str, str]:
@@ -122,7 +126,8 @@ class DeepSeekProvider(BaseProvider):
             return "[DeepSeek API key not configured]"
         try:
             return self._call_api_messages(messages)
-        except Exception:
+        except Exception as e:
+            logger.error("[deepseek] chat failed: %s\n%s", e, traceback.format_exc())
             return "[DeepSeek API unavailable]"
 
     def chat_stream(self, messages: List[Dict[str, str]]) -> Generator[Any, None, None]:
@@ -135,7 +140,10 @@ class DeepSeekProvider(BaseProvider):
             return
         try:
             yield from self._call_api_stream(messages)
+        except GeneratorExit:
+            return
         except Exception as exc:
+            logger.error("[deepseek] chat_stream failed: %s\n%s", exc, traceback.format_exc())
             yield (
                 f"## DeepSeek API 连接失败\n\n"
                 f"**错误：** {exc}\n\n"
