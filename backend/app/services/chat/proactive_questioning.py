@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -694,10 +695,26 @@ def analyze_and_ask_with_llm(
     """
     pq = ProactiveQuestioning()
 
-    try:
-        analysis = pq.analyze_with_llm(user_query, conversation_history)
-    except Exception:
-        analysis = pq._keyword_fallback_analysis(user_query, conversation_history)
+    result: Dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            result["analysis"] = pq.analyze_with_llm(
+                user_query, conversation_history,
+            )
+        except Exception as exc:  # noqa: BLE001 - fallback below
+            result["error"] = exc
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(3.0)
+
+    if thread.is_alive() or "analysis" not in result:
+        analysis = pq._keyword_fallback_analysis(
+            user_query, conversation_history,
+        )
+    else:
+        analysis = result["analysis"]
 
     missing_types = analysis.get("missing_info_types", [])
     expertise = UserExpertiseLevel(analysis.get("user_expertise", "intermediate"))

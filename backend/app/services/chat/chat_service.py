@@ -19,9 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 class ChatService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, model: Optional[str] = None):
         self.db = db
-        self.context_manager = ContextManager()
+        self.model = model
+        self.context_manager = ContextManager(model=model)
 
     # ------------------------------------------------------------------
     # Sessions

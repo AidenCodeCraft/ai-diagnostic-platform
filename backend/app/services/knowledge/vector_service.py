@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -52,12 +53,16 @@ class VectorService:
 
     _COLLECTION_NAME = settings.MILVUS_COLLECTION or "knowledge_docs"
     _VECTOR_DIM = settings.MILVUS_DIM or 1536
+    _EMBEDDING_LOAD_TIMEOUT = 10.0
 
     def __init__(self):
         self._connected = False
         self._collection: Optional[Any] = None  # pymilvus.Collection
-        self._embedding = get_embedder()
+        self._embedding = None
+        self._embedding_load_started = False
         self._connect()
+        if self._connected:
+            self._ensure_embedding()
 
     # ==================================================================
     # Connection Management
@@ -102,6 +107,51 @@ class VectorService:
             logger.warning("[VectorService] Cannot connect to Milvus: %s. Falling back to keyword.", exc)
             self._connected = False
             return False
+
+    def _ensure_embedding(self) -> bool:
+        """Load the embedding service with a hard timeout.
+
+        BGE/SentenceTransformer may download model weights on first use.  We
+        must not let a slow or unreachable model download block the streaming
+        chat endpoint indefinitely.  On timeout this VectorService instance
+        keeps keyword fallback for the current request; a background thread may
+        finish loading the shared embedder for later requests.
+        """
+        if self._embedding is not None:
+            return True
+        if self._embedding_load_started:
+            return False
+
+        self._embedding_load_started = True
+        result: Dict[str, Any] = {}
+
+        def _load() -> None:
+            try:
+                result["embedder"] = get_embedder()
+            except Exception as exc:  # noqa: BLE001 - keep fallback alive
+                result["error"] = exc
+
+        thread = threading.Thread(target=_load, daemon=True)
+        thread.start()
+        thread.join(self._EMBEDDING_LOAD_TIMEOUT)
+
+        if thread.is_alive():
+            logger.error(
+                "[VectorService] Embedding model load exceeded %.1fs; "
+                "using keyword fallback for this request",
+                self._EMBEDDING_LOAD_TIMEOUT,
+            )
+            return False
+
+        if "embedder" in result:
+            self._embedding = result["embedder"]
+            return True
+
+        logger.error(
+            "[VectorService] Embedding model load failed: %s",
+            result.get("error"),
+        )
+        return False
 
     def _ensure_collection(self) -> None:
         """确保 collection 存在，不存在则创建。"""
@@ -173,6 +223,9 @@ class VectorService:
         try:
             if self._collection is None:
                 return []
+            if self._embedding is None:
+                logger.warning("[VectorService] Embedding service unavailable, returning empty")
+                return []
 
             # 1. 生成查询嵌入向量
             start_time = time.time()
@@ -241,6 +294,9 @@ class VectorService:
 
         try:
             if self._collection is None:
+                return 0
+            if self._embedding is None:
+                logger.warning("[VectorService] Embedding service unavailable, skipping index")
                 return 0
 
             # 1. 删除旧向量（如果存在）

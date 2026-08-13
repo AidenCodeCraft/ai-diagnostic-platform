@@ -334,14 +334,33 @@ class DiagnosticChatAgent:
         # 子问题分解
         sub_questions = self._decompose(text)
 
-        return {
+        # 计算规则置信度
+        # 置信度 = min(1.0, 匹配关键词数 / 4)，匹配 4+ 个关键词 → 高置信度
+        keyword_confidence = min(1.0, len(matched) / 4.0)
+        # 如果有关键词命中，基础置信度至少 0.4
+        if matched:
+            keyword_confidence = max(0.4, keyword_confidence)
+
+        rule_result = {
             "is_diagnostic": is_diagnostic,
             "is_simple": is_simple,
             "score": total_score,
             "matched_keywords": matched[:10],
             "topics": topics,
             "sub_questions": sub_questions,
+            "confidence": keyword_confidence,
         }
+
+        # DeepSeek 推理增强（仅在置信度低且为诊断问题时触发）
+        if is_diagnostic and keyword_confidence < 0.6:
+            try:
+                from app.services.chat.deepseek_analysis import DeepSeekQuestionAnalyzer
+                analyzer = DeepSeekQuestionAnalyzer(model=self._provider_name)
+                rule_result = analyzer.analyze(text, rule_result)
+            except Exception:
+                logger.debug("[_analyze_question] DeepSeek enhancement skipped", exc_info=True)
+
+        return rule_result
 
     def _decompose(self, text: str) -> list[str]:
         """将复合问题分解为子问题列表。"""

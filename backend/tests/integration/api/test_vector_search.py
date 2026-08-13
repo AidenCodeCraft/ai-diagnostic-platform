@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.knowledge.embedding import CompositeEmbedder, get_embedder
+from app.services.knowledge.embedding import EmbeddingService, get_embedder
 from app.services.knowledge.vector_service import VectorService
 
 

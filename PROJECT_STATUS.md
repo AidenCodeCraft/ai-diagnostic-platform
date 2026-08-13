@@ -184,41 +184,94 @@ v1.0.0 — 企业版
 
 ### v0.5 — 平台化增强（全部完成）
 
-| 优先级 | 模块 | 状态 |
-|--------|------|------|
-| 🔴 P0 | 用户认证系统 | ✅ |
-| 🔴 P0 | 项目管理 | ✅ |
-| 🔴 P0 | Milvus 向量搜索 | ✅ |
-| 🔴 P0 | 对话式交互界面 | ✅ |
-| 🔴 P0 | 模型插件化管理 | ✅ |
-| 🔴 P0 | 左侧边栏重构 | ✅ |
-| 🔴 P0 | 多轮实时对话 | ✅ |
-| 🟡 P1 | 多格式知识导入 | ✅ |
-| 🟡 P1 | 扩展解析器 | ✅ |
-| 🟡 P1 | 规则引擎增强 | ✅ |
-| 🟢 P2 | LLM 多模型支持 | ✅ |
+| 优先级   | 模块          | 状态 |
+|-------|-------------|----|
+| 🔴 P0 | 用户认证系统      | ✅  |
+| 🔴 P0 | 项目管理        | ✅  |
+| 🔴 P0 | Milvus 向量搜索 | ✅  |
+| 🔴 P0 | 对话式交互界面     | ✅  |
+| 🔴 P0 | 模型插件化管理     | ✅  |
+| 🔴 P0 | 左侧边栏重构      | ✅  |
+| 🔴 P0 | 多轮实时对话      | ✅  |
+| 🟡 P1 | 多格式知识导入     | ✅  |
+| 🟡 P1 | 扩展解析器       | ✅  |
+| 🟡 P1 | 规则引擎增强      | ✅  |
+| 🟢 P2 | LLM 多模型支持   | ✅  |
 
 ---
 
 ## 测试覆盖
 
-**172 个测试 — 全部通过**
+**417 个测试已收集，306 个单元测试全部通过**
 
-| 模块 | 测试数 |
-|------|--------|
-| Agent 框架 | 21 |
-| 日志管理 | 14 |
-| 解析引擎 | 37 |
-| 分析任务 | 15 |
-| LLM 集成 | 12 |
-| 知识库 | 18 |
-| 报告系统 | 6 |
-| 插件系统 | 20 |
-| 项目管理 | 7 |
-| 用户认证 | 7 |
-| 健康检查 & 配置 | 8 |
-| 集成测试 | 7 |
-| **总计** | **172** |
+| 模块        | 测试数     |
+|-----------|---------|
+| Agent 框架  | 21      |
+| 日志管理      | 14      |
+| 解析引擎      | 37      |
+| 分析任务      | 15      |
+| LLM 集成    | 12      |
+| 知识库       | 18      |
+| 报告系统      | 6       |
+| 插件系统      | 20      |
+| 项目管理      | 7       |
+| 用户认证      | 7       |
+| 健康检查 & 配置 | 8       |
+| 集成测试      | 7       |
+| 单元测试（服务层） | ~150    |
+| **总计**    | **417** |
+
+---
+
+## v1.1 — RAG 架构增强（2026-08-12 完成）
+
+> 参照 DeepSeek 等主流 LLM 的 RAG 架构，对检索、上下文管理、推理调度等核心模块进行系统性增强。
+
+### 已完成改造
+
+| 阶段 | 模块                  | 说明                                             |
+|----|---------------------|------------------------------------------------|
+| 1  | TokenCounter        | 模型感知的精确 Token 计数（tiktoken + 启发式回退）             |
+| 1  | ContextManager      | 模型感知动态预算 + LLM 智能对话摘要                          |
+| 1  | RAG 上下文组装           | `_build_context` 按模型预算填充，替换硬编码 700K            |
+| 2  | LLM Reranker        | Cross-Encoder 低置信度时触发 DeepSeek 辅助精排            |
+| 2  | RerankerConfig      | 新增 `llm_fallback_enabled/threshold/timeout` 配置 |
+| 3  | DeepSeek 分析         | 规则评分置信度低时触发 LLM 增强问题分析                         |
+| 3  | DiagnosticChatAgent | `_analyze_question` 集成推理增强                     |
+| 4  | Provider 健康度        | 成功率/延迟追踪 + 智能路由建议                              |
+| 4  | ProviderRegistry    | 集成健康度追踪器                                       |
+
+### 新增文件
+
+| 文件                             | 说明                   |
+|--------------------------------|----------------------|
+| `core/token_counter.py`        | 模型感知 Token 计数器       |
+| `knowledge/llm_reranker.py`    | LLM-as-Reranker 辅助精排 |
+| `chat/deepseek_analysis.py`    | DeepSeek 推理增强问题分析    |
+| `knowledge/provider_health.py` | Provider 健康度追踪       |
+
+### 修改文件
+
+| 文件                               | 改动                                               |
+|----------------------------------|--------------------------------------------------|
+| `core/config.py`                 | ContextConfig 动态预算 + RerankerConfig LLM fallback |
+| `core/__init__.py`               | 导出新模块                                            |
+| `chat/context_manager.py`        | 完全重写：动态预算 + LLM 摘要                               |
+| `chat/chat_service.py`           | ContextManager 传入 model 参数                       |
+| `chat/diagnostic_chat_agent.py`  | 集成 DeepSeek 推理增强                                 |
+| `rag/rag_service.py`             | TokenCounter + LLM Reranker 集成                   |
+| `knowledge/provider_registry.py` | 健康度追踪集成                                          |
+| `requirements.txt`               | 新增 tiktoken>=0.7.0                               |
+
+### 验证结果
+
+- TokenCounter: 模型上下文窗口正确（deepseek-v4=1M, gpt-4o=128K, unknown=32K）
+- 动态预算: deepseek-v4 chat=600K, RAG=696K
+- ContextManager: 模型感知预算 + should_compress 逻辑正确
+- LLM Reranker: should_trigger / parse 逻辑正确
+- DeepSeek Analysis: should_enhance / merge 逻辑正确
+- Provider Health: 统计/评分/路由逻辑正确
+- 单元测试: 306 passed（无回归）
 
 ---
 
@@ -293,49 +346,49 @@ docker compose up -d --build
 
 ### P0 — 打通基础多轮对话
 
-| 任务 | 层 | 说明 |
-|------|-----|------|
-| `BaseProvider.chat(messages[])` | Provider | 新增多轮对话方法，DeepSeek + OpenAI 兼容 Provider 均实现 |
-| `ChatService.send_message()` | Service | 组装历史消息 → 调用 LLM Provider.chat() → 存储 AI 回复 → 返回 |
-| `POST /chat-sessions/{id}/chat` | API | 新增聊天端点，接收用户消息返回 AI 回复 |
-| `chat.ts` 新增 API 方法 | 前端 API | `createSession()` / `sendMessage()` / `getMessages()` |
-| `ChatLayout.sendMessage()` 改造 | 前端 UI | 从 localStorage 改为调用后端 chat API，对话历史服务端持久化 |
-| 对话历史从 localStorage 迁移 | 数据 | 最近对话列表从服务端加载，支持跨设备同步 |
+| 任务                              | 层        | 说明                                                    |
+|---------------------------------|----------|-------------------------------------------------------|
+| `BaseProvider.chat(messages[])` | Provider | 新增多轮对话方法，DeepSeek + OpenAI 兼容 Provider 均实现            |
+| `ChatService.send_message()`    | Service  | 组装历史消息 → 调用 LLM Provider.chat() → 存储 AI 回复 → 返回       |
+| `POST /chat-sessions/{id}/chat` | API      | 新增聊天端点，接收用户消息返回 AI 回复                                 |
+| `chat.ts` 新增 API 方法             | 前端 API   | `createSession()` / `sendMessage()` / `getMessages()` |
+| `ChatLayout.sendMessage()` 改造   | 前端 UI    | 从 localStorage 改为调用后端 chat API，对话历史服务端持久化             |
+| 对话历史从 localStorage 迁移           | 数据       | 最近对话列表从服务端加载，支持跨设备同步                                  |
 
 ### P1 — 流式输出
 
-| 任务 | 说明 |
-|------|------|
-| Provider 支持 stream 模式 | 使用 SSE 逐 token 返回 |
-| `POST /chat-sessions/{id}/stream` | SSE 端点 |
-| 前端 EventSource 流式渲染 | 逐字打字效果，替代等待 spinner |
+| 任务                                | 说明                  |
+|-----------------------------------|---------------------|
+| Provider 支持 stream 模式             | 使用 SSE 逐 token 返回   |
+| `POST /chat-sessions/{id}/stream` | SSE 端点              |
+| 前端 EventSource 流式渲染               | 逐字打字效果，替代等待 spinner |
 
 ### P2 — 诊断聊天智能化
 
-| 任务 | 说明 |
-|------|------|
-| `DiagnosticChatAgent` | 基于 Agent 框架的多轮诊断对话 Agent |
-| Function Calling / Tool Use | LLM 在对话中触发日志解析/知识库搜索/分析工具 |
-| 上下文自动注入 | 上传日志后分析结果自动注入对话上下文 |
-| 追问与澄清 | Agent 主动追问缺失信息（设备型号、固件版本等） |
+| 任务                          | 说明                         |
+|-----------------------------|----------------------------|
+| `DiagnosticChatAgent`       | 基于 Agent 框架的多轮诊断对话 Agent   |
+| Function Calling / Tool Use | LLM 在对话中触发日志解析/知识库搜索/分析工具  |
+| 上下文自动注入                     | 上传日志后分析结果自动注入对话上下文         |
+| 追问与澄清                       | Agent 主动追问缺失信息（设备型号、固件版本等） |
 
 ### P3 — 体验增强
 
-| 任务 | 说明 |
-|------|------|
-| 对话分支 | 用户可回溯到某条消息重新生成回复 |
-| 消息操作 | 复制 / 重新生成 / 点赞踩 |
-| 上下文窗口管理 | 长对话自动摘要压缩，避免超出 token 限制 |
-| Markdown 渲染 | AI 回复中的表格/代码块正确渲染 |
+| 任务          | 说明                      |
+|-------------|-------------------------|
+| 对话分支        | 用户可回溯到某条消息重新生成回复        |
+| 消息操作        | 复制 / 重新生成 / 点赞踩         |
+| 上下文窗口管理     | 长对话自动摘要压缩，避免超出 token 限制 |
+| Markdown 渲染 | AI 回复中的表格/代码块正确渲染       |
 
 ### 工作量估算
 
-| 阶段 | 后端 | 前端 | 前端 API | 预估 |
-|------|------|------|----------|------|
-| P0 基础对话 | Provider + Service + API | ChatLayout 改造 | chat.ts 重写 | 中 |
-| P1 流式输出 | SSE 端点 | 流式渲染 | EventSource | 小 |
-| P2 智能诊断 | DiagnosticChatAgent | 上下文 UI | — | 大 |
-| P3 体验增强 | — | UI 组件 | — | 中 |
+| 阶段      | 后端                       | 前端            | 前端 API      | 预估 |
+|---------|--------------------------|---------------|-------------|----|
+| P0 基础对话 | Provider + Service + API | ChatLayout 改造 | chat.ts 重写  | 中  |
+| P1 流式输出 | SSE 端点                   | 流式渲染          | EventSource | 小  |
+| P2 智能诊断 | DiagnosticChatAgent      | 上下文 UI        | —           | 大  |
+| P3 体验增强 | —                        | UI 组件         | —           | 中  |
 
 ---
 
@@ -343,45 +396,45 @@ docker compose up -d --build
 
 ### v1.0 — 企业版
 
-| 优先级 | 模块 | 状态 |
-|--------|------|------|
-| 🔴 P0 | 多租户架构 | ✅ 完成 |
-| 🔴 P0 | RBAC 权限 | ✅ 完成 |
-| 🔴 P0 | 登录与防爆破 | ✅ 完成 |
-| 🔴 P0 | 管理后台 | ✅ 完成 |
-| 🔴 P0 | 知识库管理 | ✅ 完成 |
-| 🟡 P1 | Bug 案例系统 | ✅ 完成 |
+| 优先级   | 模块          | 状态     |
+|-------|-------------|--------|
+| 🔴 P0 | 多租户架构       | ✅ 完成   |
+| 🔴 P0 | RBAC 权限     | ✅ 完成   |
+| 🔴 P0 | 登录与防爆破      | ✅ 完成   |
+| 🔴 P0 | 管理后台        | ✅ 完成   |
+| 🔴 P0 | 知识库管理       | ✅ 完成   |
+| 🟡 P1 | Bug 案例系统    | ✅ 完成   |
 | 🔴 P0 | 核心对话功能（阶段三） | 🚧 进行中 |
-| 🟢 P2 | 插件市场 | ⏳ 计划中 |
-| 🟢 P2 | 开放 API | ✅ 完成 |
+| 🟢 P2 | 插件市场        | ⏳ 计划中  |
+| 🟢 P2 | 开放 API      | ✅ 完成   |
 
 ### 阶段三 P0：基础多轮对话 — 🚧 进行中
 
 打通对话闭环，v1.0 所有功能正常可用。
 
-| 任务 | 层 | 说明 |
-|------|-----|------|
-| `BaseProvider.chat(messages[])` | Provider | 新增多轮对话方法，DeepSeek + OpenAI 兼容 Provider 均实现 |
-| `ChatService.send_message()` | Service | 组装历史消息 → 调用 LLM → 存储 AI 回复 |
-| `POST /chat-sessions/{id}/chat` | API | 新增聊天端点，接收用户消息返回 AI 回复 |
-| `chat.ts` 新增 API 方法 | 前端 API | `createSession()` / `sendMessage()` / `getMessages()` |
-| `ChatLayout.sendMessage()` 改造 | 前端 UI | 从 localStorage 改为调用后端 chat API，服务端持久化 |
+| 任务                              | 层        | 说明                                                    |
+|---------------------------------|----------|-------------------------------------------------------|
+| `BaseProvider.chat(messages[])` | Provider | 新增多轮对话方法，DeepSeek + OpenAI 兼容 Provider 均实现            |
+| `ChatService.send_message()`    | Service  | 组装历史消息 → 调用 LLM → 存储 AI 回复                            |
+| `POST /chat-sessions/{id}/chat` | API      | 新增聊天端点，接收用户消息返回 AI 回复                                 |
+| `chat.ts` 新增 API 方法             | 前端 API   | `createSession()` / `sendMessage()` / `getMessages()` |
+| `ChatLayout.sendMessage()` 改造   | 前端 UI    | 从 localStorage 改为调用后端 chat API，服务端持久化                 |
 
 ### 阶段三 P1：流式输出 — ⏳
 
-| 任务 | 说明 |
-|------|------|
-| Provider stream 模式 | SSE 逐 token 返回 |
-| `POST /chat-sessions/{id}/stream` | SSE 端点 |
-| 前端流式渲染 | 逐字打字效果 |
+| 任务                                | 说明             |
+|-----------------------------------|----------------|
+| Provider stream 模式                | SSE 逐 token 返回 |
+| `POST /chat-sessions/{id}/stream` | SSE 端点         |
+| 前端流式渲染                            | 逐字打字效果         |
 
 ### 阶段三 P2：诊断聊天智能化 — ⏳
 
-| 任务 | 说明 |
-|------|------|
-| `DiagnosticChatAgent` | 多轮诊断对话 Agent |
-| Function Calling | LLM 在对话中触发日志分析/知识库搜索工具 |
-| 上下文自动注入 | 上传日志后分析结果自动注入对话 |
+| 任务                    | 说明                     |
+|-----------------------|------------------------|
+| `DiagnosticChatAgent` | 多轮诊断对话 Agent           |
+| Function Calling      | LLM 在对话中触发日志分析/知识库搜索工具 |
+| 上下文自动注入               | 上传日志后分析结果自动注入对话        |
 
 ### v2.0 — 未来规划
 

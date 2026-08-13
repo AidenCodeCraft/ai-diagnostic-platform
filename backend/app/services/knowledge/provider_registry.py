@@ -54,8 +54,18 @@ class ProviderRegistry:
         "deepseek": DeepSeekProvider,
     }
 
-    def __init__(self) -> None:
+    def __init__(self, enable_health_tracking: bool = True) -> None:
         self.providers = dict(self.PROVIDER_MAP)
+        self._enable_health = enable_health_tracking
+        self._health_tracker = None
+
+    @property
+    def health_tracker(self):
+        """懒加载健康度追踪器。"""
+        if self._health_tracker is None and self._enable_health:
+            from app.services.knowledge.provider_health import get_provider_health_tracker
+            self._health_tracker = get_provider_health_tracker()
+        return self._health_tracker
 
     def get_provider(self, provider_or_model: Optional[str] = None) -> BaseProvider:
         """Return a provider instance for the given name/model.

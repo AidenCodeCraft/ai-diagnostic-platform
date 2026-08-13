@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 import hashlib
+import importlib.util
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -16,13 +17,11 @@ from app.services.core.config import EmbeddingConfig
 
 logger = logging.getLogger(__name__)
 
-# 启动依赖检查
-_sentence_transformers_available = False
-try:
-    from sentence_transformers import SentenceTransformer  # noqa: F401
-    _sentence_transformers_available = True
-except ImportError:
-    pass
+# Detect the optional sentence-transformers dependency without importing it.
+# The actual import is deliberately deferred to BGEEmbedder._init_model();
+# otherwise every knowledge search would pay the torch import cost even when
+# Milvus is disabled and we only need keyword search.
+_sentence_transformers_available = importlib.util.find_spec("sentence_transformers") is not None
 
 
 class BGEEmbedder(IEmbedder):

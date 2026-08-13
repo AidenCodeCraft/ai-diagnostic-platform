@@ -195,6 +195,33 @@ class RAGService:
             candidates.sort(key=lambda x: x.score, reverse=True)
         stages["rerank_ms"] = round((time.time() - t2) * 1000, 1)
 
+        # Stage 3.5: LLM 辅助重排序（Cross-Encoder 置信度不足时触发）
+        if self.config.reranker.llm_fallback_enabled:
+            t2_5 = time.time()
+            ce_scores = [r.rerank_score for r in candidates if r.rerank_score > 0]
+            try:
+                from app.services.knowledge.llm_reranker import LLMReranker
+                llm_reranker = LLMReranker(
+                    model=self.model or "deepseek-chat",
+                    confidence_threshold=self.config.reranker.llm_fallback_threshold,
+                    timeout=self.config.reranker.llm_fallback_timeout,
+                )
+                llm_ranked = llm_reranker.rerank(
+                    query=query,
+                    documents=[(i, r.chunk.text) for i, r in enumerate(candidates)],
+                    cross_encoder_scores=ce_scores,
+                    top_k=self.config.reranker.top_k,
+                )
+                if llm_ranked:
+                    # LLM 重排序结果替换 Cross-Encoder 排序
+                    for idx, llm_score in llm_ranked:
+                        if 0 <= idx < len(candidates):
+                            candidates[idx].score = llm_score
+                    candidates.sort(key=lambda x: x.score, reverse=True)
+                    stages["llm_rerank_ms"] = round((time.time() - t2_5) * 1000, 1)
+            except Exception as e:
+                logger.debug("[RAG] LLM reranker skipped: %s", e)
+
         # Stage 4: 截断
         final = candidates[:self.config.reranker.top_k]
 
@@ -215,42 +242,71 @@ class RAGService:
     # ==================================================================
 
     def _build_context(self, query: str, results: List[SearchResult]) -> str:
-        """组装 RAG 上下文，仅按总 tokens 统一控制。
+        """组装 RAG 上下文，按模型感知的 token 预算填充。
 
         不限制文档数量，不限制单篇文档大小。
-        按相关度从高到低填充，超出 max_tokens 则停止。
+        按相关度从高到低填充，超出预算则停止。
         """
-        max_tokens = self.config.context.max_tokens
-        chars_per_token = 1.0 / 0.6  # 中文 ≈ 1.67 字符/token
-        max_chars = int(max_tokens * chars_per_token)
+        # 模型感知的动态预算
+        model = self.model or "deepseek-chat"
+        try:
+            from app.services.core.token_counter import get_token_counter
+            max_tokens = self.config.context.get_rag_budget(model)
+        except Exception:
+            max_tokens = self.config.context.max_tokens
 
         parts = []
-        total_chars = 0
+        total_tokens = 0
 
         for i, r in enumerate(results):
             title = r.chunk.doc_title or "Untitled"
             header = f"{i + 1}. **{title}** (相关度: {r.score:.0%})\n   "
-            header_chars = len(header)
 
-            remaining = max_chars - total_chars - header_chars
-            if remaining <= 0:
-                logger.info(
-                    "[RAG] Token budget exhausted at doc %d/%d (%d tokens)",
-                    i, len(results), max_tokens,
-                )
+            # 估算 header + text 的 token 数
+            header_tokens = self._estimate_single_text_tokens(header)
+            text_tokens = self._estimate_single_text_tokens(r.chunk.text)
+
+            if total_tokens + header_tokens + text_tokens > max_tokens:
+                # 尝试截断文本以适配剩余预算
+                remaining = max_tokens - total_tokens - header_tokens
+                if remaining > 50:  # 至少保留 50 tokens 才有意义
+                    truncated = self._truncate_text_to_tokens(r.chunk.text, remaining)
+                    total_tokens += header_tokens + self._estimate_single_text_tokens(truncated)
+                    parts.append(header + truncated)
+                else:
+                    logger.info(
+                        "[RAG] Token budget exhausted at doc %d/%d (%d/%d tokens)",
+                        i, len(results), total_tokens, max_tokens,
+                    )
                 break
 
-            text = r.chunk.text[:remaining]
-            total_chars += header_chars + len(text)
-            parts.append(header + text)
+            total_tokens += header_tokens + text_tokens
+            parts.append(header + r.chunk.text)
 
         context = "\n\n".join(parts)
-        estimated_tokens = int(len(context) * 0.6)
         logger.info(
-            "[RAG] Context: %d/%d docs, %d chars ≈ %d tokens (budget: %d tokens)",
-            len(parts), len(results), len(context), estimated_tokens, max_tokens,
+            "[RAG] Context: %d/%d docs, ~%d tokens (budget: %d tokens, model: %s)",
+            len(parts), len(results), total_tokens, max_tokens, model,
         )
         return context
+
+    def _estimate_single_text_tokens(self, text: str) -> int:
+        """估算单段文本的 token 数。"""
+        try:
+            from app.services.core.token_counter import get_token_counter
+            return get_token_counter().count(text, model=self.model or "default")
+        except Exception:
+            return int(len(text) * 0.6)
+
+    def _truncate_text_to_tokens(self, text: str, max_tokens: int) -> str:
+        """将文本截断到指定 token 数以内。"""
+        if max_tokens <= 0:
+            return ""
+        # 保守策略：按 1 token ≈ 0.6 中文字符 截断
+        max_chars = int(max_tokens / 0.6)
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "…"
 
     # ==================================================================
     # LLM 生成

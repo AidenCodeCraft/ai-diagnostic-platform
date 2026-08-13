@@ -111,6 +111,10 @@ def chat_stream(
     """Stream AI reply via SSE with diagnostic context injection."""
 
     def generate():
+        # Send an initial heartbeat immediately. Without this, Nginx/Vite may
+        # close the chunked response before the potentially slow
+        # enrichment/knowledge-retrieval phase has produced its first token.
+        yield 'data: {"status":"start"}\n\n'
         try:
             yield from ChatService(db).send_message_stream(
                 session_id=session_id,
