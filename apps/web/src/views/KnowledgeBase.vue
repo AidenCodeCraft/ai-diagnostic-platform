@@ -134,31 +134,35 @@
         </div>
       </div>
       <div class="preview-layout">
-        <!-- 左侧目录 -->
-        <aside class="preview-sidebar">
-          <div class="sidebar-section sidebar-toc">
-            <div class="section-header">
-              <span class="section-title">📑 目录</span>
-            </div>
-            <div class="toc-body">
-              <template v-if="tocItems.length">
-                <div
-                  v-for="(item, i) in tocItems"
-                  :key="i"
-                  class="toc-item"
-                  :style="{ paddingLeft: (item.level - 1) * 14 + 8 + 'px' }"
-                  :class="{ 'toc-active': item.level === 1 }"
-                  @click="scrollToTocAnchor(item.anchorId)"
-                >{{ item.text }}</div>
-              </template>
-              <div v-else class="toc-empty">暂无标题</div>
-            </div>
-          </div>
-        </aside>
-        <!-- 右侧预览 -->
-        <div class="preview-body">
+        <!-- 右侧预览（正文全宽） -->
+        <div class="preview-body" @scroll.passive="onPreviewScroll">
           <component :is="VMdEditor.Preview" :text="form.content" />
         </div>
+        <!-- 右侧悬浮目录（docsify 风格） -->
+        <nav
+          v-if="tocItems.length"
+          class="toc-float"
+          :class="{ 'toc-float-expanded': tocHovered }"
+          @mouseenter="tocHovered = true"
+          @mouseleave="tocHovered = false"
+        >
+          <button class="toc-float-toggle" @click="tocHovered = !tocHovered" title="目录">
+            <span class="toc-float-dot" :style="{ top: tocProgress + '%' }" />
+          </button>
+          <div class="toc-float-panel">
+            <div class="toc-float-title">目录</div>
+            <div
+              v-for="(item, i) in tocItems"
+              :key="i"
+              class="toc-item"
+              :class="[
+                { 'toc-active': activeTocId === item.anchorId },
+                `toc-level-${item.level}`,
+              ]"
+              @click="scrollToTocAnchor(item.anchorId)"
+            >{{ item.text }}</div>
+          </div>
+        </nav>
       </div>
     </div>
 
@@ -321,14 +325,65 @@ const tocItems = computed(() => {
   })
 })
 
+// 右侧悬浮目录交互状态
+const tocHovered = ref(false)
+const activeTocId = ref('')
+const tocProgress = ref(0)  // 0~100，用于右侧进度圆点定位
+
 function scrollToTocAnchor(anchorId: string) {
   const el = document.getElementById(anchorId)
   if (el) {
     el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    activeTocId.value = anchorId
   }
 }
 
-// 预览渲染后统一处理：注入标题锚点 + 替换图片短引用
+// Scrollspy：滚动时高亮当前章节 + 更新进度圆点
+let scrollObserver: IntersectionObserver | null = null
+
+function onPreviewScroll() {
+  // 节流在 IntersectionObserver 回调里处理，这里仅用于进度计算兜底
+  updateTocProgress()
+}
+
+function updateTocProgress() {
+  const body = document.querySelector('.preview-body') as HTMLElement | null
+  if (!body) return
+  const max = body.scrollHeight - body.clientHeight
+  if (max <= 0) { tocProgress.value = 0; return }
+  tocProgress.value = Math.min(100, Math.max(0, (body.scrollTop / max) * 100))
+}
+
+function setupScrollSpy() {
+  const body = document.querySelector('.preview-body') as HTMLElement | null
+  if (!body) return
+
+  // 断开旧的观察器（切换文档时重建，观察新的标题元素）
+  if (scrollObserver) {
+    scrollObserver.disconnect()
+    scrollObserver = null
+  }
+  activeTocId.value = ''
+  tocProgress.value = 0
+
+  scrollObserver = new IntersectionObserver(
+    (entries) => {
+      // 取当前视口中「最靠上且仍可见」的标题
+      const visible = entries
+        .filter(e => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+      if (visible.length > 0) {
+        activeTocId.value = visible[0].target.id
+      }
+      updateTocProgress()
+    },
+    { root: body, rootMargin: '-10% 0px -70% 0px', threshold: 0 },
+  )
+
+  body.querySelectorAll('h1, h2, h3').forEach(el => scrollObserver!.observe(el))
+}
+
+// 预览渲染后统一处理：注入标题锚点 + 替换图片短引用 + 建立 Scrollspy
 function afterPreviewRender() {
   setTimeout(() => {
     const previewBody = document.querySelector('.preview-body') as HTMLElement | null
@@ -348,6 +403,10 @@ function afterPreviewRender() {
         (img as HTMLImageElement).src = imageStore.get(id)!
       }
     })
+
+    // 3. 建立滚动监听（Scrollspy）
+    setupScrollSpy()
+    updateTocProgress()
   }, 150)
 }
 
@@ -589,6 +648,10 @@ onBeforeUnmount(() => {
     }
     pasteHandler = null
   }
+  if (scrollObserver) {
+    scrollObserver.disconnect()
+    scrollObserver = null
+  }
 })
 
 // ============================================================
@@ -651,52 +714,110 @@ function handleSort(cmd: string) { sortOrder.value = cmd; fetch() }
 .empty-icon { font-size: 56px; margin-bottom: 16px; opacity: 0.5; }
 .empty-title { font-size: 18px; font-weight: 500; color: #4b5563; margin-bottom: 8px; }
 .empty-desc { font-size: 14px; color: #9ca3af; }
-/* 预览页 — 左侧目录 + 右侧预览 */
+/* 预览页 — 正文全宽 + 右侧悬浮目录 */
 .preview-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-shrink: 0; }
 .preview-header-left { display: flex; align-items: center; gap: 8px; }
 .preview-header-right { display: flex; gap: 8px; }
 .preview-header-title { font-size: 18px; font-weight: 600; color: #1f2937; }
-.preview-layout { display: flex; gap: 0; height: calc(100vh - 180px); }
-/* 左侧目录面板 — 自适应内容高度 */
-.preview-sidebar {
-  width: 200px; flex-shrink: 0;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px 0 0 10px;
-  display: flex; flex-direction: column;
-  overflow: hidden;
-}
-.sidebar-section { display: flex; flex-direction: column; overflow: hidden; }
-.sidebar-toc {
-  display: flex; flex-direction: column;
-  max-height: 100%;
-  overflow: hidden;
-}
-.section-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 12px 8px;
-  flex-shrink: 0;
-}
-.section-title { font-size: 13px; font-weight: 600; color: #374151; }
-.section-action { font-size: 14px; color: #6b7280; cursor: pointer; user-select: none; }
-.section-action:hover { color: #2563eb; }
-.toc-empty { padding: 8px 12px; font-size: 12px; color: #9ca3af; }
-/* 目录列表 — 内容溢出时滚动 */
-.toc-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 0 8px;
-  max-height: 100%;
-}
-.toc-item {
-  padding: 3px 12px; font-size: 12px; color: #6b7280;
-  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  transition: background 0.1s;
-}
-.toc-item:hover { background: #e5e7eb; color: #374151; }
-.toc-active { color: #2563eb; font-weight: 500; }
+.preview-layout { position: relative; display: flex; gap: 0; height: calc(100vh - 180px); }
 
-.preview-body { flex: 1; overflow-y: auto; padding: 24px; background: #fff; border: 1px solid #e5e7eb; border-left: none; border-radius: 0 10px 10px 0; }
+.preview-body {
+  flex: 1; overflow-y: auto; padding: 24px 48px 24px 24px;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  scroll-behavior: smooth;
+}
+
+/* ============================================================
+   右侧悬浮目录（docsify 风格）
+   - 收起时仅显示一条竖向进度条 + 圆点
+   - 悬停展开为完整目录面板
+   ============================================================ */
+.toc-float {
+  position: absolute;
+  right: 12px; top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+}
+
+/* 收起态的竖向进度条 */
+.toc-float-toggle {
+  position: relative;
+  width: 3px; height: 120px;
+  background: #e5e7eb;
+  border: none; border-radius: 2px;
+  cursor: pointer; padding: 0;
+  transition: width 0.15s;
+}
+.toc-float-toggle:hover { width: 5px; background: #d1d5db; }
+
+/* 当前阅读位置圆点 */
+.toc-float-dot {
+  position: absolute;
+  left: 50%; top: 0;
+  width: 9px; height: 9px;
+  background: #2563eb;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px #2563eb;
+  transition: top 0.2s ease;
+  pointer-events: none;
+}
+
+/* 悬停展开的目录面板 */
+.toc-float-panel {
+  position: absolute;
+  right: 16px; top: 50%;
+  transform: translateY(-50%);
+  width: 220px; max-height: 70vh;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  padding: 8px 0;
+  opacity: 0; visibility: hidden;
+  transition: opacity 0.15s ease, visibility 0.15s;
+}
+.toc-float-expanded .toc-float-panel { opacity: 1; visibility: visible; }
+
+.toc-float-title {
+  padding: 4px 14px 8px;
+  font-size: 12px; font-weight: 600; color: #9ca3af;
+  border-bottom: 1px solid #f3f4f6; margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+
+.toc-item {
+  padding: 5px 14px; font-size: 12px; color: #6b7280;
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: background 0.1s, color 0.1s;
+  line-height: 1.5;
+}
+.toc-item:hover { background: #f3f4f6; color: #374151; }
+
+/* 层级视觉：h1/h2/h3 不同缩进与字重 */
+.toc-level-1 { font-weight: 600; color: #374151; padding-left: 14px; }
+.toc-level-2 { padding-left: 26px; }
+.toc-level-3 { padding-left: 38px; color: #9ca3af; font-size: 11px; }
+
+/* 当前阅读章节高亮 */
+.toc-active {
+  color: #2563eb;
+  background: #eff6ff;
+  border-left: 2px solid #2563eb;
+  font-weight: 600;
+}
+.toc-level-1.toc-active { padding-left: 12px; }
+.toc-level-2.toc-active { padding-left: 24px; }
+.toc-level-3.toc-active { padding-left: 36px; }
+
+/* 移动端：隐藏悬浮目录，改为全宽阅读 */
+@media (max-width: 768px) {
+  .toc-float { display: none; }
+  .preview-body { padding: 16px; }
+}
 .kb-editor-page { display: flex; flex-direction: column; height: calc(100vh - 140px); }
 .editor-body { flex: 1; min-height: 0; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
 .md-preview { padding: 16px 20px; font-size: 14px; line-height: 1.8; }

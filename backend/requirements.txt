@@ -13,7 +13,6 @@ python-multipart==0.0.9
 pymilvus==2.5.4
 prometheus-client==0.21.0
 
-# RAG 引擎核心依赖
-sentence-transformers>=3.0.0    # BGE Embedding + BGE-Reranker
+# RAG 引擎核心依赖（轻量，生产必需）
 rank-bm25>=0.2.2                # BM25 稀疏检索
 tiktoken>=0.7.0                 # 精确 Token 计数（模型感知上下文管理）

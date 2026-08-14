@@ -109,6 +109,8 @@ class DeepSeekQuestionAnalyzer:
 
     def _call_deepseek_analyze(self, user_input: str) -> Dict[str, Any]:
         """调用 DeepSeek 进行深度问题分析。"""
+        import concurrent.futures
+
         prompt = (
             "你是一个诊断问题分析助手。请分析以下用户输入，判断：\n"
             "1. 是否为技术诊断类问题\n"
@@ -125,28 +127,16 @@ class DeepSeekQuestionAnalyzer:
             '"reasoning": "简要推理过程"}'
         )
 
-        import threading
-
-        result: Dict[str, str] = {}
-
-        def _run() -> None:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(self._do_llm_call, prompt)
             try:
-                result["response"] = self._do_llm_call(prompt)
-            except Exception as exc:  # noqa: BLE001 - caller falls back to rules
-                result["error"] = str(exc)
+                response = future.result(timeout=self.timeout)
+            except concurrent.futures.TimeoutError:
+                raise TimeoutError(
+                    f"DeepSeek analysis timed out after {self.timeout}s"
+                )
 
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
-        thread.join(self.timeout)
-
-        if thread.is_alive():
-            raise TimeoutError(
-                f"DeepSeek analysis timed out after {self.timeout}s"
-            )
-        if "error" in result:
-            raise RuntimeError(result["error"])
-
-        return self._parse_response(result.get("response", ""))
+        return self._parse_response(response)
 
     def _do_llm_call(self, prompt: str) -> str:
         """执行实际的 LLM 调用。"""

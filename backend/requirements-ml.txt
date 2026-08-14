@@ -1,0 +1,10 @@
+# 可选：本地 ML 能力（本地嵌入 + 本地重排序）
+# 生产环境若使用云端 Embedding API（EMBEDDING_PROVIDER=deepseek/openai），
+# 无需安装本文件，可显著减小镜像体积、加快构建。
+#
+# 本地开发/离线场景启用本地 BGE 模型时安装：
+#   pip install -r requirements-ml.txt
+#
+# 注意：本文件依赖 torch（约 2GB+），需在含编译工具链的环境安装。
+
+sentence-transformers>=3.0.0    # BGE Embedding + BGE-Reranker
