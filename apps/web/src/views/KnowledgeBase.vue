@@ -396,15 +396,7 @@ function afterPreviewRender() {
       el.id = `toc-${idx++}`
     })
 
-    // 2. 替换图片短引用 #img-N → 真实 base64
-    previewBody.querySelectorAll('img[src^="#img-"]').forEach((img) => {
-      const id = (img as HTMLImageElement).getAttribute('src')?.replace('#', '')
-      if (id && imageStore.has(id)) {
-        (img as HTMLImageElement).src = imageStore.get(id)!
-      }
-    })
-
-    // 3. 建立滚动监听（Scrollspy）
+    // 2. 建立滚动监听（Scrollspy）
     setupScrollSpy()
     updateTocProgress()
   }, 150)
@@ -657,28 +649,19 @@ onBeforeUnmount(() => {
 // ============================================================
 // 图片上传处理（截图粘贴 / 拖拽 / 工具栏上传）
 // ============================================================
-// 图片缓存：存储 base64 数据，用短 ID 引用避免 Markdown 源码过长
-const imageStore = new Map<string, string>()
-let imageCounter = 0
-
 async function handleUploadImage(event: any, insertImage: Function, files: File[]) {
   if (!files || files.length === 0) return
   const file = files[0]
 
-  const reader = new FileReader()
-  reader.onload = (e) => {
-    const base64 = e.target?.result as string
-    const imgId = `img-${++imageCounter}`
-    imageStore.set(imgId, base64)
-
-    // 插入 HTML img 标签（短引用），而不是 ![desc](data:...) 长 base64
-    // markdown-it 设置了 html: true，HTML 标签会被保留渲染
-    insertImage({
-      url: `#${imgId}`,    // 短占位符
-      desc: file.name || 'image',
-    })
+  const fd = new FormData()
+  fd.append('file', file)
+  try {
+    const { data } = await knowledgeApi.uploadImage(fd)
+    // 插入指向后端图片端点的 URL，图片持久化到服务端（对象存储 / 本地目录）
+    insertImage({ url: data.url, desc: file.name || 'image' })
+  } catch (e: any) {
+    ElMessage.error('图片上传失败: ' + (e?.response?.data?.detail || e.message))
   }
-  reader.readAsDataURL(file)
 }
 
 async function remove(id: number) {
@@ -725,6 +708,13 @@ function handleSort(cmd: string) { sortOrder.value = cmd; fetch() }
   flex: 1; overflow-y: auto; padding: 24px 48px 24px 24px;
   background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
   scroll-behavior: smooth;
+}
+.preview-body :deep(.v-md-editor-preview img),
+.preview-body :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 8px 0;
 }
 
 /* ============================================================

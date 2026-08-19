@@ -53,6 +53,10 @@
               @mouseover="onMsgContentMouseOver"
               @mouseout="onMsgContentMouseOut"
             ></div>
+            <KnowledgeImageGallery
+              v-if="msg.role === 'assistant' && !isNoMatchResponse(msg.content) && getImages(msg).length > 0"
+              :images="getImages(msg)"
+            />
           </div>
           <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active && !loading" class="message-actions">
             <button class="action-btn" :class="{ active: copiedId === msg.id }" @click="copyMessage(msg)" :title="copiedId === msg.id ? '已复制' : '复制回复'">
@@ -131,11 +135,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount, reactive } from 'vue'
+import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted, reactive } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { useFormat } from '@/composables/useFormat'
-import { chatApi } from '@/api/chat'
+import { chatApi, type ChatImage } from '@/api/chat'
 import { knowledgeApi } from '@/api/knowledge'
+import KnowledgeImageGallery from './KnowledgeImageGallery.vue'
 
 const { formatFileSize, fileIcon } = useFormat()
 
@@ -309,6 +314,14 @@ function onMsgContentClick(e: Event) {
   const refLink = findRefLink(target)
   if (refLink) {
     handleRefClickFor(refLink)
+    return
+  }
+  // 内联知识库图片：点击新标签打开原图
+  if (target.tagName === 'IMG' && (target as HTMLImageElement).classList.contains('kb-image')) {
+    const src = (target as HTMLImageElement).getAttribute('src')
+    if (src && src.startsWith('/api/')) {
+      window.open(src, '_blank', 'noopener')
+    }
   }
 }
 
@@ -376,8 +389,13 @@ function handleRefMouseLeaveFor() {
   scheduleTooltipHide()
 }
 
+onMounted(() => {
+  document.addEventListener('error', onImageError, true)
+})
+
 onBeforeUnmount(() => {
   cancelTooltipHide()
+  document.removeEventListener('error', onImageError, true)
 })
 
 // ── 消息排序 ─────────────────────────────────────────────────
@@ -399,6 +417,64 @@ function formatSize(bytes: number) {
 function isNoMatchResponse(content: string): boolean {
   if (!content) return false
   return /知识库中暂无.*相关信息/.test(content)
+}
+
+// ── 关联图片：从 sources 中扁平化去重 ────────────────────────
+function collectImages(sources: any[] | undefined): ChatImage[] {
+  if (!Array.isArray(sources)) return []
+  const seen = new Set<number>()
+  const out: ChatImage[] = []
+  for (const s of sources) {
+    if (Array.isArray(s?.images)) {
+      for (const img of s.images) {
+        if (img && typeof img.id === 'number' && img.url && !seen.has(img.id)) {
+          seen.add(img.id)
+          out.push(img)
+        }
+      }
+    }
+  }
+  return out
+}
+
+// 以 sources 数组引用为键做缓存：流式期间 sources 引用不变 → 图片列表稳定，不闪烁
+const imagesCache = new WeakMap<object, ChatImage[]>()
+function getImages(msg: any): ChatImage[] {
+  if (!msg || !Array.isArray(msg.sources)) return []
+  let imgs = imagesCache.get(msg.sources)
+  if (!imgs) {
+    imgs = collectImages(msg.sources)
+    imagesCache.set(msg.sources, imgs)
+  }
+  return imgs
+}
+
+// ── 内联图片 id 校验（过滤 LLM 幻觉 id → 降级为占位） ────────
+function validateInlineImages(html: string, sources: any[] = []): string {
+  const validIds = new Set<string>()
+  for (const s of sources) {
+    if (Array.isArray(s?.images)) {
+      for (const img of s.images) {
+        if (img && img.id != null) validIds.add(String(img.id))
+      }
+    }
+  }
+  return html.replace(
+    /<img[^>]*class="kb-image"[^>]*data-original-src="ref:\/\/img\/(\d+)"[^>]*>/gi,
+    (m, id: string) => (validIds.has(id) ? m : '<span class="img-missing-inline">🖼 图片缺失</span>'),
+  )
+}
+
+// 内联图片加载失败兜底（img error 不冒泡，需捕获阶段监听）
+function onImageError(e: Event) {
+  const el = e.target as HTMLElement | null
+  if (!el || el.tagName !== 'IMG') return
+  if (!(el as HTMLImageElement).classList.contains('kb-image')) return
+  if (el.closest('.kb-image-gallery')) return  // 画廊内部自己处理
+  const span = document.createElement('span')
+  span.className = 'img-missing-inline'
+  span.textContent = '🖼 图片缺失'
+  el.replaceWith(span)
 }
 
 // ── 分离参考来源行 ──────────────────────────────────────────
@@ -440,7 +516,8 @@ function renderContent(text: string, msg: any, hasFiles?: boolean, sources: any[
   const { body, sourcesText } = splitSourcesFromContent(display)
 
   try {
-    const bodyHtml = renderMarkdown(body)
+    let bodyHtml = renderMarkdown(body)
+    bodyHtml = validateInlineImages(bodyHtml, sources)
     let sourcesHtml = ''
     if (sourcesText) {
       sourcesHtml = renderMarkdown(sourcesText)
@@ -1170,6 +1247,29 @@ function scrollToBottom() {
 
 .msg-content :deep(strong) {
   font-weight: 600;
+}
+
+/* 知识库图片（回答正文 + 引用文档面板共用） */
+.msg-content :deep(img.kb-image),
+.doc-panel-content :deep(img.kb-image) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 8px 0;
+  display: block;
+  cursor: zoom-in;
+  transition: opacity 0.2s;
+}
+
+/* 内联图片缺失占位 */
+.msg-content :deep(.img-missing-inline),
+.doc-panel-content :deep(.img-missing-inline) {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px dashed #d1d5db;
+  border-radius: 4px;
+  color: #9ca3af;
+  font-size: 12px;
 }
 
 /* 思考区块 */

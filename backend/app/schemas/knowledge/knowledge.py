@@ -27,6 +27,19 @@ class KnowledgeUpdate(BaseModel):
     is_pinned: Optional[bool] = None
 
 
+class KnowledgeImageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    doc_id: Optional[int] = None
+    url: str
+    caption: Optional[str] = None
+    anchor: Optional[str] = None
+    mime_type: str = "image/png"
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
 class KnowledgeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,6 +53,7 @@ class KnowledgeResponse(BaseModel):
     status: str
     is_pinned: bool = False
     vector_id: Optional[str] = None
+    images: List[KnowledgeImageResponse] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

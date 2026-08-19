@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -79,6 +80,63 @@ class DocumentImporter:
             "format": "text",
             "chunks": self._chunk_text(content),
         }
+
+    # ------------------------------------------------------------------
+    # Image extraction
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def extract_images(content: str) -> List[Dict[str, Any]]:
+        """从 Markdown 内容中抽取图片引用及其章节/上下文元信息。
+
+        支持语法：
+          ![alt](src)
+          ![alt](src "title")
+          ![alt](<src>)
+
+        Returns:
+            [{"alt", "src", "anchor", "position", "context_text"}, ...]
+        """
+        images: List[Dict[str, Any]] = []
+        if not content:
+            return images
+
+        # 先定位所有标题，用于给图片打「章节锚点」
+        heading_re = re.compile(r"(?m)^(\#{1,6})\s+(.+?)\s*$")
+        headings = [(m.start(), m.group(2).strip()) for m in heading_re.finditer(content)]
+
+        # 图片语法：![alt](src "title")
+        image_re = re.compile(r"!\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+[\"']([^\"']*)[\"'])?\s*\)")
+
+        position = 0
+        for m in image_re.finditer(content):
+            alt = (m.group(1) or "").strip()
+            src = (m.group(2) or "").strip()
+            title = (m.group(3) or "").strip()
+            # 去掉 <...> 包裹
+            if src.startswith("<") and src.endswith(">"):
+                src = src[1:-1]
+
+            # 最近的上方标题作为章节锚点
+            anchor = ""
+            for hs, ht in headings:
+                if hs <= m.start():
+                    anchor = ht
+                else:
+                    break
+
+            start = max(0, m.start() - 120)
+            end = min(len(content), m.end() + 120)
+            position += 1
+            images.append({
+                "alt": alt or title or "",
+                "src": src,
+                "anchor": anchor,
+                "position": position,
+                "context_text": content[start:end],
+            })
+
+        return images
 
     # ------------------------------------------------------------------
     # Chunking

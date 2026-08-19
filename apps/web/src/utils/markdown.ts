@@ -65,6 +65,35 @@ renderer.link = function ({ href, title, text }: { href: string; title?: string 
   return `<a href="${href}"${titleAttr}${targetAttr}>${text}</a>`
 }
 
+// 增强图片渲染 - 解析 ref://img/<id> 与平台相对路径，懒加载 + 失败降级
+renderer.image = function ({ href, title, text }: { href: string; title?: string | null; text: string }) {
+  const alt = (text || title || '图片').replace(/"/g, '&quot;')
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+  const src = resolveImageUrl(href)
+  return `<img class="kb-image" src="${src}" alt="${alt}"${titleAttr} loading="lazy" decoding="async" data-original-src="${escapeHtml(href)}" />`
+}
+
+/**
+ * 把图片 href 解析为浏览器可直接访问的 URL：
+ *  - ref://img/<id>   → /api/v1/knowledge/images/<id>
+ *  - http(s)/data/绝对路径 → 原样
+ *  - 其它相对路径      → 原样（通常由后端在入库时已重写为平台 URL）
+ */
+function resolveImageUrl(href: string): string {
+  if (!href) return ''
+  const refImg = href.match(/^ref:\/\/img\/(\d+)$/)
+  if (refImg) return `/api/v1/knowledge/images/${refImg[1]}`
+  return href
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 marked.use({ renderer })
 
 /**

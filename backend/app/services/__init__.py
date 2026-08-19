@@ -3,6 +3,7 @@ from app.services.chat import ChatService, AgentService, AgentTaskService, Diagn
 from app.services.diagnostics import LogService, LogParserService, ParsingService, AnalysisTaskService, DiagnosisPipeline, ReportService
 from app.services.knowledge import (
     KnowledgeService, DocumentImporter,
+    KnowledgeImageService, KnowledgeImageStorage,
     VectorService, get_vector_service, ProviderRegistry,
     EmbeddingService, get_embedder, DocumentIndexer,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "ChatService", "AgentService", "AgentTaskService", "DiagnosticChatAgent",
     "LogService", "LogParserService", "ParsingService", "AnalysisTaskService", "DiagnosisPipeline", "ReportService",
     "KnowledgeService", "DocumentImporter",
+    "KnowledgeImageService", "KnowledgeImageStorage",
     "VectorService", "get_vector_service", "ProviderRegistry",
     "EmbeddingService", "get_embedder", "DocumentIndexer",
     "OrganizationService", "ProjectService", "RuleEngine", "BugCaseService",

@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.services.knowledge.knowledge_service import KnowledgeService
+from app.services.knowledge.image_service import KnowledgeImageService
 from app.services.rag.rag_prompt import (
     RAG_STRICT_SYSTEM_PROMPT,
 )
@@ -449,11 +450,25 @@ class DiagnosticChatAgent:
                 lines.append(
                     f"{i + 1}. **{title}** (相关度: {score:.0%})\n   {snippet}"
                 )
+                # 关联图片：按命中章节锚点 + 文本相似度挑选，随 references 下发
+                anchor = self._extract_section_anchor(snippet)
+                images = self._match_doc_images(item.get("id"), text, anchor)
                 self.references.append({
                     "id": item.get("id"),
                     "title": title,
                     "source": item.get("source") or "知识库",
                     "excerpt": snippet,
+                    "images": [
+                        {
+                            "id": img.id,
+                            "url": img.url,
+                            "caption": img.caption,
+                            "anchor": img.anchor,
+                            "width": img.width,
+                            "height": img.height,
+                        }
+                        for img in images
+                    ],
                 })
 
         # 记录部分匹配状态（供 _assemble_rag_mode 使用）
@@ -461,6 +476,32 @@ class DiagnosticChatAgent:
         self._last_search_layer = search_result.matched_layer
 
         return "\n\n".join(lines) if lines else "", self.references
+
+    @staticmethod
+    def _extract_section_anchor(snippet: str) -> str:
+        """从检索 snippet 中提取命中章节标题（作为图片关联锚点）。
+
+        注意：_extract_markdown_section 返回的 snippet 可能带 ``...`` 前缀，
+        需先剥离前缀再按行首匹配标题，否则锚点会丢失。
+        """
+        for line in (snippet or "").splitlines():
+            line = line.strip().lstrip("….·")
+            if not line:
+                continue
+            m = re.match(r"^#{1,6}\s+(.+?)\s*$", line)
+            if m:
+                return m.group(1).strip()
+        return ""
+
+    def _match_doc_images(self, doc_id: Any, query: str, anchor: str) -> list:
+        """为命中文档挑选关联图片（失败时静默降级为空列表，不影响主链路）。"""
+        try:
+            return KnowledgeImageService(self.db).match_images(
+                doc_id, query=query or "", anchor=anchor or "", top_k=4,
+            )
+        except Exception as exc:
+            logger.debug("[知识检索] 图片匹配失败 doc=%s: %s", doc_id, exc)
+            return []
 
     def _extract_search_terms(
         self, text: str, analysis: Dict[str, Any],
@@ -729,19 +770,50 @@ class DiagnosticChatAgent:
         if analysis_context:
             system_prompt += f"\n\n---\n## 补充：日志分析结果\n{analysis_context}"
 
+        user_content = (
+            f"## 用户问题\n{cleaned_input}\n\n"
+            f"## 知识库检索结果（唯一事实来源）\n\n{knowledge_context}"
+        )
+        image_context = self._build_image_context()
+        if image_context:
+            user_content += f"\n\n{image_context}"
+
         return [
             {"role": "system", "content": system_prompt},
         ] + [
             m for m in existing_messages if m.get("role") != "system"
         ] + [
-            {
-                "role": "user",
-                "content": (
-                    f"## 用户问题\n{cleaned_input}\n\n"
-                    f"## 知识库检索结果（唯一事实来源）\n\n{knowledge_context}"
-                ),
-            },
+            {"role": "user", "content": user_content},
         ]
+
+    def _build_image_context(self) -> str:
+        """把 references 中的可用图片格式化进 Prompt，供 LLM 内联引用。
+
+        仅在严格 RAG 模式（有知识库命中）时调用；无图片返回空串。
+        """
+        seen: set = set()
+        lines: List[str] = []
+        for ref in self.references:
+            title = ref.get("title") or "知识库"
+            for img in ref.get("images") or []:
+                img_id = img.get("id")
+                if img_id is None or img_id in seen:
+                    continue
+                seen.add(img_id)
+                caption = img.get("caption") or "图片"
+                lines.append(f"- `ref://img/{img_id}` — {caption}（来自《{title}》）")
+
+        if not lines:
+            return ""
+
+        return (
+            "## 可用图片（供内联引用）\n"
+            + "\n".join(lines)
+            + "\n\n引用规则：\n"
+            "1. 当回答内容涵盖某张图片所描述的内容时，在相关语句后内联插入 "
+            "`![图注](ref://img/<id>)`（图注用图片名）。\n"
+            "2. 不要引用与回答无关的图片，也不要编造图片 id（只能使用上面列出的 id）。"
+        )
 
     def _assemble_chat_mode(
         self,

@@ -7,7 +7,7 @@ from app.database.base import Base
 from app.models import User, LoginAttempt, ApiKey  # noqa: F401
 from app.models import ChatSession, ChatMessage, AgentTask  # noqa: F401
 from app.models import Log, Analysis, Report  # noqa: F401
-from app.models import KnowledgeDocument  # noqa: F401
+from app.models import KnowledgeDocument, KnowledgeImage, KnowledgeImageFeedback  # noqa: F401
 from app.models import Organization, OrganizationMember, Project, BugCase, ClientLogEntry  # noqa: F401
 
 logger = get_logger(__name__)

@@ -1,5 +1,16 @@
 import client from './client'
 
+export interface KnowledgeImage {
+  id: number
+  doc_id?: number | null
+  url: string
+  caption?: string | null
+  anchor?: string | null
+  mime_type?: string
+  width?: number | null
+  height?: number | null
+}
+
 export interface KnowledgeDoc {
   id: number
   title: string
@@ -7,6 +18,7 @@ export interface KnowledgeDoc {
   category: string | null
   doc_type: string
   status: string
+  images?: KnowledgeImage[]
   created_at: string
 }
 
@@ -39,5 +51,15 @@ export const knowledgeApi = {
     return client.post('/knowledge/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
+  },
+  /** 上传单张图片（编辑器插入用），返回 { id, url, ... } */
+  uploadImage(formData: FormData) {
+    return client.post<KnowledgeImage>('/knowledge/images', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  /** 逐图反馈：标记「不相关」以优化后续关联 */
+  feedbackImage(imageId: number, feedback: 'irrelevant') {
+    return client.post(`/knowledge/images/${imageId}/feedback`, { feedback })
   },
 }

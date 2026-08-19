@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     MINIO_BUCKET: str = "diagnostic-logs"
     MINIO_SECURE: bool = False
 
+    # ── Knowledge Images（对象存储 + 本地目录回退） ───────────
+    KNOWLEDGE_IMAGE_DIR: str = "data/knowledge_images"
+    MINIO_KNOWLEDGE_BUCKET: str = "knowledge-images"
+    IMAGE_URL_TTL_SECONDS: int = 3600
+    MAX_IMAGE_SIZE_MB: int = 10
+
     # ── Ollama (Local LLM) ──────────────────────────────────
     OLLAMA_ENABLED: bool = False
     OLLAMA_HOST: str = "http://localhost:11434"

@@ -16,6 +16,7 @@ from app.schemas.diagnostics import (
 from app.schemas.knowledge import (
     KnowledgeCreate, KnowledgeUpdate, KnowledgeResponse, KnowledgeSearchResult,
     KnowledgeListResponse, KnowledgeTreeNode, KnowledgeTreeResponse,
+    KnowledgeImageResponse,
 )
 from app.schemas.system import (
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse,
@@ -36,6 +37,7 @@ __all__ = [
     "ReportResponse", "ReportDetail", "ReportListResponse",
     "KnowledgeCreate", "KnowledgeUpdate", "KnowledgeResponse", "KnowledgeSearchResult",
     "KnowledgeListResponse", "KnowledgeTreeNode", "KnowledgeTreeResponse",
+    "KnowledgeImageResponse",
     "ProjectCreate", "ProjectUpdate", "ProjectResponse", "ProjectListResponse",
     "ClientLogEntrySchema", "ClientLogBatchRequest",
     "OrganizationCreate", "OrganizationUpdate", "OrganizationResponse", "OrganizationListResponse",

@@ -151,9 +151,19 @@ export const chatApi = {
   },
 }
 
+export interface ChatImage {
+  id: number
+  url: string
+  caption?: string | null
+  anchor?: string | null
+  width?: number | null
+  height?: number | null
+}
+
 export interface ChatSource {
   id?: number
   title: string
   source: string
   excerpt: string
+  images?: ChatImage[]
 }
