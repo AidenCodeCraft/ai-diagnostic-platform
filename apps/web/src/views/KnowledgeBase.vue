@@ -85,6 +85,16 @@
           </el-table-column>
           <el-table-column prop="category" label="分类" width="120"><template #default="{ row }">{{ row.category || '—' }}</template></el-table-column>
           <el-table-column label="文档类型" width="100"><template #default="{ row }">{{ typeLabel(row.doc_type) }}</template></el-table-column>
+          <el-table-column label="质量" width="120">
+            <template #default="{ row }">
+              <template v-if="row.doc_type === 'folder'">—</template>
+              <template v-else>
+                <el-tag v-if="row.quality_score != null" :type="row.quality_score >= 60 ? 'success' : (row.quality_score >= 40 ? 'warning' : 'info')" size="small">{{ Math.round(row.quality_score) }}</el-tag>
+                <el-tag v-if="row.status && row.status !== 'active'" type="info" size="small" style="margin-left:4px">草稿</el-tag>
+                <span v-if="row.quality_score == null && (!row.status || row.status === 'active')">—</span>
+              </template>
+            </template>
+          </el-table-column>
           <el-table-column prop="updated_at" label="修改时间" width="180"><template #default="{ row }">{{ formatTime(row.updated_at || row.created_at) }}</template></el-table-column>
           <el-table-column label="大小" width="100"><template #default="{ row }">{{ formatSize(row) }}</template></el-table-column>
           <!-- 更多菜单 -->
@@ -115,6 +125,9 @@
           <div class="card-icon">{{ item.doc_type === 'note' ? '📝' : item.doc_type === 'folder' ? '📂' : '📄' }}</div>
           <div class="card-title">{{ item.title }}</div>
           <div class="card-meta">{{ formatTime(item.updated_at || item.created_at) }}</div>
+          <div v-if="item.doc_type !== 'folder' && item.quality_score != null" class="card-quality">
+            {{ Math.round(item.quality_score) }} 分<template v-if="item.status && item.status !== 'active'"> · 草稿</template>
+          </div>
         </div>
         <el-pagination v-if="total > pageSize" style="margin-top:16px;justify-content:center;width:100%" background layout="prev,pager,next" :total="total" :page-size="pageSize" v-model:current-page="page" @change="fetch" />
       </div>
@@ -171,16 +184,62 @@
     <!-- ============================================================ -->
     <div v-else-if="viewState === 'edit'" class="kb-editor-page">
       <div class="kb-header">
-        <el-input v-model="form.title" placeholder="笔记标题" style="width:300px;font-size:18px;font-weight:600" />
-        <el-input v-model="form.category" placeholder="分类（可选）" style="width:200px;margin-left:8px" />
-        <div style="margin-left:auto;display:flex;gap:8px">
-          <el-button @click="showProfile = true">诊断配置</el-button>
+        <el-input v-model="form.title" placeholder="标题" style="width:240px;font-size:18px;font-weight:600" />
+        <el-select v-model="form.doc_type" style="width:170px;margin-left:8px" @change="onDocTypeChange">
+          <el-option label="现场问题处理示例" value="case" />
+          <el-option label="FAQ" value="faq" />
+          <el-option label="代码逻辑" value="code_logic" />
+          <el-option label="基础知识" value="knowledge" />
+          <el-option label="笔记" value="note" />
+          <el-option label="手册" value="manual" />
+        </el-select>
+        <el-input v-model="form.category" placeholder="分类（可选）" style="width:150px;margin-left:8px" />
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <el-button-group class="mode-toggle">
+            <el-button :type="editMode === 'edit' ? 'primary' : ''" @click="editMode = 'edit'">编辑</el-button>
+            <el-button :type="editMode === 'split' ? 'primary' : ''" @click="editMode = 'split'; refreshPreview()">分屏</el-button>
+            <el-button :type="editMode === 'preview' ? 'primary' : ''" @click="editMode = 'preview'; refreshPreview()">预览</el-button>
+          </el-button-group>
+          <el-button @click="applyFormat" :loading="formatting">一键格式化</el-button>
+          <el-button v-if="formatSnapshot !== null" @click="undoFormat">撤销格式化</el-button>
+          <el-button @click="showProfile = true">进阶覆盖</el-button>
           <el-button @click="cancelEdit">取消</el-button>
           <el-button type="primary" @click="save" :loading="saving">{{ editingId ? '保存' : '创建' }}</el-button>
         </div>
       </div>
-      <div class="editor-body">
-        <v-md-editor ref="editorRef" v-model="form.content" height="100%" left-toolbar="undo redo | bold italic strikethrough | h2 h3 h4 | ul ol | link image | code quote | table hr | fullscreen" :disabled-menus="[]" @upload-image="handleUploadImage" />
+      <div class="editor-body" :class="'mode-' + editMode">
+        <div v-show="editMode !== 'preview'" class="editor-pane">
+          <v-md-editor ref="editorRef" v-model="form.content" height="100%" left-toolbar="undo redo | bold italic strikethrough | h2 h3 h4 | ul ol | link image | code quote | table hr | fullscreen" :disabled-menus="[]" @upload-image="handleUploadImage" />
+        </div>
+        <div v-show="editMode !== 'edit'" class="preview-pane">
+          <div class="preview-pane-header">
+            <span>提交后预览</span>
+            <span class="preview-quality">
+              质量分
+              <b>{{ previewResult ? Math.round(previewResult.quality_score) : '—' }}</b>
+              <el-tag v-if="previewResult" :type="previewResult.status_hint === 'active' ? 'success' : 'warning'" size="small">
+                {{ previewResult.status_hint === 'active' ? '可发布' : '待完善' }}
+              </el-tag>
+            </span>
+          </div>
+          <div class="preview-pane-body">
+            <div v-if="previewLoading" class="preview-loading">规范化中…</div>
+            <template v-else-if="previewResult">
+              <div v-if="previewResult.issues.length" class="preview-issues">
+                <div v-for="(issue, i) in previewResult.issues" :key="i" :class="['preview-issue', issue.level]">
+                  {{ issue.level === 'error' ? '✕' : '⚠' }} {{ issue.message }}
+                </div>
+              </div>
+              <div v-if="previewResult.suggested_keywords.length" class="preview-suggest">
+                候选关键词：{{ previewResult.suggested_keywords.join('、') }}（可加入「日志特征」）
+              </div>
+              <div class="preview-rendered">
+                <component :is="VMdEditor.Preview" :text="previewResult.normalized_content" />
+              </div>
+            </template>
+            <div v-else class="preview-loading">暂无内容</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -251,7 +310,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed, nextTick, defineComponent, h } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch, defineComponent, h } from 'vue'
 import { Search, UploadFilled } from '@element-plus/icons-vue'
 import { knowledgeApi } from '@/api/knowledge'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -399,6 +458,97 @@ function buildProfilePayload() {
     confidence: f.confidence,
     status: 'active',
     source: 'manual',
+  }
+}
+
+// ── 编辑模式 / 提交后预览 / 一键格式化 ──
+const editMode = ref<'edit' | 'split' | 'preview'>('edit')
+const previewResult = ref<any>(null)
+const previewLoading = ref(false)
+const formatting = ref(false)
+const formatSnapshot = ref<string | null>(null)
+let previewTimer: ReturnType<typeof setTimeout> | null = null
+
+function defaultEditMode(docType: string): 'edit' | 'split' {
+  return (docType || '') === 'case' ? 'split' : 'edit'
+}
+
+function schedulePreview() {
+  if (previewTimer) clearTimeout(previewTimer)
+  previewTimer = setTimeout(() => refreshPreview(), 500)
+}
+
+async function refreshPreview() {
+  if (viewState.value !== 'edit') return
+  previewLoading.value = true
+  try {
+    const { data } = await knowledgeApi.formatPreview({
+      content: form.value.content,
+      doc_type: form.value.doc_type,
+      title: form.value.title,
+    })
+    previewResult.value = data
+  } catch (e: any) {
+    console.warn('[KnowledgeBase] format preview failed:', e?.response?.data?.detail || e?.message || e)
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+watch(
+  () => [form.value.content, form.value.doc_type],
+  () => schedulePreview(),
+)
+
+async function applyFormat() {
+  formatting.value = true
+  try {
+    const { data } = await knowledgeApi.formatPreview({
+      content: form.value.content,
+      doc_type: form.value.doc_type,
+      title: form.value.title,
+    })
+    previewResult.value = data
+    const normalized = data.normalized_content || ''
+    if (normalized === form.value.content) {
+      ElMessage.info('格式已规范，无需调整')
+      return
+    }
+    formatSnapshot.value = form.value.content
+    form.value.content = normalized
+    ElMessage.success('已按模板规范格式（可撤销）')
+    refreshPreview()
+  } catch (e: any) {
+    ElMessage.error('格式化失败: ' + (e?.response?.data?.detail || e?.message))
+  } finally {
+    formatting.value = false
+  }
+}
+
+function undoFormat() {
+  if (formatSnapshot.value === null) return
+  form.value.content = formatSnapshot.value
+  formatSnapshot.value = null
+  ElMessage.info('已撤销格式化')
+  refreshPreview()
+}
+
+function onDocTypeChange() {
+  refreshPreview()
+}
+
+function showSaveResult(resp: any) {
+  if (!resp) return
+  const quality = resp.quality_score
+  const issues: any[] = Array.isArray(resp.issues) ? resp.issues : []
+  if (resp.status === 'draft') {
+    const errors = issues.filter((i: any) => i.level === 'error')
+    const msg = errors.length ? errors.map((i: any) => i.message).join('；') : '存在待完善项'
+    ElMessage.warning(`已保存为草稿（质量分 ${quality != null ? Math.round(quality) : '—'}）：${msg}`)
+  } else if (issues.length) {
+    ElMessage.success(`已保存（质量分 ${quality != null ? Math.round(quality) : '—'}，${issues.length} 条提示）`)
+  } else {
+    ElMessage.success('已保存')
   }
 }
 
@@ -640,13 +790,18 @@ function openItem(row: any) {
     loadProfileForDoc(row.id)
   }
 }
-function enterEdit() { if (editingId.value) loadProfileForDoc(editingId.value); viewState.value = 'edit' }
+function enterEdit() {
+  if (editingId.value) loadProfileForDoc(editingId.value)
+  editMode.value = defaultEditMode(form.value.doc_type)
+  viewState.value = 'edit'
+  nextTick(() => refreshPreview())
+}
 
 // ============================================================
 // 更多菜单操作
 // ============================================================
 async function handleRowAction(cmd: string, row: any) {
-  if (cmd === 'edit') { form.value = { title: row.title, category: row.category || '', doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; viewState.value = 'edit'; loadProfileForDoc(row.id) }
+  if (cmd === 'edit') { form.value = { title: row.title, category: row.category || '', doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; editMode.value = defaultEditMode(form.value.doc_type); viewState.value = 'edit'; loadProfileForDoc(row.id); nextTick(() => refreshPreview()) }
   else if (cmd === 'rename') { renameId.value = row.id; renameName.value = row.title; showRename.value = true }
   else if (cmd === 'pin') {
     try {
@@ -666,13 +821,36 @@ async function doRename() { if (!renameName.value.trim() || !renameId.value) ret
 function handleCreateCommand(cmd: string) {
   if (cmd === 'upload') showUpload.value = true
   else if (cmd === 'folder') showFolder.value = true
-  else if (cmd === 'note') { editingId.value = null; form.value = { title: '', category: '', doc_type: 'note', content: '' }; resetProfile(); viewState.value = 'edit' }
+  else if (cmd === 'note') { editingId.value = null; form.value = { title: '', category: '', doc_type: 'note', content: '' }; resetProfile(); formatSnapshot.value = null; editMode.value = 'edit'; viewState.value = 'edit'; nextTick(() => refreshPreview()) }
 }
 function handleFileSelect(f: any) { uploadFile.value = f.raw }
 async function doUpload() { if (!uploadFile.value) return; uploading.value = true; try { const fd = new FormData(); fd.append('file', uploadFile.value); if (uploadForm.value.category) fd.append('category', uploadForm.value.category); fd.append('doc_type', uploadForm.value.doc_type); if (currentFolder.value) fd.append('parent_id', currentFolder.value.id.toString()); await knowledgeApi.upload(fd); ElMessage.success('上传成功'); showUpload.value = false; await fetch() } catch (e: any) { ElMessage.error(e?.response?.data?.detail || '上传失败') } finally { uploading.value = false } }
 function createFolder() { if (!folderName.value.trim()) return; if (!checkPathDepth()) { showFolder.value = false; return } const data: any = { title: folderName.value, content: '', doc_type: 'folder' }; if (currentFolder.value) data.parent_id = currentFolder.value.id; knowledgeApi.create(data).then(() => { ElMessage.success('文件夹已创建'); showFolder.value = false; folderName.value = ''; fetch() }).catch(() => ElMessage.error('创建失败')) }
 
-async function save() { saving.value = true; try { const data: any = { ...form.value }; if (currentFolder.value) data.parent_id = currentFolder.value.id; const profile = buildProfilePayload(); if (profile) data.profile = profile; if (editingId.value) { await knowledgeApi.update(editingId.value, data); ElMessage.success('已保存') } else { await knowledgeApi.create(data); ElMessage.success('已创建') }; viewState.value = 'list'; editingId.value = null; await fetch() } catch (e: any) { ElMessage.error(e.response?.data?.detail || '保存失败') } finally { saving.value = false } }
+async function save() {
+  saving.value = true
+  try {
+    const data: any = { ...form.value }
+    if (currentFolder.value) data.parent_id = currentFolder.value.id
+    const profile = buildProfilePayload()
+    if (profile) data.profile = profile
+    let resp: any = null
+    if (editingId.value) {
+      resp = (await knowledgeApi.update(editingId.value, data)).data
+    } else {
+      resp = (await knowledgeApi.create(data)).data
+    }
+    viewState.value = 'list'
+    editingId.value = null
+    formatSnapshot.value = null
+    await fetch()
+    showSaveResult(resp)
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.detail || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
 // ============================================================
 // 剪贴板处理 — 在 textarea 上绑定捕获阶段 paste 事件
 // ============================================================
@@ -917,7 +1095,21 @@ function handleSort(cmd: string) { sortOrder.value = cmd; fetch() }
   .preview-body { padding: 16px; }
 }
 .kb-editor-page { display: flex; flex-direction: column; height: calc(100vh - 140px); }
-.editor-body { flex: 1; min-height: 0; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+.editor-body { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.editor-pane { flex: 1; min-width: 0; height: 100%; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+.preview-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background: #fff; }
+.preview-pane-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #f0f0f0; font-size: 13px; color: #374151; }
+.preview-quality { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b7280; }
+.preview-pane-body { flex: 1; overflow: auto; padding: 12px 16px; }
+.preview-loading { color: #9ca3af; font-size: 13px; padding: 12px; }
+.preview-issues { margin-bottom: 8px; }
+.preview-issue { font-size: 12px; line-height: 1.7; }
+.preview-issue.error { color: #dc2626; }
+.preview-issue.warn { color: #d97706; }
+.preview-suggest { font-size: 12px; color: #6b7280; margin-bottom: 8px; }
+.preview-rendered { font-size: 14px; line-height: 1.7; color: #374151; }
+.mode-toggle .el-button { padding: 6px 10px; }
+.card-quality { font-size: 11px; color: #2563eb; margin-top: 4px; }
 .md-preview { padding: 16px 20px; font-size: 14px; line-height: 1.8; }
 .md-preview :deep(h2) { font-size: 18px; margin: 16px 0 8px; }
 .md-preview :deep(h3) { font-size: 15px; margin: 12px 0 6px; }

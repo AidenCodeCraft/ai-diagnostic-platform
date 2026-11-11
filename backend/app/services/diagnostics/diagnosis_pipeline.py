@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.core.logging_config import get_logger
 from app.services.knowledge.knowledge_service import KnowledgeService
 from app.services.knowledge.profile_service import KnowledgeProfileService
+from app.services.knowledge.document_meta_service import KnowledgeSectionService
 from app.services.infrastructure.llm_service import LLMService
 from app.services.diagnostics.parser_service import LogParserService
 from app.services.diagnostics.knowledge_log_locator import KnowledgeLogLocator
@@ -70,6 +71,7 @@ class DiagnosisPipeline:
         self.rule_engine = RuleEngine()
         self.knowledge = KnowledgeService(db)
         self.profile_service = KnowledgeProfileService(db)
+        self.section_service = KnowledgeSectionService(db)
         self.locator = KnowledgeLogLocator()
 
     # ==================================================================
@@ -133,6 +135,7 @@ class DiagnosisPipeline:
         # ═══════════════════════════════════════════════════════════
         logger.info("[Pipeline] Stage 4.5 — 知识驱动日志定位")
         detections = self._locate_by_knowledge(knowledge_results, file_path, user_query)
+        self._annotate_detection_sections(detections)
         evidence = [d.to_dict() for d in detections if d.verdict in ("hit", "partial")]
         logger.info(
             "[Pipeline] Stage 4.5 完成: detections=%d evidence=%d",
@@ -351,6 +354,25 @@ class DiagnosisPipeline:
     # Stage 4.5: 知识驱动日志定位
     # ==================================================================
 
+    def _annotate_detection_sections(self, detections: list) -> None:
+        """把命中行映射到所属章节标题（用于证据引用）。"""
+        for detection in detections:
+            if not detection.doc_id:
+                continue
+            try:
+                rows = self.section_service.list(int(detection.doc_id))
+            except Exception:
+                rows = []
+            for matched in detection.matched_lines:
+                matched.section = self._section_for_line(rows, matched.line_no)
+
+    @staticmethod
+    def _section_for_line(rows, line_no: int) -> str:
+        for row in rows:
+            if (row.start_line or 0) <= line_no <= (row.end_line or 0):
+                return row.title or ""
+        return ""
+
     def _locate_by_knowledge(
         self, knowledge_results: list, file_path: str, user_query: str,
     ) -> list:
@@ -477,7 +499,8 @@ class DiagnosisPipeline:
         for d in detections:
             lines.append(f"- 《{d.title}》判定：{verdict_cn.get(d.verdict, '未命中')}")
             for m in d.matched_lines[:8]:
-                lines.append(f"  - L{m.line_no}: {m.text[:200]}")
+                location = f"L{m.line_no}" + (f"（{m.section}）" if m.section else "")
+                lines.append(f"  - {location}: {m.text[:200]}")
             if d.expected:
                 lines.append(f"  - 期望判定：{d.expected}")
             if d.root_cause:

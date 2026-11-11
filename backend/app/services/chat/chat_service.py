@@ -271,6 +271,8 @@ class ChatService:
             messages, direct_reply = agent.enrich_messages(session_id, content, messages, resolved_analysis)
             if agent.references:
                 yield f"data: {json.dumps({'sources': agent.references}, ensure_ascii=False)}\n\n"
+            if getattr(agent, "clarification_questions", None):
+                yield f"data: {json.dumps({'clarification': agent.clarification_questions}, ensure_ascii=False)}\n\n"
 
             # 如果 enrich_messages 已生成直接回复（如主动追问），直接流式输出，不调 LLM
             if direct_reply is not None:

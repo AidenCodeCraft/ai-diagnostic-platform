@@ -45,6 +45,20 @@
               @mouseover="onMsgContentMouseOver"
               @mouseout="onMsgContentMouseOut"
             ></div>
+            <div v-if="msg.clarification && msg.clarification.length" class="clarify-block">
+              <div v-for="(q, qi) in msg.clarification" :key="qi" class="clarify-item">
+                <span class="clarify-label">{{ q.label }}</span>
+                <div class="clarify-options">
+                  <button
+                    v-for="opt in (q.options || [])"
+                    :key="opt"
+                    type="button"
+                    class="clarify-option"
+                    @click="pickClarification(opt)"
+                  >{{ opt }}</button>
+                </div>
+              </div>
+            </div>
             <div
               v-if="msg._renderedSources && !isNoMatchResponse(msg.content)"
               class="msg-sources"
@@ -159,6 +173,7 @@ const emit = defineEmits<{
   (e: 'openKnowledge', source: { id?: number; title: string }): void
   (e: 'regenerate', msg: any): void
   (e: 'editMessage', msg: any): void
+  (e: 'selectClarification', text: string): void
 }>()
 
 // ── 引用文档 Tooltip ──────────────────────────────────────────
@@ -888,6 +903,11 @@ function dislikeMessage(msg: any) {
   }
 }
 
+/** 澄清选项芯片：把选项内容回填给父组件（填入输入框） */
+function pickClarification(value: string) {
+  emit('selectClarification', value)
+}
+
 /** 标记「已解决」并触发自进化蒸馏（仅对已持久化的消息可用） */
 async function resolveMessage(msg: any) {
   if (!props.chatId || !msg._persisted) return
@@ -1049,6 +1069,44 @@ function scrollToBottom() {
   gap: 2px;
   margin-bottom: 4px;
   align-items: flex-end;
+}
+
+/* 澄清反问选项 */
+.clarify-block {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.clarify-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.clarify-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+.clarify-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.clarify-option {
+  padding: 4px 12px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #2563eb;
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.clarify-option:hover {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
 }
 
 .msg-file-card {

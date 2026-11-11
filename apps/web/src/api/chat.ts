@@ -78,6 +78,7 @@ export const chatApi = {
     logAnalysis?: Record<string, any>,
     onReasoning?: (reasoning: string) => void,
     onSources?: (sources: ChatSource[]) => void,
+    onClarification?: (questions: any[]) => void,
   ) {
     const token = sessionStorage.getItem('token')
     let resp: Response
@@ -110,6 +111,7 @@ export const chatApi = {
         if (data.token) onToken?.(data.token)
         if (data.reasoning) onReasoning?.(data.reasoning)
         if (data.sources) onSources?.(data.sources)
+        if (data.clarification) onClarification?.(data.clarification)
         if (data.done) onDone?.(data.model)
       } catch { /* ignore incomplete or invalid SSE payloads */ }
     }

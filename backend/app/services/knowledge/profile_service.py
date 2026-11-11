@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
-from app.models import KnowledgeDiagnosisProfile, KnowledgeDocument
+from app.models import KnowledgeDiagnosisProfile, KnowledgeDocument, KnowledgeDocumentMeta
 
 logger = get_logger(__name__)
 
@@ -24,7 +24,7 @@ _PROFILE_TEXT_FIELDS = (
 )
 _PROFILE_LIST_FIELDS = ("log_keywords", "log_patterns", "negative_patterns")
 _VALID_STATUS = {"draft", "active", "archived"}
-_VALID_SOURCE = {"manual", "ai_candidate"}
+_VALID_SOURCE = {"manual", "ai_candidate", "template", "manual_override"}
 
 
 def _normalize_list(value: Any) -> List[str]:
@@ -89,11 +89,23 @@ class KnowledgeProfileService:
             .order_by(KnowledgeDiagnosisProfile.created_at.desc())
             .all()
         )
+        doc_ids = [int(doc.id) for _, doc in rows]
+        meta_map: Dict[int, float] = {}
+        if doc_ids:
+            metas = (
+                self.db.query(KnowledgeDocumentMeta)
+                .filter(KnowledgeDocumentMeta.doc_id.in_(doc_ids))
+                .all()
+            )
+            meta_map = {int(m.doc_id): (m.quality_score or 0.0) for m in metas}
+
         items: List[Dict[str, Any]] = []
         for profile, doc in rows:
             item = self.to_dict(profile)
             item["title"] = doc.title
             item["content"] = doc.content
+            item["doc_type"] = doc.doc_type
+            item["quality_score"] = meta_map.get(int(doc.id))
             item["doc_created_at"] = doc.created_at.isoformat() if doc.created_at else None
             items.append(item)
         return items

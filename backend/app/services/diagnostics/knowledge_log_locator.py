@@ -30,9 +30,15 @@ class MatchedLine:
     line_no: int
     text: str
     via: str  # "pattern" | "keyword"
+    section: str = ""  # 所属章节标题（由流水线回填）
 
     def to_dict(self) -> dict:
-        return {"line_no": self.line_no, "text": self.text, "via": self.via}
+        return {
+            "line_no": self.line_no,
+            "text": self.text,
+            "via": self.via,
+            "section": self.section,
+        }
 
 
 @dataclass

@@ -126,3 +126,51 @@ class KnowledgeDiagnosisProfile(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+
+class KnowledgeSection(Base):
+    """知识条目的分节 — 带稳定章节键与行号范围，供 AI 精确定位。"""
+
+    __tablename__ = "knowledge_sections"
+
+    id = Column(Integer, primary_key=True)
+    doc_id = Column(
+        Integer,
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    section_key = Column(String(100), nullable=False)
+    title = Column(String(300), nullable=False)
+    level = Column(Integer, default=2)
+    start_line = Column(Integer, default=0)
+    end_line = Column(Integer, default=0)
+    content = Column(Text, nullable=True)
+    position = Column(Integer, default=0)
+
+
+class KnowledgeDocumentMeta(Base):
+    """知识条目元信息 — 模板、质量分、内容哈希、特征点等。"""
+
+    __tablename__ = "knowledge_document_metas"
+
+    id = Column(Integer, primary_key=True)
+    doc_id = Column(
+        Integer,
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    quality_score = Column(Float, default=0.0)
+    content_hash = Column(String(64), nullable=True)
+    template_key = Column(String(50), nullable=True)
+    # 特征点（城市/设备类型/版本等），供检索与反问槽位使用
+    features = Column(JSON, default=dict)
+    normalized_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

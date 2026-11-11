@@ -105,11 +105,15 @@
             <el-table-column prop="confidence" label="置信度" width="80">
               <template #default="{ row }">{{ row.confidence != null ? (row.confidence * 100).toFixed(0) + '%' : '—' }}</template>
             </el-table-column>
+            <el-table-column prop="quality_score" label="质量分" width="80">
+              <template #default="{ row }">{{ row.quality_score != null ? Math.round(row.quality_score) : '—' }}</template>
+            </el-table-column>
             <el-table-column prop="created_at" label="创建时间" width="170">
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
+            <el-table-column label="操作" width="220" fixed="right">
               <template #default="{ row }">
+                <el-button size="small" @click="openDraft(row)">查看</el-button>
                 <el-button size="small" type="primary" @click="approveDraft(row)">通过</el-button>
                 <el-button size="small" type="danger" @click="rejectDraft(row)">驳回</el-button>
               </template>
@@ -119,6 +123,22 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 候选详情 -->
+    <el-dialog v-model="viewDraftVisible" title="候选详情" width="760px" top="6vh">
+      <div v-if="viewDraftLoading" class="empty-hint">加载中…</div>
+      <template v-else>
+        <div class="draft-meta">
+          <span>质量分：{{ viewDraftQuality != null ? Math.round(viewDraftQuality) : '—' }}</span>
+        </div>
+        <div v-if="viewDraftIssues.length" class="draft-issues">
+          <div v-for="(it, i) in viewDraftIssues" :key="i" :class="['draft-issue', it.level]">
+            {{ it.level === 'error' ? '✕' : '⚠' }} {{ it.message }}
+          </div>
+        </div>
+        <pre class="draft-content">{{ viewDraftContent }}</pre>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -256,6 +276,34 @@ async function rejectDraft(row: any) {
   }
 }
 
+// ── 候选详情 ──
+const viewDraftVisible = ref(false)
+const viewDraftLoading = ref(false)
+const viewDraftContent = ref('')
+const viewDraftQuality = ref<number | null>(null)
+const viewDraftIssues = ref<any[]>([])
+
+async function openDraft(row: any) {
+  viewDraftVisible.value = true
+  viewDraftLoading.value = true
+  viewDraftContent.value = row.content || ''
+  viewDraftQuality.value = row.quality_score != null ? row.quality_score : null
+  viewDraftIssues.value = []
+  try {
+    const { data } = await client.post('/knowledge/format/preview', {
+      content: row.content || '',
+      doc_type: row.doc_type,
+    })
+    viewDraftContent.value = data.normalized_content || row.content || ''
+    viewDraftQuality.value = data.quality_score != null ? data.quality_score : viewDraftQuality.value
+    viewDraftIssues.value = data.issues || []
+  } catch (e: any) {
+    console.warn('[Audit] preview failed:', e?.response?.data?.detail || e?.message || e)
+  } finally {
+    viewDraftLoading.value = false
+  }
+}
+
 onMounted(() => {
   fetchAnalyses()
   fetchBugCases()
@@ -270,6 +318,12 @@ onMounted(() => {
 .audit-tabs { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 0 16px 16px; }
 .tab-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding-top: 8px; }
 .tab-hint { font-size: 12px; color: #9ca3af; margin-right: auto; }
+.draft-meta { font-size: 13px; color: #374151; margin-bottom: 8px; }
+.draft-issues { margin-bottom: 8px; }
+.draft-issue { font-size: 12px; line-height: 1.7; }
+.draft-issue.error { color: #dc2626; }
+.draft-issue.warn { color: #d97706; }
+.draft-content { max-height: 55vh; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .audit-table-wrap { min-height: 200px; }
 .empty-hint { text-align: center; padding: 40px 0; color: #9ca3af; font-size: 14px; }
 </style>

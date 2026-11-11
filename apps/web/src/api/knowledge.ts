@@ -11,6 +11,36 @@ export interface KnowledgeImage {
   height?: number | null
 }
 
+export interface KnowledgeIssue {
+  code: string
+  level: 'error' | 'warn'
+  message: string
+  section_key?: string
+}
+
+export interface FormatSection {
+  section_key: string
+  title: string
+  level: number
+  start_line: number
+  end_line: number
+  content: string
+}
+
+export interface FormatPreview {
+  title: string
+  doc_type: string | null
+  normalized_content: string
+  sections: FormatSection[]
+  profile_draft: Record<string, any>
+  features: Record<string, string>
+  suggested_keywords: string[]
+  issues: KnowledgeIssue[]
+  quality_score: number
+  status_hint: 'active' | 'draft'
+  template: any
+}
+
 export interface KnowledgeDoc {
   id: number
   title: string
@@ -19,6 +49,9 @@ export interface KnowledgeDoc {
   doc_type: string
   status: string
   images?: KnowledgeImage[]
+  quality_score?: number | null
+  issues?: KnowledgeIssue[]
+  suggested_keywords?: string[]
   created_at: string
 }
 
@@ -84,5 +117,13 @@ export const knowledgeApi = {
   },
   saveProfile(docId: number, data: KnowledgeProfile) {
     return client.put<KnowledgeProfile>(`/knowledge/${docId}/profile`, data)
+  },
+  /** 不落库：规范化 + 校验，返回「提交后格式」预览 */
+  formatPreview(data: { content: string; doc_type?: string; title?: string }) {
+    return client.post<FormatPreview>('/knowledge/format/preview', data)
+  },
+  /** 知识模板契约 */
+  templates() {
+    return client.get<{ templates: any[] }>('/knowledge/templates')
   },
 }

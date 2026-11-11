@@ -137,6 +137,7 @@ class DiagnosticChatAgent:
         self.provider_name = provider_name
         self.knowledge = KnowledgeService(db)
         self.references: List[Dict[str, Any]] = []
+        self.clarification_questions: List[Dict[str, Any]] = []
         self._last_search_partial: bool = False
         self._last_search_layer: str = ""
 
@@ -180,6 +181,22 @@ class DiagnosticChatAgent:
             knowledge_context, _ = self._retrieve_knowledge(cleaned, analysis)
 
             if not knowledge_context:
+                # 先尝试槽位化反问（设备/城市/版本等），信息不足时引导用户补充
+                try:
+                    from app.services.chat.clarification import (
+                        ClarificationService, build_clarification_reply,
+                    )
+                    questions = ClarificationService(self.db).analyze(cleaned)
+                    if questions:
+                        self.clarification_questions = [q.to_dict() for q in questions]
+                        reply = build_clarification_reply(questions)
+                        return (
+                            existing_messages + [{"role": "assistant", "content": reply}],
+                            reply,
+                        )
+                except Exception:
+                    logger.debug("[enrich_messages] slot clarification skipped", exc_info=True)
+
                 # 知识库无匹配 → 可以追问（收集更多信息）
                 try:
                     proactive_llm = analyze_and_ask_with_llm(cleaned, existing_messages)
@@ -426,17 +443,18 @@ class DiagnosticChatAgent:
 
         items = all_items[:max_items]
 
-        # 获取完整文档内容（用于 snippet 提取）
+        # 获取完整文档内容（用于 snippet 提取，并定位章节/行号）
         for item in items:
             doc_id = item.get("id")
             if not item.get("_full_content"):
                 try:
                     full_doc = self.knowledge.get(doc_id)
                     item["_full_content"] = full_doc.content or ""
-                    # 用搜索词提取更好的 snippet
-                    item["snippet"] = self.knowledge._extract_snippet(
+                    info = self.knowledge._extract_snippet_info(
                         item["_full_content"], search_result.matched_term,
                     )
+                    item["snippet"] = info["snippet"]
+                    item["_section"] = info
                 except Exception:
                     pass
 
@@ -450,14 +468,19 @@ class DiagnosticChatAgent:
                 lines.append(
                     f"{i + 1}. **{title}** (相关度: {score:.0%})\n   {snippet}"
                 )
-                # 关联图片：按命中章节锚点 + 文本相似度挑选，随 references 下发
-                anchor = self._extract_section_anchor(snippet)
+                # 章节定位 + 图片关联（章节标题优先，回退到 snippet 解析）
+                section = item.get("_section") or {}
+                anchor = section.get("section_title") or self._extract_section_anchor(snippet)
                 images = self._match_doc_images(item.get("id"), text, anchor)
                 self.references.append({
                     "id": item.get("id"),
                     "title": title,
                     "source": item.get("source") or "知识库",
                     "excerpt": snippet,
+                    "section": section.get("section_title", ""),
+                    "section_key": section.get("section_key", ""),
+                    "start_line": section.get("start_line", 0),
+                    "end_line": section.get("end_line", 0),
                     "images": [
                         {
                             "id": img.id,

@@ -86,7 +86,8 @@
           <ChatMessageList ref="msgListRef" :key="'cl-' + currentChatId + '-' + displayMessages.length"
             :messages="displayMessages" :loading="loadingPhase !== 'idle'" :isEmpty="displayMessages.length === 0"
             :chatId="currentChatId"
-            @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editMessage="handleEditMessage" />
+            @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editMessage="handleEditMessage"
+            @selectClarification="onSelectClarification" />
           <div class="input-wrapper">
             <ChatInputArea v-model="inputText" :files="attachedFiles" :selectedModel="selectedModel"
               :isUploading="isUploading" :canReport="canGenerateReport" :hasMessages="messages.length > 0"
@@ -162,6 +163,8 @@ const messages = ref<any[]>([])
 const currentChatId = ref(0)
 const canGenerateReport = ref(false)
 const lastAnalysis = ref<any>(null)
+// 附件分析需要补充信息时，记录日志 ID 与问题，用户补充后自动重跑
+const pendingClarification = ref<{ logId: number; questions: any[] } | null>(null)
 
 // 按 createdAt 升序排列，使用 ID 去重（而非内容去重）
 const displayMessages = computed(() => {
@@ -315,6 +318,7 @@ async function newChat() {
   sessionStorage.removeItem('activeChatId')
   canGenerateReport.value = false
   lastAnalysis.value = null
+  pendingClarification.value = null
   inputText.value = ''
   attachedFiles.value = []
   resetBranches()
@@ -327,6 +331,7 @@ async function selectChat(id: number) {
     router.push('/chat')
     return
   }
+  pendingClarification.value = null
 
   try {
     loadingPhase.value = 'sending'
@@ -588,6 +593,9 @@ async function sendMessage() {
     if (files.length > 0) {
       loadingPhase.value = 'uploading'
       await processFiles(files, userMsg)
+    } else if (pendingClarification.value) {
+      loadingPhase.value = 'analyzing'
+      await reanalyzeWithClarification(userMsg)
     } else if (userMsg) {
       loadingPhase.value = 'streaming'
       await streamChat(userMsg)
@@ -597,6 +605,49 @@ async function sendMessage() {
   } finally {
     loadingPhase.value = 'idle'
     isSending.value = false
+  }
+}
+
+/** 附件澄清后：用户补充信息，自动用上次日志重新分析 */
+async function reanalyzeWithClarification(text: string) {
+  const pending = pendingClarification.value
+  if (!pending) return
+  const started = Date.now()
+  const id = started.toString()
+  messageIds.add(id)
+  messages.value.push({
+    id,
+    role: 'assistant',
+    content: '',
+    createdAt: started,
+    thinking: { elapsed: 0, active: true, text: '正在结合补充信息重新分析…' },
+    sources: [] as ChatSource[],
+  })
+  const msg = messages.value[messages.value.length - 1]
+  try {
+    const res = await chatApi.runAnalysis(pending.logId, selectedModel.value, text)
+    const detail = (await chatApi.getAnalysisResult(res.data.id)).data
+    lastAnalysis.value = detail
+    const response = detail.diagnosis_markdown || detail.summary || '分析完成'
+    msg.content = response
+    msg.sources = detail.sources || detail.knowledge_sources || detail.references || []
+    msg.thinking.active = false
+    msg.thinking.elapsed = Math.max(1, Math.round((Date.now() - started) / 1000))
+    if (detail.needs_clarification && (detail.questions || []).length) {
+      msg.clarification = detail.questions
+      pendingClarification.value = { logId: pending.logId, questions: detail.questions }
+    } else {
+      pendingClarification.value = null
+    }
+    await chatApi.saveMessage(currentChatId.value, 'assistant', response, msg.sources, {
+      text: msg.thinking.text,
+      elapsed: msg.thinking.elapsed,
+    }).catch(() => {})
+  } catch (e: any) {
+    msg.content = `❌ 分析失败：${formatApiError(e)}`
+    msg.thinking.active = false
+  } finally {
+    msgListRef.value?.scrollToBottom()
   }
 }
 
@@ -724,6 +775,12 @@ async function processFiles(files: FileAttachment[], text: string) {
 
           processingMsg.content = response
           processingMsg.sources = sources
+          if (detail.needs_clarification && (detail.questions || []).length) {
+            processingMsg.clarification = detail.questions
+            pendingClarification.value = { logId, questions: detail.questions }
+          } else {
+            pendingClarification.value = null
+          }
           processingMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - analysisStartedAt) / 1000))
           processingMsg.thinking.active = false
           canGenerateReport.value = true
@@ -806,7 +863,14 @@ async function streamChat(text: string) {
       }
     },
     (sources: ChatSource[]) => { replyMsg.sources = sources },
+    (questions: any[]) => { replyMsg.clarification = questions },
   )
+}
+
+/** 供澄清选项芯片点击：把选项填入输入框，由用户确认后发送 */
+function onSelectClarification(value: string) {
+  const current = inputText.value.trim()
+  inputText.value = current ? `${current} ${value}` : value
 }
 
 function addMessage(role: string, content: string, files?: MsgAttachment[]) {

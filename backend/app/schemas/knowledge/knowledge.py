@@ -87,6 +87,7 @@ class KnowledgeResponse(BaseModel):
     status: str
     is_pinned: bool = False
     vector_id: Optional[str] = None
+    quality_score: Optional[float] = None
     images: List[KnowledgeImageResponse] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

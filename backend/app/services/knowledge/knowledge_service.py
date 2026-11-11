@@ -8,7 +8,8 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.models import KnowledgeDocument
+from app.models import KnowledgeDocument, KnowledgeDocumentMeta
+from app.services.knowledge.templates import guess_section_key
 
 
 class KnowledgeService:
@@ -20,6 +21,20 @@ class KnowledgeService:
     # ------------------------------------------------------------------
     # Create
     # ------------------------------------------------------------------
+
+    def _attach_quality(self, docs: List[KnowledgeDocument]) -> None:
+        """把 meta.quality_score 附加到文档对象上（供列表/详情展示）。"""
+        if not docs:
+            return
+        ids = [int(d.id) for d in docs]
+        metas = (
+            self.db.query(KnowledgeDocumentMeta)
+            .filter(KnowledgeDocumentMeta.doc_id.in_(ids))
+            .all()
+        )
+        quality_map = {int(m.doc_id): m.quality_score for m in metas}
+        for doc in docs:
+            setattr(doc, "quality_score", quality_map.get(int(doc.id)))
 
     def create(self, data: Dict[str, Any]) -> KnowledgeDocument:
         doc = KnowledgeDocument(
@@ -47,6 +62,7 @@ class KnowledgeService:
         ).first()
         if not doc:
             raise ValueError("knowledge document not found")
+        self._attach_quality([doc])
         return doc
 
     def list(
@@ -83,6 +99,7 @@ class KnowledgeService:
             .limit(page_size)
             .all()
         )
+        self._attach_quality(items)
 
         return {
             "items": items,
@@ -527,6 +544,71 @@ class KnowledgeService:
         if end < len(content):
             snippet = snippet + "..."
         return snippet
+
+    @staticmethod
+    def _extract_snippet_info(content: str, query: str, window: int = 300) -> Dict[str, Any]:
+        """提取含关键词的片段，并返回所属章节与行号范围。"""
+        base = {"snippet": "", "section_title": "", "section_key": "", "start_line": 0, "end_line": 0}
+        if not content or not query:
+            return {**base, "snippet": (content or "")[:window]}
+
+        idx = content.lower().find(query.lower())
+        if idx == -1:
+            for token in re.findall(r"[A-Za-z]*\d+[A-Za-z]*", query):
+                idx = content.lower().find(token.lower())
+                if idx != -1:
+                    break
+        if idx == -1:
+            return {**base, "snippet": content[:300]}
+
+        located = KnowledgeService._locate_markdown_section(content, idx)
+        if located:
+            return {**base, **located}
+
+        start = max(0, idx - window // 2)
+        end = min(len(content), idx + window // 2)
+        snippet = content[start:end]
+        if start > 0:
+            snippet = "..." + snippet
+        if end < len(content):
+            snippet = snippet + "..."
+        return {**base, "snippet": snippet}
+
+    @staticmethod
+    def _locate_markdown_section(content: str, keyword_idx: int) -> Optional[Dict[str, Any]]:
+        """定位关键词所属的 Markdown 章节，返回片段、章节标题与行号范围。"""
+        if keyword_idx < 0 or keyword_idx >= len(content):
+            return None
+        heading_pattern = re.compile(r"(?m)^(\#{1,6})\s+(.+?)\s*$")
+        before = content[:keyword_idx]
+        headings = list(heading_pattern.finditer(before))
+        if not headings:
+            return None
+        last = headings[-1]
+        level = len(last.group(1))
+        title = last.group(2).strip()
+        section_start = last.start()
+        after = content[keyword_idx:]
+        next_heading = None
+        for m in heading_pattern.finditer(after):
+            if len(m.group(1)) <= level:
+                next_heading = m
+                break
+        section_end = keyword_idx + next_heading.start() if next_heading else len(content)
+        section_text = content[section_start:section_end].strip()
+        if len(section_text) > 1500:
+            return None
+        start_line = content.count("\n", 0, section_start) + 1
+        end_line = content.count("\n", 0, section_end) + 1
+        prefix = "..." if section_start > 0 else ""
+        suffix = "..." if section_end < len(content) else ""
+        return {
+            "snippet": prefix + section_text + suffix,
+            "section_title": title,
+            "section_key": guess_section_key(title),
+            "start_line": start_line,
+            "end_line": end_line,
+        }
 
     @staticmethod
     def _extract_markdown_section(content: str, keyword_idx: int) -> Optional[str]:

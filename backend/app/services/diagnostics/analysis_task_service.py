@@ -99,6 +99,20 @@ class AnalysisTaskService:
         pipeline = DiagnosisPipeline(self.db, model=str(analysis.model or "mock"))
         result = pipeline.run(str(file_path), user_query=user_query or "")
 
+        # 无证据时，若缺少关键槽位则改为「反问引导」而非直接无结论
+        if result.get("support_missing"):
+            try:
+                from app.services.chat.clarification import ClarificationService
+                questions = ClarificationService(self.db).analyze(user_query or "")
+                if questions:
+                    result["needs_clarification"] = True
+                    result["questions"] = [q.to_dict() for q in questions]
+                    result["summary"] = "信息不足，无法唯一匹配知识库案例；请补充关键信息后重新分析。"
+                    result["root_cause"] = "需要补充设备/现场/版本等关键信息后才能给出结论。"
+                    result["confidence"] = 0.0
+            except Exception:
+                logger.debug("[_execute_analysis] clarification skipped", exc_info=True)
+
         # Persist
         setattr(analysis, 'result', json.dumps(result))
         setattr(analysis, 'summary', result.get("summary", ""))
@@ -122,6 +136,8 @@ class AnalysisTaskService:
             "confidence": analysis.confidence,
             "next_steps": self._normalize_next_steps(analysis.next_steps),
             "model": analysis.model,
+            "needs_clarification": bool(result.get("needs_clarification", False)),
+            "questions": result.get("questions", []) or [],
             "created_at": created_at_raw.isoformat() if created_at_raw is not None else None,
         }
 
@@ -188,9 +204,20 @@ class AnalysisTaskService:
         evidence = raw_result.get("evidence", []) or []
         support_missing = bool(raw_result.get("support_missing", False))
         log_facts = raw_result.get("log_facts", []) or []
+        needs_clarification = bool(raw_result.get("needs_clarification", False))
+        questions = raw_result.get("questions", []) or []
 
         # Pre-compute the Markdown representation on backend
-        if summary or root_cause:
+        if needs_clarification and questions:
+            clarify_lines: List[str] = ["## 需要补充信息", summary or "信息不足，请补充关键信息。", ""]
+            for q in questions:
+                options = "、".join(q.get("options") or [])
+                hint = f"（{q.get('hint')}）" if q.get("hint") else ""
+                clarify_lines.append(f"- **{q.get('label', '')}**{hint}：{options or '请补充'}")
+            clarify_lines.append("")
+            clarify_lines.append("补充以上信息后，请重新上传日志或补充说明以便继续分析。")
+            diagnosis_markdown = "\n".join(clarify_lines)
+        elif summary or root_cause:
             markdown_lines: List[str] = [
                 "## 诊断结果",
                 "",
@@ -209,15 +236,19 @@ class AnalysisTaskService:
             if evidence:
                 markdown_lines.append("### 知识库证据")
                 for d in evidence:
-                    matched = "、".join(
-                        f"L{m.get('line_no')}" for m in (d.get("matched_lines") or [])[:10]
-                    )
+                    title = d.get("title", "")
+                    parts = []
+                    for m in (d.get("matched_lines") or [])[:10]:
+                        sec = m.get("section")
+                        parts.append(
+                            f"《{title} · {sec} · L{m.get('line_no')}》" if sec
+                            else f"《{title} · L{m.get('line_no')}》"
+                        )
+                    matched = "、".join(parts)
                     verdict_cn = {"hit": "命中", "partial": "部分命中", "miss": "未命中"}.get(
                         d.get("verdict"), ""
                     )
-                    markdown_lines.append(
-                        f"- 《{d.get('title', '')}》判定：{verdict_cn}；命中行：{matched or '无'}"
-                    )
+                    markdown_lines.append(f"- 判定：{verdict_cn}；证据：{matched or '无'}")
                 markdown_lines.append("")
             if log_facts:
                 markdown_lines.append("### 日志事实")
@@ -245,6 +276,8 @@ class AnalysisTaskService:
             "evidence": evidence,
             "support_missing": support_missing,
             "log_facts": log_facts,
+            "needs_clarification": needs_clarification,
+            "questions": questions,
             "model": analysis.model or "mock",
             "error_message": analysis.error_message,
             "created_at": created_at_raw.isoformat() if created_at_raw is not None else None,

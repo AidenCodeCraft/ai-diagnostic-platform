@@ -20,7 +20,16 @@ from app.schemas import (
     KnowledgeProfileCreate,
     KnowledgeProfileResponse,
 )
-from app.services import KnowledgeService, KnowledgeImageService, KnowledgeProfileService
+from app.services import (
+    KnowledgeService,
+    KnowledgeImageService,
+    KnowledgeProfileService,
+    KnowledgeFormatService,
+    KnowledgeSectionService,
+    KnowledgeDocumentMetaService,
+    SectionParser,
+)
+from app.services.knowledge.templates import list_templates
 
 
 def get_db_session():
@@ -40,6 +49,51 @@ def _ingest_images(db: Session, doc_id: int, content: str, base_dir=None) -> Non
         KnowledgeService(db).update(doc_id, {"content": new_content})
 
 
+def _standardize(db: Session, doc_id: int, profile_override=None) -> Dict[str, Any]:
+    """入库强制规范化：内容规范化、分节/元信息落库、诊断剧本生成。"""
+    doc = KnowledgeService(db).get(doc_id)
+    fmt = KnowledgeFormatService().preview(doc.content or "", doc.doc_type, doc.title)
+
+    doc.content = fmt["normalized_content"]
+    doc.status = fmt["status_hint"]
+    db.commit()
+    db.refresh(doc)
+
+    parsed = SectionParser.parse(doc.content or "", doc.doc_type)
+    KnowledgeSectionService(db).replace(doc_id, parsed)
+    KnowledgeDocumentMetaService(db).upsert(doc_id, {
+        "template_key": doc.doc_type,
+        "quality_score": fmt["quality_score"],
+        "content_hash": KnowledgeDocumentMetaService.compute_hash(doc.content or ""),
+        "features": fmt["features"],
+    })
+
+    merged = dict(fmt["profile_draft"])
+    if profile_override:
+        for key, value in profile_override.items():
+            if value is not None:
+                merged[key] = value
+    meaningful = any(
+        merged.get(k) for k in ("symptom", "log_keywords", "log_patterns", "root_cause", "solution")
+    )
+    if meaningful or profile_override:
+        merged["status"] = "draft" if doc.status == "draft" else "active"
+        merged["source"] = "manual_override" if profile_override else "template"
+        KnowledgeProfileService(db).upsert(doc_id, merged)
+    return fmt
+
+
+def _doc_payload(db: Session, doc_id: int, fmt=None) -> Dict[str, Any]:
+    """返回文档 + 校验结果（issues / quality_score / suggested_keywords）。"""
+    doc = KnowledgeService(db).get(doc_id)
+    payload = KnowledgeResponse.model_validate(doc).model_dump()
+    if fmt is not None:
+        payload["issues"] = fmt.get("issues", [])
+        payload["quality_score"] = fmt.get("quality_score", 0.0)
+        payload["suggested_keywords"] = fmt.get("suggested_keywords", [])
+    return payload
+
+
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
@@ -48,21 +102,22 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 # ------------------------------------------------------------------
 
 
-@router.post("", response_model=KnowledgeResponse, status_code=201)
+@router.post("", status_code=201)
 def create_document(
     body: KnowledgeCreate,
     db: Session = Depends(get_db_session),
 ) -> Any:
-    """Create a new knowledge document (含内容中图片的入库与 URL 重写)。"""
+    """创建知识条目：入库前强制规范化 + 校验（图片、分节、质量分、诊断剧本）。"""
     data = body.model_dump()
     profile_data = data.pop("profile", None)
     content = data.get("content") or ""
     doc = KnowledgeService(db).create(data)
     if content:
         _ingest_images(db, doc.id, content)
-    if profile_data:
-        KnowledgeProfileService(db).upsert(doc.id, profile_data)
-    return KnowledgeService(db).get(doc.id)
+    if content and (doc.doc_type or "") != "folder":
+        fmt = _standardize(db, doc.id, profile_data)
+        return _doc_payload(db, doc.id, fmt)
+    return _doc_payload(db, doc.id)
 
 
 @router.post("/upload", response_model=KnowledgeResponse, status_code=201)
@@ -75,9 +130,10 @@ def upload_document(
 ) -> Any:
     """Upload a document file (.md, .txt) and import into knowledge base."""
     from pathlib import Path
+    from tempfile import gettempdir
     from app.services import DocumentImporter
 
-    tmp_path = Path("/tmp") / (file.filename or "upload")
+    tmp_path = Path(gettempdir()) / (file.filename or "upload")
     tmp_path.write_bytes(file.file.read())
 
     try:
@@ -94,8 +150,10 @@ def upload_document(
         })
         if content:
             _ingest_images(db, doc.id, content, base_dir=tmp_path.parent)
-            doc = KnowledgeService(db).get(doc.id)
-        return doc
+        if content and (doc_type or "") != "folder":
+            fmt = _standardize(db, doc.id, None)
+            return _doc_payload(db, doc.id, fmt)
+        return _doc_payload(db, doc.id)
     finally:
         if tmp_path.exists():
             tmp_path.unlink()
@@ -245,6 +303,36 @@ def save_profile(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/templates")
+def get_templates() -> Dict[str, Any]:
+    """返回全部知识模板契约（章节与必填级别）。"""
+    return {"templates": list_templates()}
+
+
+@router.get("/{doc_id}/sections")
+def get_sections(
+    doc_id: int,
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """返回知识条目的分节（章节 + 行号范围），供预览/审核/定位。"""
+    try:
+        KnowledgeService(db).get(doc_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    rows = KnowledgeSectionService(db).list(doc_id)
+    return {"sections": [KnowledgeSectionService.to_dict(r) for r in rows]}
+
+
+@router.post("/format/preview")
+def format_preview(body: Dict[str, Any]) -> Dict[str, Any]:
+    """不落库：规范化 + 校验，返回「提交后格式」预览。"""
+    return KnowledgeFormatService().preview(
+        content=body.get("content") or "",
+        doc_type=body.get("doc_type"),
+        title=body.get("title"),
+    )
+
+
 @router.get("/{doc_id}", response_model=KnowledgeResponse)
 def get_document(
     doc_id: int,
@@ -262,13 +350,13 @@ def get_document(
 # ------------------------------------------------------------------
 
 
-@router.put("/{doc_id}", response_model=KnowledgeResponse)
+@router.put("/{doc_id}")
 def update_document(
     doc_id: int,
     body: KnowledgeUpdate,
     db: Session = Depends(get_db_session),
 ) -> Any:
-    """Update a knowledge document (含内容中图片的入库与 URL 重写)。"""
+    """更新知识条目：内容变更时强制重新规范化 + 校验。"""
     try:
         data = body.model_dump(exclude_unset=True)
         profile_data = data.pop("profile", None)
@@ -277,9 +365,10 @@ def update_document(
                 doc_id, data["content"],
             )
         doc = KnowledgeService(db).update(doc_id, data)
-        if profile_data:
-            KnowledgeProfileService(db).upsert(doc_id, profile_data)
-        return doc
+        if (data.get("content") or data.get("doc_type") or profile_data) and (doc.doc_type or "") != "folder":
+            fmt = _standardize(db, doc_id, profile_data)
+            return _doc_payload(db, doc_id, fmt)
+        return _doc_payload(db, doc_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

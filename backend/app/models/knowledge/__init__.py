@@ -3,6 +3,8 @@ from app.models.knowledge.knowledge import (
     KnowledgeImage,
     KnowledgeImageFeedback,
     KnowledgeDiagnosisProfile,
+    KnowledgeSection,
+    KnowledgeDocumentMeta,
 )
 
 __all__ = [
@@ -10,4 +12,6 @@ __all__ = [
     "KnowledgeImage",
     "KnowledgeImageFeedback",
     "KnowledgeDiagnosisProfile",
+    "KnowledgeSection",
+    "KnowledgeDocumentMeta",
 ]
