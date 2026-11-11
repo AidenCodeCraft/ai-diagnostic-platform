@@ -63,6 +63,10 @@ export const chatApi = {
   updateFeedback(sessionId: number, messageId: number, feedback: string | null) {
     return client.put(`/chat-sessions/${sessionId}/messages/${messageId}/feedback`, { feedback })
   },
+  /** 标记消息已解决并触发自进化蒸馏（生成待审核的知识库候选） */
+  resolveMessage(sessionId: number, messageId: number | string, resolved = true) {
+    return client.post(`/chat-sessions/${sessionId}/messages/${messageId}/resolve`, { resolved })
+  },
   /** SSE stream with optional diagnostic context */
   async sendMessageStream(
     sessionId: number,

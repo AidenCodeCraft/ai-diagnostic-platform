@@ -86,6 +86,38 @@
           <div v-if="!rulesLoading && rules.length === 0" class="empty-hint">暂无诊断规则</div>
         </div>
       </el-tab-pane>
+
+      <!-- 知识自进化审核 -->
+      <el-tab-pane label="知识自进化审核" name="drafts">
+        <div class="tab-header">
+          <span class="tab-hint">用户标记「已解决」后自动蒸馏出的知识库候选，审核通过后才会进入检索。</span>
+          <el-button size="small" @click="fetchDrafts" :loading="draftsLoading">刷新</el-button>
+        </div>
+        <div class="audit-table-wrap">
+          <el-table :data="drafts" stripe v-loading="draftsLoading">
+            <el-table-column prop="title" label="候选标题" min-width="180" />
+            <el-table-column prop="symptom" label="现象" min-width="150">
+              <template #default="{ row }">{{ row.symptom || '—' }}</template>
+            </el-table-column>
+            <el-table-column prop="log_keywords" label="日志关键词" min-width="150">
+              <template #default="{ row }">{{ (row.log_keywords || []).join('、') || '—' }}</template>
+            </el-table-column>
+            <el-table-column prop="confidence" label="置信度" width="80">
+              <template #default="{ row }">{{ row.confidence != null ? (row.confidence * 100).toFixed(0) + '%' : '—' }}</template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="创建时间" width="170">
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="150" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" type="primary" @click="approveDraft(row)">通过</el-button>
+                <el-button size="small" type="danger" @click="rejectDraft(row)">驳回</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-if="!draftsLoading && drafts.length === 0" class="empty-hint">暂无自进化候选</div>
+        </div>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -93,6 +125,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import client from '@/api/client'
+import { ElMessage } from 'element-plus'
 
 const activeTab = ref('analyses')
 
@@ -100,11 +133,13 @@ const analyses = ref<any[]>([])
 const bugCases = ref<any[]>([])
 const plugins = ref<any[]>([])
 const rules = ref<any[]>([])
+const drafts = ref<any[]>([])
 
 const analysesLoading = ref(false)
 const bugsLoading = ref(false)
 const pluginsLoading = ref(false)
 const rulesLoading = ref(false)
+const draftsLoading = ref(false)
 
 const analysisStatus = ref('')
 
@@ -187,11 +222,46 @@ async function fetchRules() {
   }
 }
 
+// ── 知识自进化审核 ─────────────────────────────────────
+async function fetchDrafts() {
+  draftsLoading.value = true
+  try {
+    const { data } = await client.get('/admin/knowledge/profiles/drafts')
+    drafts.value = data.items || []
+  } catch (e: any) {
+    drafts.value = []
+    console.error('[Audit] fetchDrafts failed:', e?.response?.data?.detail || e?.message || e)
+  } finally {
+    draftsLoading.value = false
+  }
+}
+
+async function approveDraft(row: any) {
+  try {
+    await client.post(`/admin/knowledge/profiles/${row.id}/approve`)
+    ElMessage.success('已通过，候选已进入知识库检索')
+    await fetchDrafts()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '操作失败')
+  }
+}
+
+async function rejectDraft(row: any) {
+  try {
+    await client.post(`/admin/knowledge/profiles/${row.id}/reject`)
+    ElMessage.success('已驳回')
+    await fetchDrafts()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '操作失败')
+  }
+}
+
 onMounted(() => {
   fetchAnalyses()
   fetchBugCases()
   fetchPlugins()
   fetchRules()
+  fetchDrafts()
 })
 </script>
 
@@ -199,6 +269,7 @@ onMounted(() => {
 .page-title { font-size: 20px; font-weight: 600; color: #1f2937; margin: 0 0 20px; }
 .audit-tabs { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 0 16px 16px; }
 .tab-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding-top: 8px; }
+.tab-hint { font-size: 12px; color: #9ca3af; margin-right: auto; }
 .audit-table-wrap { min-height: 200px; }
 .empty-hint { text-align: center; padding: 40px 0; color: #9ca3af; font-size: 14px; }
 </style>

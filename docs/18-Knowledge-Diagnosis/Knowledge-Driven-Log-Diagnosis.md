@@ -172,5 +172,5 @@ KB 命中条目 → 取该条目的 KnowledgeDiagnosisProfile
 
 - [x] **阶段 A**：profile 表 / 服务 / Schema / API / 前端「诊断配置」表单
 - [x] **阶段 B**：`KnowledgeLogLocator` + `DiagnosisPipeline` Stage 4.5 + 强约束 Prompt（v3.0）+ 结果带证据
-- [ ] **阶段 C**：自进化（蒸馏 + 反馈触发 + 审核队列）
+- [x] **阶段 C**：自进化（蒸馏 + 反馈触发 + 审核队列 + 管理后台「审核监控」审核页）
 - [ ] **阶段 D**：存量 KB 批量回填

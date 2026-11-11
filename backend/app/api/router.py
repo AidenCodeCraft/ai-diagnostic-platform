@@ -9,6 +9,7 @@ from app.api.auth.api_keys import router as api_keys_router
 # ── Admin ────────────────────────────────────────────────────
 from app.api.admin import router as admin_router
 from app.api.admin.users import router as users_router
+from app.api.admin.knowledge_review import router as knowledge_review_router
 
 # ── Chat ─────────────────────────────────────────────────────
 from app.api.chat.chat_sessions import router as chat_sessions_router
@@ -48,6 +49,7 @@ api_router.include_router(api_keys_router)
 # Admin
 api_router.include_router(admin_router)
 api_router.include_router(users_router)
+api_router.include_router(knowledge_review_router)
 
 # Chat
 api_router.include_router(chat_sessions_router)

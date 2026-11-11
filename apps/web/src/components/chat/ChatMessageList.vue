@@ -65,6 +65,9 @@
             <button class="action-btn" @click="regenerateMessage(msg)" title="重新生成">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             </button>
+            <button v-if="msg._persisted" class="action-btn" :class="{ active: msg._resolved }" @click="resolveMessage(msg)" :title="msg._resolved ? '已标记解决' : '标记已解决并沉淀知识'">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            </button>
             <button class="action-btn" :class="{ active: msg._liked }" @click="likeMessage(msg)" title="有帮助">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
             </button>
@@ -882,6 +885,17 @@ function dislikeMessage(msg: any) {
   if (props.chatId) {
     chatApi.updateFeedback(props.chatId, msg.id, newDisliked ? 'dislike' : null)
       .catch(e => console.warn('[dislikeMessage] persist failed:', e))
+  }
+}
+
+/** 标记「已解决」并触发自进化蒸馏（仅对已持久化的消息可用） */
+async function resolveMessage(msg: any) {
+  if (!props.chatId || !msg._persisted) return
+  try {
+    await chatApi.resolveMessage(props.chatId, msg.id, true)
+    msg._resolved = true
+  } catch (e) {
+    console.warn('[resolveMessage] failed:', e)
   }
 }
 

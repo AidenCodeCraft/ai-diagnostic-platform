@@ -7,6 +7,7 @@ from app.services.knowledge.vector_service import VectorService, get_vector_serv
 from app.services.knowledge.provider_registry import ProviderRegistry
 from app.services.knowledge.embedding import EmbeddingService, get_embedder
 from app.services.knowledge.document_indexer import DocumentIndexer
+from app.services.knowledge.distiller import KnowledgeDistiller
 
 __all__ = [
     "KnowledgeService",
@@ -20,4 +21,5 @@ __all__ = [
     "EmbeddingService",
     "get_embedder",
     "DocumentIndexer",
+    "KnowledgeDistiller",
 ]

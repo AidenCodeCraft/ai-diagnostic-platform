@@ -30,7 +30,7 @@ class KnowledgeService:
             doc_type=data.get("doc_type", "manual"),
             parent_id=data.get("parent_id"),
             project_id=data.get("project_id"),
-            status="active",
+            status=data.get("status") or "active",
         )
         self.db.add(doc)
         self.db.commit()

@@ -80,6 +80,24 @@ class KnowledgeProfileService:
             .all()
         )
 
+    def list_drafts_with_docs(self) -> List[Dict[str, Any]]:
+        """审核队列：草稿剧本 + 其对应知识条目信息。"""
+        rows = (
+            self.db.query(KnowledgeDiagnosisProfile, KnowledgeDocument)
+            .join(KnowledgeDocument, KnowledgeDiagnosisProfile.doc_id == KnowledgeDocument.id)
+            .filter(KnowledgeDiagnosisProfile.status == "draft")
+            .order_by(KnowledgeDiagnosisProfile.created_at.desc())
+            .all()
+        )
+        items: List[Dict[str, Any]] = []
+        for profile, doc in rows:
+            item = self.to_dict(profile)
+            item["title"] = doc.title
+            item["content"] = doc.content
+            item["doc_created_at"] = doc.created_at.isoformat() if doc.created_at else None
+            items.append(item)
+        return items
+
     # ------------------------------------------------------------------
     # 写入
     # ------------------------------------------------------------------
@@ -140,16 +158,40 @@ class KnowledgeProfileService:
     # ------------------------------------------------------------------
 
     def approve(self, profile_id: int) -> KnowledgeDiagnosisProfile:
+        """审核通过：激活剧本与其对应知识条目，并提升置信度。"""
         profile = self.get_by_id(profile_id)
         profile.status = "active"
+        profile.confidence = min(1.0, (profile.confidence or 0.3) + 0.2)
         profile.updated_at = datetime.now(timezone.utc)
+        doc = (
+            self.db.query(KnowledgeDocument)
+            .filter(KnowledgeDocument.id == profile.doc_id)
+            .first()
+        )
+        if doc is not None:
+            doc.status = "active"
+            doc.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         self.db.refresh(profile)
         return profile
 
     def reject(self, profile_id: int) -> None:
+        """驳回候选：删除剧本；自进化候选连同其草稿知识条目一并删除。"""
         profile = self.get_by_id(profile_id)
+        doc = None
+        if (profile.source or "") == "ai_candidate":
+            doc = (
+                self.db.query(KnowledgeDocument)
+                .filter(
+                    KnowledgeDocument.id == profile.doc_id,
+                    KnowledgeDocument.status == "draft",
+                )
+                .first()
+            )
         self.db.delete(profile)
+        self.db.flush()
+        if doc is not None:
+            self.db.delete(doc)
         self.db.commit()
 
     # ------------------------------------------------------------------
@@ -172,4 +214,5 @@ class KnowledgeProfileService:
             "confidence": profile.confidence if profile.confidence is not None else 0.8,
             "status": profile.status or "active",
             "source": profile.source or "manual",
+            "created_at": profile.created_at.isoformat() if profile.created_at else None,
         }

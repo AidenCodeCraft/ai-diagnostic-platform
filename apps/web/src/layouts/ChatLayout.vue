@@ -345,6 +345,7 @@ async function selectChat(id: number) {
         createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
         files: extractFiles(m),
         sources: m.sources || [],
+        _persisted: true,
       }
       
       // 恢复持久化的思维链数据（短内容默认展开，长内容折叠）

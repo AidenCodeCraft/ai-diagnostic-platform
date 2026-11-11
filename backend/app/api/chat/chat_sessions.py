@@ -173,3 +173,34 @@ def update_message_feedback(
     msg.feedback = fb or None  # type: ignore[assignment]
     db.commit()
     return {"ok": True, "feedback": msg.feedback}
+
+
+@router.post("/{session_id}/messages/{message_id}/resolve")
+def resolve_message(
+    session_id: int,
+    message_id: int,
+    body: Dict[str, Any],
+    db: Session = Depends(get_db_session),
+):
+    """用户确认「已解决/未解决」。已解决时触发自进化蒸馏（生成待审核候选）。"""
+    resolved = bool(body.get("resolved"))
+    if not resolved:
+        return {"ok": True, "resolved": False, "candidate_profile_id": None}
+
+    session = ChatService(db).get_session(session_id)
+    from app.services.knowledge.distiller import KnowledgeDistiller
+
+    try:
+        profile = KnowledgeDistiller(db).distill_for_message(
+            session_id, message_id, model=session.model,
+        )
+    except Exception as exc:
+        logger.error("[resolve_message] session=%s message=%s distill failed: %s",
+                     session_id, message_id, exc)
+        raise HTTPException(status_code=500, detail=f"蒸馏失败: {exc}") from exc
+
+    return {
+        "ok": True,
+        "resolved": True,
+        "candidate_profile_id": profile.id if profile else None,
+    }
