@@ -97,46 +97,53 @@ class KnowledgeService:
         page: int = 1,
         page_size: int = 20,
     ) -> Dict[str, Any]:
-        """Hybrid search: tries vector search (Milvus) first, falls back to keyword.
+        """Run one consistent hybrid search for every caller.
 
-        Search pipeline:
-        1. Try Milvus vector search (semantic)
-        2. If no results, try keyword phrase search (exact match)
-        3. If still no results, try token-based search (fuzzy match)
-
-        Keyword search now supports token-based matching:
-        first tries exact phrase ILIKE, then falls back to
-        individual token OR-matching for better recall.
+        Dense and sparse retrieval use different score scales, so they are
+        merged by rank rather than by comparing their raw scores.
         """
-        # Try vector search first (Milvus)
         try:
-            from app.services.knowledge.vector_service import VectorService
-            vector = VectorService()
-            vector_results = vector.search(query_text, top_k=page_size)
+            from app.services.knowledge.retrievers import (
+                BM25Retriever,
+                HybridRetriever,
+                MilvusRetriever,
+            )
 
-            if vector_results:
-                doc_ids = [r["id"] for r in vector_results]
-                docs = self.db.query(KnowledgeDocument).filter(
-                    KnowledgeDocument.id.in_(doc_ids),
-                    KnowledgeDocument.status == "active",
-                ).all()
-                doc_map = {int(d.id): d for d in docs}  # type: ignore[arg-type]
-                results = []
-                for vr in vector_results:
-                    doc = doc_map.get(vr["id"])
-                    if doc:
-                        results.append({
-                            "id": doc.id, "title": doc.title,
-                            "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
-                            "relevance_score": round(vr.get("score", 0), 2),
-                            "snippet": self._extract_snippet(str(doc.content), query_text),
-                        })
-                return {"items": results, "total": len(results), "page": page, "page_size": page_size}
+            docs = (
+                self.db.query(KnowledgeDocument)
+                .filter(KnowledgeDocument.status == "active")
+                .order_by(KnowledgeDocument.updated_at.desc())
+                .limit(1000)
+                .all()
+            )
+            sparse = BM25Retriever()
+            sparse.index([
+                (int(doc.id), f"{doc.title or ''}\n{doc.content or ''}")
+                for doc in docs
+            ])
+            retriever = HybridRetriever(MilvusRetriever(), sparse)
+            retrieved = retriever.retrieve(query_text, top_k=max(page_size, 10))
+
+            doc_map = {int(doc.id): doc for doc in docs}
+            results = []
+            seen_ids = set()
+            for item in retrieved:
+                doc = doc_map.get(int(item.chunk.doc_id))
+                if not doc or doc.id in seen_ids:
+                    continue
+                seen_ids.add(doc.id)
+                results.append({
+                    "id": doc.id, "title": doc.title,
+                    "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
+                    "relevance_score": round(item.score, 4),
+                    "snippet": self._extract_snippet(str(doc.content), query_text),
+                })
+            if results:
+                return {"items": results[:page_size], "total": len(results), "page": page, "page_size": page_size}
         except Exception as exc:
             logger = __import__("app.core.logging_config", fromlist=["get_logger"]).get_logger(__name__)
-            logger.debug("[KnowledgeService] Vector search unavailable, falling back to keyword: %s", exc)
+            logger.debug("[KnowledgeService] Hybrid search unavailable, falling back to keyword: %s", exc)
 
-        # Fallback: BM25 关键词检索（替换旧的 ILIKE 回退）
         items = self._keyword_search_bm25(query_text, page_size)
         if items:
             total = len(items)
@@ -199,7 +206,7 @@ class KnowledgeService:
                             str(doc.content), query_text,
                         ),
                     })
-            return items
+            return items or self._keyword_search_phrase(query_text, limit)
         except Exception as e:
             logger = __import__("app.core.logging_config", fromlist=["get_logger"]).get_logger(__name__)
             logger.debug("[KnowledgeService] BM25 search failed, falling back to ILIKE: %s", e)

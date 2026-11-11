@@ -112,6 +112,11 @@ _NOISE_TOKENS: Set[str] = {
     "中搜", "志中", "在日", "该在", "我应",
 }
 
+_QUERY_ACTION_PATTERN = re.compile(
+    r"^(?:(?:我想|想|查询|搜索|查找|查|搜))+|"
+    r"(?:查询|搜索|查找|查|搜)(?:什么)?$"
+)
+
 # =========================================================================
 # 数据结构
 # =========================================================================
@@ -403,12 +408,24 @@ class QueryPreprocessor:
         intents = [w for w in intents if w not in all_stop and w not in entities]
         # full_segments 额外过滤：去掉被其他更长 segment 包含的短片段
         full_segments = [s for s in full_segments if s not in all_stop and s not in entities]
+        normalized_segments: List[str] = []
+        for segment in full_segments:
+            normalized = _QUERY_ACTION_PATTERN.sub("", segment).strip()
+            if (
+                len(normalized) >= 2
+                and normalized not in all_stop
+                and normalized not in entities
+                and normalized not in normalized_segments
+            ):
+                normalized_segments.append(normalized)
         # 去重：如果短片段是长片段的子串，保留长片段
         filtered_segments: List[str] = []
         for seg in sorted(full_segments, key=len, reverse=True):
             if not any(seg in other and seg != other for other in filtered_segments):
                 filtered_segments.append(seg)
-        full_segments = filtered_segments
+        full_segments = normalized_segments + [
+            seg for seg in filtered_segments if seg not in normalized_segments
+        ]
 
         # 6. 剥离指令 → cleaned
         cleaned = raw
@@ -520,6 +537,7 @@ class QueryPreprocessor:
                 layers.append(SearchLayer(
                     priority=priority, name="意图搜索",
                     terms=intent_terms[:15], page_size=5,
+                    stop_on_high_score=False,
                 ))
                 priority += 1
 
@@ -598,12 +616,9 @@ class QueryPreprocessor:
                 if layer.stop_on_high_score and high_score_ids and len(all_items) >= 3:
                     break
 
-            # 如果该层找到了高分结果，停止降级
-            if high_score_ids and len(all_items) >= 3:
-                break
-
-        # 兜底：用 fallback 词搜索
-        if not all_items and plan.fallback_terms:
+        # 完整问题始终参与召回，避免宽泛词的无关结果阻断语义检索。
+        # 结果合并后统一排序，因此完整问题只会增加候选，不会覆盖已有结果。
+        if plan.fallback_terms:
             for term in plan.fallback_terms[:3]:
                 total_attempted += 1
                 try:
@@ -616,10 +631,11 @@ class QueryPreprocessor:
                     if doc_id not in seen_ids:
                         seen_ids.add(doc_id)
                         all_items.append(item)
-                if all_items:
+                        matched_layer = "完整问题搜索"
+                        matched_term = term
+                if items and matched_layer == "无匹配":
                     matched_layer = "兜底搜索"
                     matched_term = term
-                    break
 
         # 排序
         all_items.sort(

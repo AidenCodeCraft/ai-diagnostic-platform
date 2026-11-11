@@ -17,8 +17,10 @@ from app.schemas import (
     KnowledgeSearchResult,
     KnowledgeTreeResponse,
     KnowledgeImageResponse,
+    KnowledgeProfileCreate,
+    KnowledgeProfileResponse,
 )
-from app.services import KnowledgeService, KnowledgeImageService
+from app.services import KnowledgeService, KnowledgeImageService, KnowledgeProfileService
 
 
 def get_db_session():
@@ -53,12 +55,14 @@ def create_document(
 ) -> Any:
     """Create a new knowledge document (含内容中图片的入库与 URL 重写)。"""
     data = body.model_dump()
+    profile_data = data.pop("profile", None)
     content = data.get("content") or ""
     doc = KnowledgeService(db).create(data)
     if content:
         _ingest_images(db, doc.id, content)
-        doc = KnowledgeService(db).get(doc.id)
-    return doc
+    if profile_data:
+        KnowledgeProfileService(db).upsert(doc.id, profile_data)
+    return KnowledgeService(db).get(doc.id)
 
 
 @router.post("/upload", response_model=KnowledgeResponse, status_code=201)
@@ -210,6 +214,37 @@ def feedback_image(
     return {"ok": True, "image_id": image_id, "feedback": feedback}
 
 
+# ------------------------------------------------------------------
+# Diagnosis profile (「诊断剧本」结构化信息)
+# ------------------------------------------------------------------
+
+
+@router.get("/{doc_id}/profile", response_model=Optional[KnowledgeProfileResponse])
+def get_profile(
+    doc_id: int,
+    db: Session = Depends(get_db_session),
+) -> Any:
+    """获取知识条目的诊断剧本；不存在返回 null。"""
+    profile = KnowledgeProfileService(db).get(doc_id)
+    if not profile:
+        return None
+    return KnowledgeProfileService.to_dict(profile)
+
+
+@router.put("/{doc_id}/profile", response_model=KnowledgeProfileResponse)
+def save_profile(
+    doc_id: int,
+    body: KnowledgeProfileCreate,
+    db: Session = Depends(get_db_session),
+) -> Any:
+    """新增/更新知识条目的诊断剧本。"""
+    try:
+        profile = KnowledgeProfileService(db).upsert(doc_id, body.model_dump())
+        return KnowledgeProfileService.to_dict(profile)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/{doc_id}", response_model=KnowledgeResponse)
 def get_document(
     doc_id: int,
@@ -236,11 +271,15 @@ def update_document(
     """Update a knowledge document (含内容中图片的入库与 URL 重写)。"""
     try:
         data = body.model_dump(exclude_unset=True)
+        profile_data = data.pop("profile", None)
         if data.get("content"):
             data["content"] = KnowledgeImageService(db).process_document_images(
                 doc_id, data["content"],
             )
-        return KnowledgeService(db).update(doc_id, data)
+        doc = KnowledgeService(db).update(doc_id, data)
+        if profile_data:
+            KnowledgeProfileService(db).upsert(doc_id, profile_data)
+        return doc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

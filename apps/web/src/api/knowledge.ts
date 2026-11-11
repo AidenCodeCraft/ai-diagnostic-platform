@@ -22,8 +22,24 @@ export interface KnowledgeDoc {
   created_at: string
 }
 
+export interface KnowledgeProfile {
+  id?: number
+  doc_id?: number
+  symptom?: string | null
+  environment?: string | null
+  log_keywords?: string[]
+  log_patterns?: string[]
+  negative_patterns?: string[]
+  expected?: string | null
+  root_cause?: string | null
+  solution?: string | null
+  confidence?: number
+  status?: string
+  source?: string
+}
+
 export const knowledgeApi = {
-  create(data: { title: string; content: string; category?: string; doc_type?: string }) {
+  create(data: { title: string; content: string; category?: string; doc_type?: string; parent_id?: number; profile?: KnowledgeProfile }) {
     return client.post<KnowledgeDoc>('/knowledge', data)
   },
   list(params?: { page?: number; page_size?: number; category?: string; doc_type?: string; parent_id?: number }) {
@@ -61,5 +77,12 @@ export const knowledgeApi = {
   /** 逐图反馈：标记「不相关」以优化后续关联 */
   feedbackImage(imageId: number, feedback: 'irrelevant') {
     return client.post(`/knowledge/images/${imageId}/feedback`, { feedback })
+  },
+  /** 诊断剧本（结构化诊断信息） */
+  getProfile(docId: number) {
+    return client.get<KnowledgeProfile | null>(`/knowledge/${docId}/profile`)
+  },
+  saveProfile(docId: number, data: KnowledgeProfile) {
+    return client.put<KnowledgeProfile>(`/knowledge/${docId}/profile`, data)
   },
 }

@@ -103,7 +103,8 @@ class AnalysisTaskService:
         setattr(analysis, 'result', json.dumps(result))
         setattr(analysis, 'summary', result.get("summary", ""))
         setattr(analysis, 'root_cause', result.get("root_cause", ""))
-        setattr(analysis, 'confidence', float(result.get("confidence", 0.5) or 0.5))
+        _confidence = result.get("confidence", 0.5)
+        setattr(analysis, 'confidence', float(_confidence if _confidence is not None else 0.5))
         next_steps = result.get("next_steps", [])
         setattr(analysis, 'next_steps', json.dumps(self._normalize_next_steps(next_steps)))
         setattr(analysis, 'model', str(analysis.model or "diagnosis-pipeline"))
@@ -174,6 +175,20 @@ class AnalysisTaskService:
         root_cause = str(analysis.root_cause or "")
         next_steps = self._normalize_next_steps(analysis.next_steps)
 
+        # 解析原始结果 JSON（含证据 / 定位 / 无支撑标记）
+        raw_result: Dict[str, Any] = {}
+        if analysis.result:
+            try:
+                parsed = json.loads(str(analysis.result))
+                if isinstance(parsed, dict):
+                    raw_result = parsed
+            except (json.JSONDecodeError, TypeError):
+                raw_result = {}
+        detections = raw_result.get("detections", []) or []
+        evidence = raw_result.get("evidence", []) or []
+        support_missing = bool(raw_result.get("support_missing", False))
+        log_facts = raw_result.get("log_facts", []) or []
+
         # Pre-compute the Markdown representation on backend
         if summary or root_cause:
             markdown_lines: List[str] = [
@@ -187,8 +202,28 @@ class AnalysisTaskService:
                 "",
                 f"诊断置信度：**{confidence_str}**",
                 "",
-                "### 建议措施",
             ]
+            if support_missing:
+                markdown_lines.append("> 知识库中暂无支撑，本结果未输出推测性诊断结论。")
+                markdown_lines.append("")
+            if evidence:
+                markdown_lines.append("### 知识库证据")
+                for d in evidence:
+                    matched = "、".join(
+                        f"L{m.get('line_no')}" for m in (d.get("matched_lines") or [])[:10]
+                    )
+                    verdict_cn = {"hit": "命中", "partial": "部分命中", "miss": "未命中"}.get(
+                        d.get("verdict"), ""
+                    )
+                    markdown_lines.append(
+                        f"- 《{d.get('title', '')}》判定：{verdict_cn}；命中行：{matched or '无'}"
+                    )
+                markdown_lines.append("")
+            if log_facts:
+                markdown_lines.append("### 日志事实")
+                markdown_lines.extend(str(f) for f in log_facts)
+                markdown_lines.append("")
+            markdown_lines.append("### 建议措施")
             for i, s in enumerate(next_steps):
                 markdown_lines.append(f"{i + 1}. {s}")
             diagnosis_markdown = "\n".join(markdown_lines)
@@ -206,6 +241,10 @@ class AnalysisTaskService:
             "confidence": analysis.confidence or 0.0,
             "next_steps": next_steps,
             "diagnosis_markdown": diagnosis_markdown,
+            "detections": detections,
+            "evidence": evidence,
+            "support_missing": support_missing,
+            "log_facts": log_facts,
             "model": analysis.model or "mock",
             "error_message": analysis.error_message,
             "created_at": created_at_raw.isoformat() if created_at_raw is not None else None,

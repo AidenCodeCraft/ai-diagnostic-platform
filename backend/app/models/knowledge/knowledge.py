@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import relationship
 
 from app.database.base import Base
@@ -88,3 +88,41 @@ class KnowledgeImageFeedback(Base):
     )
     feedback = Column(String(20), nullable=False)  # 'irrelevant'
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class KnowledgeDiagnosisProfile(Base):
+    """知识库「诊断剧本」— 让知识条目可执行地驱动日志检索与判定。
+
+    与 KnowledgeDocument 1:1。自进化候选复用同表（status=draft, source=ai_candidate）。
+    """
+
+    __tablename__ = "knowledge_diagnosis_profiles"
+
+    id = Column(Integer, primary_key=True)
+    doc_id = Column(
+        Integer,
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    symptom = Column(Text, nullable=True)
+    environment = Column(String(300), nullable=True)
+    # 要搜的日志关键词 / 正则 / 排除正则（JSON list[str]）
+    log_keywords = Column(JSON, default=list)
+    log_patterns = Column(JSON, default=list)
+    negative_patterns = Column(JSON, default=list)
+    # 命中后如何判定（如版本号格式）
+    expected = Column(Text, nullable=True)
+    root_cause = Column(Text, nullable=True)
+    solution = Column(Text, nullable=True)
+    # 可信度（自进化权重）
+    confidence = Column(Float, default=0.8)
+    status = Column(String(20), default="active")  # draft / active / archived
+    source = Column(String(20), default="manual")  # manual / ai_candidate
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

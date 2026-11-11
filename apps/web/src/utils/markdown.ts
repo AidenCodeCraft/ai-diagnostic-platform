@@ -97,11 +97,30 @@ function escapeHtml(value: string): string {
 marked.use({ renderer })
 
 /**
+ * 将 ref:// 链接 URL 中的空格编码为 %20。
+ *
+ * 背景：LLM 生成的引用链接锚点可能含空格（如
+ * `ref://1#1. 实际运行方向与当前线路运行方向相反`），
+ * 而 CommonMark 规范规定链接 URL 不能含未转义空格，
+ * 导致 marked 解析失败、链接退化为原始文本。
+ *
+ * 此处仅编码空格（保留其余字符），跳转时 scrollToDocAnchor
+ * 通过 decodeURIComponent 可正确还原。
+ */
+function encodeRefUrlSpaces(text: string): string {
+  return text.replace(
+    /\]\((ref:\/\/[^)\n]+)\)/g,
+    (_match, url: string) => `](${url.replace(/ /g, '%20')})`,
+  )
+}
+
+/**
  * 渲染 Markdown 文本
  */
 export function renderMarkdown(text: string): string {
   try {
-    return marked.parse(text) as string
+    const normalized = encodeRefUrlSpaces(text)
+    return marked.parse(normalized) as string
   } catch (error) {
     console.error('Markdown render error:', error)
     return text.replace(/\n/g, '<br>')

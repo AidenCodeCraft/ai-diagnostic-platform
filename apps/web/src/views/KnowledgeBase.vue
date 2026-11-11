@@ -174,6 +174,7 @@
         <el-input v-model="form.title" placeholder="笔记标题" style="width:300px;font-size:18px;font-weight:600" />
         <el-input v-model="form.category" placeholder="分类（可选）" style="width:200px;margin-left:8px" />
         <div style="margin-left:auto;display:flex;gap:8px">
+          <el-button @click="showProfile = true">诊断配置</el-button>
           <el-button @click="cancelEdit">取消</el-button>
           <el-button type="primary" @click="save" :loading="saving">{{ editingId ? '保存' : '创建' }}</el-button>
         </div>
@@ -209,6 +210,42 @@
     <el-dialog v-model="showRename" title="重命名" width="400px">
       <el-input v-model="renameName" placeholder="新名称" />
       <template #footer><el-button @click="showRename = false">取消</el-button><el-button type="primary" @click="doRename">确认</el-button></template>
+    </el-dialog>
+
+    <!-- 诊断剧本（结构化诊断信息），随知识条目保存 -->
+    <el-dialog v-model="showProfile" title="诊断配置（可选）" width="640px" top="6vh">
+      <el-form label-width="110px" label-position="left">
+        <el-form-item label="现象/问题">
+          <el-input v-model="profileForm.symptom" type="textarea" :rows="2" placeholder="如：设备黑屏、程序版本号查询" />
+        </el-form-item>
+        <el-form-item label="环境">
+          <el-input v-model="profileForm.environment" placeholder="设备/芯片/固件版本（可选）" />
+        </el-form-item>
+        <el-form-item label="日志关键词">
+          <el-input v-model="profileForm.log_keywords" type="textarea" :rows="2" placeholder="每行一个，如：version、版本号、firmware" />
+        </el-form-item>
+        <el-form-item label="日志正则">
+          <el-input v-model="profileForm.log_patterns" type="textarea" :rows="2" placeholder="每行一个正则，如：(?i)(version|版本号)\\s*[:=]\\s*[\\w.\\-]+" />
+        </el-form-item>
+        <el-form-item label="排除正则">
+          <el-input v-model="profileForm.negative_patterns" type="textarea" :rows="2" placeholder="每行一个，用于排除误命中" />
+        </el-form-item>
+        <el-form-item label="判定说明">
+          <el-input v-model="profileForm.expected" type="textarea" :rows="2" placeholder="命中后如何判定，如：提取 x.y.z 版本号" />
+        </el-form-item>
+        <el-form-item label="根因">
+          <el-input v-model="profileForm.root_cause" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="解决方案">
+          <el-input v-model="profileForm.solution" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="置信度">
+          <el-slider v-model="profileForm.confidence" :min="0" :max="1" :step="0.05" style="width:100%" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showProfile = false">关闭</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -294,6 +331,76 @@ const renameName = ref('')
 const uploadForm = ref({ category: '', doc_type: 'manual' })
 const uploadFile = ref<File | null>(null)
 const form = ref({ title: '', category: '', doc_type: 'note', content: '' })
+
+// ── 诊断剧本（结构化诊断信息）──
+const showProfile = ref(false)
+const profileForm = ref({
+  symptom: '',
+  environment: '',
+  log_keywords: '',
+  log_patterns: '',
+  negative_patterns: '',
+  expected: '',
+  root_cause: '',
+  solution: '',
+  confidence: 0.8,
+})
+
+function _splitLines(s: string): string[] {
+  return s.split('\n').map(x => x.trim()).filter(Boolean)
+}
+
+function resetProfile() {
+  profileForm.value = {
+    symptom: '', environment: '',
+    log_keywords: '', log_patterns: '', negative_patterns: '',
+    expected: '', root_cause: '', solution: '',
+    confidence: 0.8,
+  }
+}
+
+function fillProfile(p: any) {
+  profileForm.value = {
+    symptom: p?.symptom || '',
+    environment: p?.environment || '',
+    log_keywords: (p?.log_keywords || []).join('\n'),
+    log_patterns: (p?.log_patterns || []).join('\n'),
+    negative_patterns: (p?.negative_patterns || []).join('\n'),
+    expected: p?.expected || '',
+    root_cause: p?.root_cause || '',
+    solution: p?.solution || '',
+    confidence: typeof p?.confidence === 'number' ? p.confidence : 0.8,
+  }
+}
+
+async function loadProfileForDoc(id: number) {
+  try {
+    const { data } = await knowledgeApi.getProfile(id)
+    fillProfile(data)
+  } catch {
+    resetProfile()
+  }
+}
+
+function buildProfilePayload() {
+  const f = profileForm.value
+  const hasAny = [f.symptom, f.environment, f.log_keywords, f.log_patterns,
+    f.negative_patterns, f.expected, f.root_cause, f.solution].some(v => v && v.trim())
+  if (!hasAny) return undefined
+  return {
+    symptom: f.symptom.trim(),
+    environment: f.environment.trim(),
+    log_keywords: _splitLines(f.log_keywords),
+    log_patterns: _splitLines(f.log_patterns),
+    negative_patterns: _splitLines(f.negative_patterns),
+    expected: f.expected.trim(),
+    root_cause: f.root_cause.trim(),
+    solution: f.solution.trim(),
+    confidence: f.confidence,
+    status: 'active',
+    source: 'manual',
+  }
+}
 
 const viewState = ref<'list' | 'preview' | 'edit'>('list')
 const currentFolder = ref<any>(null)
@@ -530,15 +637,16 @@ function openItem(row: any) {
       form.value = { title: row.title, category: row.category || '', doc_type: row.doc_type || 'note', content: '' }
       loadDocumentContent(row.id)
     }
+    loadProfileForDoc(row.id)
   }
 }
-function enterEdit() { viewState.value = 'edit' }
+function enterEdit() { if (editingId.value) loadProfileForDoc(editingId.value); viewState.value = 'edit' }
 
 // ============================================================
 // 更多菜单操作
 // ============================================================
 async function handleRowAction(cmd: string, row: any) {
-  if (cmd === 'edit') { form.value = { title: row.title, category: row.category || '', doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; viewState.value = 'edit' }
+  if (cmd === 'edit') { form.value = { title: row.title, category: row.category || '', doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; viewState.value = 'edit'; loadProfileForDoc(row.id) }
   else if (cmd === 'rename') { renameId.value = row.id; renameName.value = row.title; showRename.value = true }
   else if (cmd === 'pin') {
     try {
@@ -558,13 +666,13 @@ async function doRename() { if (!renameName.value.trim() || !renameId.value) ret
 function handleCreateCommand(cmd: string) {
   if (cmd === 'upload') showUpload.value = true
   else if (cmd === 'folder') showFolder.value = true
-  else if (cmd === 'note') { editingId.value = null; form.value = { title: '', category: '', doc_type: 'note', content: '' }; viewState.value = 'edit' }
+  else if (cmd === 'note') { editingId.value = null; form.value = { title: '', category: '', doc_type: 'note', content: '' }; resetProfile(); viewState.value = 'edit' }
 }
 function handleFileSelect(f: any) { uploadFile.value = f.raw }
 async function doUpload() { if (!uploadFile.value) return; uploading.value = true; try { const fd = new FormData(); fd.append('file', uploadFile.value); if (uploadForm.value.category) fd.append('category', uploadForm.value.category); fd.append('doc_type', uploadForm.value.doc_type); if (currentFolder.value) fd.append('parent_id', currentFolder.value.id.toString()); await knowledgeApi.upload(fd); ElMessage.success('上传成功'); showUpload.value = false; await fetch() } catch (e: any) { ElMessage.error(e?.response?.data?.detail || '上传失败') } finally { uploading.value = false } }
 function createFolder() { if (!folderName.value.trim()) return; if (!checkPathDepth()) { showFolder.value = false; return } const data: any = { title: folderName.value, content: '', doc_type: 'folder' }; if (currentFolder.value) data.parent_id = currentFolder.value.id; knowledgeApi.create(data).then(() => { ElMessage.success('文件夹已创建'); showFolder.value = false; folderName.value = ''; fetch() }).catch(() => ElMessage.error('创建失败')) }
 
-async function save() { saving.value = true; try { const data: any = { ...form.value }; if (currentFolder.value) data.parent_id = currentFolder.value.id; if (editingId.value) { await knowledgeApi.update(editingId.value, data); ElMessage.success('已保存') } else { await knowledgeApi.create(data); ElMessage.success('已创建') }; viewState.value = 'list'; editingId.value = null; await fetch() } catch (e: any) { ElMessage.error(e.response?.data?.detail || '保存失败') } finally { saving.value = false } }
+async function save() { saving.value = true; try { const data: any = { ...form.value }; if (currentFolder.value) data.parent_id = currentFolder.value.id; const profile = buildProfilePayload(); if (profile) data.profile = profile; if (editingId.value) { await knowledgeApi.update(editingId.value, data); ElMessage.success('已保存') } else { await knowledgeApi.create(data); ElMessage.success('已创建') }; viewState.value = 'list'; editingId.value = null; await fetch() } catch (e: any) { ElMessage.error(e.response?.data?.detail || '保存失败') } finally { saving.value = false } }
 // ============================================================
 // 剪贴板处理 — 在 textarea 上绑定捕获阶段 paste 事件
 // ============================================================

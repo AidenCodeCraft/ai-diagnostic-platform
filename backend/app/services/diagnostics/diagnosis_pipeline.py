@@ -24,8 +24,10 @@ from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
 from app.services.knowledge.knowledge_service import KnowledgeService
+from app.services.knowledge.profile_service import KnowledgeProfileService
 from app.services.infrastructure.llm_service import LLMService
 from app.services.diagnostics.parser_service import LogParserService
+from app.services.diagnostics.knowledge_log_locator import KnowledgeLogLocator
 from app.services.system.rule_engine import RuleEngine
 
 logger = get_logger(__name__)
@@ -49,13 +51,15 @@ class DiagnosisPipeline:
 
     DIAGNOSIS_PROMPT = (
         "你是一名资深的嵌入式系统与设备诊断工程师。"
-        "请根据以下信息进行综合分析，给出准确的诊断结果。\n\n"
-        "## 数据来源与约束\n"
-        "1. 【日志分析结果】【规则引擎结果】是本次诊断的本地分析数据，你可基于此自由推理。\n"
-        "2. 【知识库相关案例】是外部参考，不得编造知识库未提及的信息；如与日志分析冲突，以日志为准。\n"
-        "3. 输出必须使用中文，且为合法的 JSON 格式（不要用 markdown 代码块包裹）。\n"
-        "4. 置信度要考虑规则引擎匹配程度、知识库相关度和错误事件严重性。\n"
-        "5. 如果用户提出了具体问题，请围绕用户问题进行针对性分析。\n\n"
+        "请严格依据知识库证据与日志证据给出可追溯的诊断结论。\n\n"
+        "## 数据来源与约束（最高优先级）\n"
+        "1. 【知识库证据】是唯一结论来源：任何结论必须引用某条知识库条目"
+        "及其在日志中命中的行号（如 L12）。\n"
+        "2. 【日志证据】用于确认/补充事实；日志与知识库冲突时以日志为准并标注冲突。\n"
+        "3. 若【知识库证据】显示未命中或不存在，必须明确说明无法给出诊断结论，"
+        "禁止推测、禁止编造。\n"
+        "4. 输出必须使用中文，且为合法的 JSON 格式（不要用 markdown 代码块包裹）。\n"
+        "5. 置信度要考虑知识库剧本的置信度、命中行数量与错误事件严重性。\n\n"
         "## 输入信息\n\n"
     )
 
@@ -65,6 +69,8 @@ class DiagnosisPipeline:
         self.parser = LogParserService()
         self.rule_engine = RuleEngine()
         self.knowledge = KnowledgeService(db)
+        self.profile_service = KnowledgeProfileService(db)
+        self.locator = KnowledgeLogLocator()
 
     # ==================================================================
     # Public API
@@ -123,7 +129,25 @@ class DiagnosisPipeline:
         logger.info("[Pipeline] Stage 4 完成: %d 条知识命中", len(knowledge_results))
 
         # ═══════════════════════════════════════════════════════════
-        # Stage 5: 构建精确 Prompt（只包含裁剪后的关键日志）
+        # Stage 4.5: 知识驱动日志定位 — 用剧本在日志中定位证据
+        # ═══════════════════════════════════════════════════════════
+        logger.info("[Pipeline] Stage 4.5 — 知识驱动日志定位")
+        detections = self._locate_by_knowledge(knowledge_results, file_path, user_query)
+        evidence = [d.to_dict() for d in detections if d.verdict in ("hit", "partial")]
+        logger.info(
+            "[Pipeline] Stage 4.5 完成: detections=%d evidence=%d",
+            len(detections), len(evidence),
+        )
+
+        # 强约束：无知识库证据 → 不产出结论（不调 LLM 自由发挥）
+        if not evidence:
+            logger.info("[Pipeline] 知识库无支撑 — 返回无结论结果")
+            return self._no_support_result(
+                events, error_events, detections, knowledge_results, rule_suggestions,
+            )
+
+        # ═══════════════════════════════════════════════════════════
+        # Stage 5: 构建精确 Prompt（含知识库证据）
         # ═══════════════════════════════════════════════════════════
         prompt = self._build_prompt(
             events=events,
@@ -132,6 +156,7 @@ class DiagnosisPipeline:
             knowledge_summary=knowledge_summary,
             trimmed_log=trimmed_log,
             user_query=user_query,
+            detections=detections,
         )
 
         # ═══════════════════════════════════════════════════════════
@@ -148,9 +173,9 @@ class DiagnosisPipeline:
             )
         except Exception as exc:
             logger.warning(
-                "[Pipeline] LLM 失败 — 回退到规则引擎: %s", exc,
+                "[Pipeline] LLM 失败 — 返回无结论结果: %s", exc,
             )
-            return self._fallback_from_rules(events, rule_suggestions)
+            return self._llm_failure_result(events, error_events, detections, knowledge_results)
 
         # ═══════════════════════════════════════════════════════════
         # Stage 7: 结果规范化
@@ -158,7 +183,7 @@ class DiagnosisPipeline:
         payload = self._normalize(llm_result)
         return {
             "summary": payload.get("summary", "分析完成") or "分析完成",
-            "root_cause": payload.get("root_cause", "请查看规则引擎匹配结果") or "请查看规则引擎匹配结果",
+            "root_cause": payload.get("root_cause", "证据不足，无法确认") or "证据不足，无法确认",
             "confidence": float(payload.get("confidence", 0.5) or 0.5),
             "next_steps": self._normalize_list(payload.get("next_steps", [])),
             "rule_hits": len(rule_suggestions),
@@ -166,11 +191,16 @@ class DiagnosisPipeline:
             "event_count": len(events),
             "error_count": len(error_events),
             "trimmed_log": trimmed_log,
+            "detections": [d.to_dict() for d in detections],
+            "evidence": evidence,
+            "support_missing": False,
             "pipeline_stages": {
                 "parsed_events": len(events),
                 "error_events": len(error_events),
                 "rule_hits": len(rule_suggestions),
                 "knowledge_hits": len(knowledge_results),
+                "detections": len(detections),
+                "evidence": len(evidence),
             },
         }
 
@@ -318,6 +348,39 @@ class DiagnosisPipeline:
             return []
 
     # ==================================================================
+    # Stage 4.5: 知识驱动日志定位
+    # ==================================================================
+
+    def _locate_by_knowledge(
+        self, knowledge_results: list, file_path: str, user_query: str,
+    ) -> list:
+        """对每条 KB 命中，用其诊断剧本在日志中定位证据。"""
+        if not knowledge_results:
+            return []
+        try:
+            lines = Path(file_path).read_text(
+                encoding="utf-8", errors="ignore",
+            ).splitlines()
+        except Exception as exc:
+            logger.warning("[Pipeline] 读取日志失败，跳过知识定位: %s", exc)
+            return []
+
+        detections = []
+        for item in knowledge_results[:5]:
+            doc_id = item.get("id")
+            title = item.get("title") or ""
+            profile = None
+            if doc_id:
+                try:
+                    profile = self.profile_service.get(int(doc_id))
+                except Exception:
+                    profile = None
+            detections.append(
+                self.locator.locate(profile, title, lines, user_query=user_query or "")
+            )
+        return detections
+
+    # ==================================================================
     # Stage 5: Prompt 构建
     # ==================================================================
 
@@ -329,6 +392,7 @@ class DiagnosisPipeline:
         knowledge_summary: str,
         trimmed_log: str,
         user_query: str,
+        detections: Optional[list] = None,
     ) -> str:
         """构建 LLM prompt — 使用裁剪后的关键日志，而非完整原始日志。"""
         parts = [self.DIAGNOSIS_PROMPT]
@@ -350,6 +414,11 @@ class DiagnosisPipeline:
 
         # 知识库检索结果
         parts.append(f"## 知识库相关案例\n{knowledge_summary}")
+
+        # 知识库证据（唯一结论来源）
+        parts.append(
+            f"## 知识库证据（唯一结论来源）\n{self._format_detections(detections or [])}"
+        )
 
         # 关键错误日志片段（已裁剪）
         parts.append(f"## 关键错误日志片段\n```\n{trimmed_log}\n```")
@@ -399,33 +468,119 @@ class DiagnosisPipeline:
         )
 
     @staticmethod
-    def _fallback_from_rules(events: list, suggestions: list) -> Dict[str, Any]:
-        error_count = len([e for e in events if e.get("is_error")])
-        if suggestions:
-            top = suggestions[0]
-            return {
-                "summary": f"规则引擎匹配到 {len(suggestions)} 条已知问题。最可能: {top.get('message', '')}",
-                "root_cause": f"规则引擎匹配结果: {top.get('rule', '')} ({top.get('module', '')})",
-                "confidence": 0.65,
-                "next_steps": [s.get("message", "") for s in suggestions[:5]],
-                "rule_hits": len(suggestions),
-                "knowledge_hits": 0,
-                "event_count": len(events),
-                "error_count": error_count,
-            }
+    def _format_detections(detections: list) -> str:
+        """把定位结果格式化为 Prompt 中的「知识库证据」段。"""
+        if not detections:
+            return "未命中任何知识库剧本证据。"
+        verdict_cn = {"hit": "命中", "partial": "部分命中", "miss": "未命中"}
+        lines: list[str] = []
+        for d in detections:
+            lines.append(f"- 《{d.title}》判定：{verdict_cn.get(d.verdict, '未命中')}")
+            for m in d.matched_lines[:8]:
+                lines.append(f"  - L{m.line_no}: {m.text[:200]}")
+            if d.expected:
+                lines.append(f"  - 期望判定：{d.expected}")
+            if d.root_cause:
+                lines.append(f"  - 知识库根因：{d.root_cause}")
+            if d.solution:
+                lines.append(f"  - 知识库方案：{d.solution}")
+        return "\n".join(lines)
+
+    def _no_support_result(
+        self,
+        events: list,
+        error_events: list,
+        detections: list,
+        knowledge_results: list,
+        rule_suggestions: list,
+    ) -> Dict[str, Any]:
+        """强约束：无知识库证据时返回无结论结果（禁止推测）。"""
+        error_count = len(error_events)
+        if knowledge_results:
+            reason = (
+                "知识库命中了相关文档，但其中没有可执行的诊断剧本，"
+                "或剧本未在日志中命中证据，无法给出诊断结论。"
+            )
+        else:
+            reason = "知识库中暂无与该问题相关的可验证支撑，无法给出诊断结论。"
+
+        log_facts = []
+        for e in error_events[:8]:
+            msg = str(e.get("message", "")).strip()
+            if msg:
+                log_facts.append(f"- [{e.get('module', '?')}] {msg[:100]}")
+
         return {
-            "summary": f"检测到 {error_count} 个错误事件，建议上传更多日志进行深度分析。",
-            "root_cause": "无法自动确定根因，规则引擎未匹配到已知模式。",
-            "confidence": 0.3,
+            "summary": (
+                f"{reason} 已解析 {len(events)} 条日志事件（其中 {error_count} 条错误）。"
+            ),
+            "root_cause": "知识库中暂无支撑，按平台约束不输出推测性结论。",
+            "confidence": 0.0,
             "next_steps": [
-                "检查设备硬件状态和驱动版本",
-                "尝试通过管理后台添加自定义诊断规则",
-                "上传更详细的日志进行二次分析",
+                "请确认知识库中已为该问题配置『诊断配置』（日志关键词/正则/判定条件）",
+                "补充设备型号、固件版本等上下文后重试",
+                "确认问题后，可将本次处理经验沉淀为知识条目供后续复用",
             ],
-            "rule_hits": 0,
-            "knowledge_hits": 0,
+            "rule_hits": len(rule_suggestions),
+            "knowledge_hits": len(knowledge_results),
             "event_count": len(events),
             "error_count": error_count,
+            "log_facts": log_facts,
+            "detections": [d.to_dict() for d in detections],
+            "evidence": [],
+            "support_missing": True,
+            "pipeline_stages": {
+                "parsed_events": len(events),
+                "error_events": len(error_events),
+                "rule_hits": len(rule_suggestions),
+                "knowledge_hits": len(knowledge_results),
+                "detections": len(detections),
+                "evidence": 0,
+            },
+        }
+
+    def _llm_failure_result(
+        self,
+        events: list,
+        error_events: list,
+        detections: list,
+        knowledge_results: list,
+    ) -> Dict[str, Any]:
+        """LLM 不可用时的安全降级：只回事实，不下结论。"""
+        error_count = len(error_events)
+        log_facts = []
+        for e in error_events[:8]:
+            msg = str(e.get("message", "")).strip()
+            if msg:
+                log_facts.append(f"- [{e.get('module', '?')}] {msg[:100]}")
+
+        return {
+            "summary": (
+                f"AI 分析服务暂时不可用，无法给出诊断结论。"
+                f"已解析 {len(events)} 条日志事件（其中 {error_count} 条错误）。"
+            ),
+            "root_cause": "AI 分析服务不可用，按平台约束不输出推测性结论。",
+            "confidence": 0.0,
+            "next_steps": [
+                "请检查 LLM 配置（API Key / Base URL）后重试",
+                "可先查看下方日志事实进行人工排查",
+            ],
+            "rule_hits": 0,
+            "knowledge_hits": len(knowledge_results),
+            "event_count": len(events),
+            "error_count": error_count,
+            "log_facts": log_facts,
+            "detections": [d.to_dict() for d in detections],
+            "evidence": [],
+            "support_missing": True,
+            "pipeline_stages": {
+                "parsed_events": len(events),
+                "error_events": len(error_events),
+                "rule_hits": 0,
+                "knowledge_hits": len(knowledge_results),
+                "detections": len(detections),
+                "evidence": 0,
+            },
         }
 
     @staticmethod
