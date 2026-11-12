@@ -10,8 +10,11 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import logging
+import math
+import re
 from typing import Dict, List, Optional, Tuple
 
+from app.core.config import settings
 from app.services.core.interfaces import IEmbedder
 from app.services.core.config import EmbeddingConfig
 
@@ -158,6 +161,49 @@ class APIEmbedder(IEmbedder):
         return hashlib.md5(text.encode('utf-8')).hexdigest()
 
 
+class HashingEmbedder(IEmbedder):
+    """确定性哈希嵌入 — 无外部依赖的兜底方案。
+
+    注意：这是「词形哈希」而非语义嵌入，仅用于本地开发/测试，
+    让向量检索链路（Milvus）可以跑通；生产应使用 BGE 或 API Embedding。
+    """
+
+    def __init__(self, config: Optional[EmbeddingConfig] = None):
+        self.config = config or EmbeddingConfig()
+        self._dim = max(8, int(self.config.dimension or 512))
+
+    @property
+    def dimension(self) -> int:
+        return self._dim
+
+    def embed(self, text: str) -> List[float]:
+        return self.embed_batch([text])[0]
+
+    def embed_batch(self, texts: List[str]) -> List[List[float]]:
+        return [self._embed_one(t) for t in texts]
+
+    def health_check(self) -> bool:
+        return True
+
+    def _embed_one(self, text: str) -> List[float]:
+        vec = [0.0] * self._dim
+        for token in self._tokenize(text):
+            digest = int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16)
+            index = digest % self._dim
+            sign = 1.0 if (digest >> 8) % 2 == 0 else -1.0
+            vec[index] += sign
+        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+        return [v / norm for v in vec]
+
+    @staticmethod
+    def _tokenize(text: str) -> List[str]:
+        lowered = (text or "").lower()
+        en = re.findall(r"[a-z0-9_]{2,}", lowered)
+        cn_chars = re.findall(r"[\u4e00-\u9fff]", lowered)
+        bigrams = ["".join(pair) for pair in zip(cn_chars, cn_chars[1:])]
+        return en + cn_chars + bigrams
+
+
 class EmbeddingService:
     """Embedding 统一入口 — 替换旧的 EmbeddingService 类。
 
@@ -168,11 +214,27 @@ class EmbeddingService:
     """
 
     def __init__(self, config: Optional[EmbeddingConfig] = None):
-        self.config = config or EmbeddingConfig()
+        self.config = config or self._settings_config()
         self._bge: Optional[BGEEmbedder] = None
         self._api: Optional[APIEmbedder] = None
+        self._hash: Optional[HashingEmbedder] = None
         self._active: Optional[IEmbedder] = None
         self._init()
+
+    @staticmethod
+    def _settings_config() -> EmbeddingConfig:
+        """从 Settings 构建 EmbeddingConfig（env 优先于默认值）。"""
+        cfg = EmbeddingConfig()
+        try:
+            cfg.provider = str(getattr(settings, "EMBEDDING_PROVIDER", "auto") or "auto").lower()
+            cfg.dimension = int(getattr(settings, "EMBEDDING_DIM", cfg.dimension) or cfg.dimension)
+            cfg.batch_size = int(getattr(settings, "EMBEDDING_BATCH_SIZE", cfg.batch_size) or cfg.batch_size)
+            cfg.api_url = str(getattr(settings, "EMBEDDING_API_URL", "") or "")
+            cfg.api_key = str(getattr(settings, "EMBEDDING_API_KEY", "") or "")
+            cfg.api_model = str(getattr(settings, "EMBEDDING_API_MODEL", cfg.api_model) or cfg.api_model)
+        except Exception:  # noqa: BLE001 - settings 缺失时回退默认配置
+            pass
+        return cfg
 
     @property
     def dimension(self) -> int:
@@ -206,26 +268,94 @@ class EmbeddingService:
                 getattr(e, '_cache').clear()
 
     def _init(self) -> None:
-        # 优先 BGE
-        if _sentence_transformers_available:
-            try:
-                self._bge = BGEEmbedder(self.config)
-                if self._bge.health_check():
-                    self._active = self._bge
-                    return
-            except Exception as e:
-                logger.warning("[Embedding] BGE init failed: %s", e)
+        provider = (self.config.provider or "auto").lower()
+        allow_hash = bool(getattr(settings, "EMBEDDING_HASH_FALLBACK", True))
 
-        # 备选 API
-        self._api = APIEmbedder(self.config)
-        if self._api.health_check():
-            self._active = self._api
-            logger.info("[Embedding] Using API embedder")
+        if provider == "hash":
+            self._activate_hash("EMBEDDING_PROVIDER=hash")
             return
 
+        if provider in ("local", "bge"):
+            if self._try_bge():
+                return
+            if allow_hash:
+                self._activate_hash("本地 BGE 不可用")
+                return
+            raise RuntimeError(
+                "BGE Embedding 需要 sentence-transformers，请执行: pip install sentence-transformers"
+            )
+
+        if provider == "api":
+            if self._try_api():
+                return
+            if allow_hash:
+                self._activate_hash("API Embedding 未配置")
+                return
+            raise RuntimeError(
+                "Embedding 服务不可用。请配置 EMBEDDING_API_URL 和 EMBEDDING_API_KEY"
+            )
+
+        # auto: BGE → API → hash
+        if self._try_bge():
+            return
+        if self._try_api():
+            return
+        if allow_hash:
+            self._activate_hash("未检测到 BGE/API Embedding")
+            return
         raise RuntimeError(
             "Embedding 服务不可用。请安装 sentence-transformers "
             "或配置 EMBEDDING_API_URL 和 EMBEDDING_API_KEY。"
+        )
+
+    def _try_bge(self) -> bool:
+        if not _sentence_transformers_available:
+            return False
+
+        # BGE 首次加载可能下载模型权重；加超时避免离线环境无限阻塞
+        import threading
+
+        timeout = float(getattr(settings, "EMBEDDING_LOAD_TIMEOUT", 30.0) or 30.0)
+        result: Dict[str, object] = {}
+
+        def _load() -> None:
+            try:
+                result["embedder"] = BGEEmbedder(self.config)
+            except Exception as exc:  # noqa: BLE001 - 记录并回退
+                result["error"] = exc
+
+        thread = threading.Thread(target=_load, daemon=True)
+        thread.start()
+        thread.join(timeout)
+
+        if thread.is_alive():
+            logger.warning(
+                "[Embedding] BGE model load exceeded %.1fs; falling back", timeout,
+            )
+            return False
+        if "embedder" in result:
+            self._bge = result["embedder"]  # type: ignore[assignment]
+            if self._bge is not None and self._bge.health_check():
+                self._active = self._bge
+                logger.info("[Embedding] Using local BGE embedder (dim=%d)", self._bge.dimension)
+                return True
+        if "error" in result:
+            logger.warning("[Embedding] BGE init failed: %s", result["error"])
+        return False
+
+    def _try_api(self) -> bool:
+        self._api = APIEmbedder(self.config)
+        if self._api.health_check():
+            self._active = self._api
+            logger.info("[Embedding] Using API embedder (model=%s)", self.config.api_model)
+            return True
+        return False
+
+    def _activate_hash(self, reason: str) -> None:
+        self._hash = HashingEmbedder(self.config)
+        self._active = self._hash
+        logger.warning(
+            "[Embedding] %s，使用哈希嵌入兜底（非语义向量，仅用于开发/测试）", reason,
         )
 
     def _get_active(self) -> IEmbedder:

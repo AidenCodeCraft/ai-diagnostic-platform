@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 from app.models import Analysis, Log, Report
 
 
+class ReportExportUnavailable(RuntimeError):
+    """PDF 导出依赖缺失或不可用。"""
+
+
 class ReportService:
     """Service for generating, listing, and exporting diagnostic reports."""
 
@@ -85,6 +89,91 @@ class ReportService:
         report = self.get_report(report_id)
         content = self._decode_content(str(report.content))
         return self._to_markdown(content)
+
+    def export_pdf(self, report_id: int) -> bytes:
+        """Export a report as PDF（服务端生成，支持中文）。
+
+        Raises:
+            ReportExportUnavailable: reportlab 未安装。
+            ValueError: 报告不存在。
+        """
+        import io
+
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+            from reportlab.pdfgen import canvas
+        except ImportError as exc:
+            raise ReportExportUnavailable(
+                "PDF 导出需要 reportlab，请安装: pip install reportlab"
+            ) from exc
+
+        report = self.get_report(report_id)
+        content = self._decode_content(str(report.content))
+        title = str(content.get("title", "Diagnostic Report"))
+        summary = str(content.get("summary", ""))
+        root_cause = str(content.get("root_cause", ""))
+        next_steps = self._parse_next_steps(content.get("next_steps"))
+        confidence = content.get("confidence", "N/A")
+
+        buffer = io.BytesIO()
+        font_name = "STSong-Light"
+        try:
+            pdfmetrics.registerFont(UnicodeCIDFont(font_name))
+        except Exception:  # noqa: BLE001 - 字体不可用时回退内置字体
+            font_name = "Helvetica"
+
+        pdf = canvas.Canvas(buffer, pagesize=A4)
+        page_width, page_height = A4
+        margin_x, cursor_y = 50, page_height - 60
+
+        def ensure_space() -> None:
+            nonlocal cursor_y
+            if cursor_y < 60:
+                pdf.showPage()
+                pdf.setFont(font_name, 11)
+                cursor_y = page_height - 60
+
+        pdf.setFont(font_name, 16)
+        pdf.drawString(margin_x, cursor_y, title[:60])
+        cursor_y -= 30
+
+        pdf.setFont(font_name, 11)
+        sections = [
+            ("Summary", summary),
+            ("Root Cause", root_cause),
+            ("Confidence", str(confidence)),
+        ]
+        for label, value in sections:
+            ensure_space()
+            pdf.drawString(margin_x, cursor_y, f"{label}:")
+            cursor_y -= 18
+            for line in self._wrap_pdf_text(value, 60):
+                ensure_space()
+                pdf.drawString(margin_x, cursor_y, line)
+                cursor_y -= 16
+            cursor_y -= 8
+
+        if next_steps:
+            ensure_space()
+            pdf.drawString(margin_x, cursor_y, "Next Steps:")
+            cursor_y -= 18
+            for index, step in enumerate(next_steps, 1):
+                for line in self._wrap_pdf_text(f"{index}. {step}", 60):
+                    ensure_space()
+                    pdf.drawString(margin_x, cursor_y, line)
+                    cursor_y -= 16
+
+        pdf.save()
+        return buffer.getvalue()
+
+    @staticmethod
+    def _wrap_pdf_text(text: str, width: int = 60) -> List[str]:
+        value = str(text or "")
+        if not value:
+            return [""]
+        return [value[start:start + width] for start in range(0, len(value), width)]
 
     # ------------------------------------------------------------------
     # Queries

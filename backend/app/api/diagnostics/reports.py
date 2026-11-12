@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import session as session_module
 from app.schemas import ReportDetail, ReportListResponse
 from app.services import ReportService
+from app.services.diagnostics.report_service import ReportExportUnavailable
 
 
 def get_db_session():
@@ -78,6 +79,25 @@ def export_report_markdown(
         return ReportService(db).export_markdown(report_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{report_id}/pdf")
+def export_report_pdf(
+    report_id: int,
+    db: Session = Depends(get_db_session),
+) -> Response:
+    """Export a report as PDF（需要 reportlab；未安装时返回 501）。"""
+    try:
+        pdf_bytes = ReportService(db).export_pdf(report_id)
+    except ReportExportUnavailable as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="report_{report_id}.pdf"'},
+    )
 
 
 # ------------------------------------------------------------------

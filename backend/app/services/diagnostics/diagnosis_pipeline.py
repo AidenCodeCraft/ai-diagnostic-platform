@@ -224,9 +224,12 @@ class DiagnosisPipeline:
         5. 控制总长度不超过 MAX_TRIMMED_LOG_CHARS
         """
         try:
-            all_lines = Path(file_path).read_text(
-                encoding="utf-8", errors="ignore",
-            ).splitlines()
+            from app.core.config import settings
+            from app.services.parser.log_reader import LogReader
+            text, _truncated = LogReader().read_all_capped(
+                file_path, max_lines=settings.MAX_PARSE_LINES,
+            )
+            all_lines = text.splitlines()
         except Exception:
             return "(无法读取日志文件)"
 
@@ -380,9 +383,12 @@ class DiagnosisPipeline:
         if not knowledge_results:
             return []
         try:
-            lines = Path(file_path).read_text(
-                encoding="utf-8", errors="ignore",
-            ).splitlines()
+            from app.core.config import settings
+            from app.services.parser.log_reader import LogReader
+            text, _truncated = LogReader().read_all_capped(
+                file_path, max_lines=settings.MAX_PARSE_LINES,
+            )
+            lines = text.splitlines()
         except Exception as exc:
             logger.warning("[Pipeline] 读取日志失败，跳过知识定位: %s", exc)
             return []

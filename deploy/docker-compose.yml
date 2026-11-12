@@ -64,10 +64,13 @@ services:
 
   # ═══════════════════════════════════════════════════════════
   # Milvus Standalone — 向量数据库（知识库 RAG）
-  # 使用 etcd 内嵌模式，无需单独部署 etcd
+  # 使用「内嵌 etcd + 本地存储」模式（官方 standalone_embed 写法），
+  # 无需单独部署 etcd/Zet 或依赖 MinIO（COMMON_STORAGETYPE=local）。
+  # 版本说明：镜像 v2.4.0 与客户端 pymilvus 2.5.4 的兼容性已实测
+  # （create/insert/flush/search 全链路通过）；若后续镜像站可用，可平滑升级 v2.5.4。
   # ═══════════════════════════════════════════════════════════
   milvus:
-    image: milvusdb/milvus:v2.3.12
+    image: milvusdb/milvus:v2.4.0
     container_name: ai-diagnostic-milvus
     restart: always
     command: ["milvus", "run", "standalone"]
@@ -75,14 +78,17 @@ services:
       - "19530:19530"
       - "9091:9091"
     environment:
-      ETCD_AUTO_COMPACTION_MODE: revision
-      ETCD_AUTO_COMPACTION_RETENTION: "1000"
-      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
-      ETCD_SNAPSHOT_COUNT: "50000"
+      # ── 内嵌 etcd（必须显式开启；缺省会去连外部 etcd 的 localhost:2379）──
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: /var/lib/milvus/etcd
+      ETCD_CONFIG_PATH: /milvus/configs/advanced/etcd.yaml
+      # ── 本地存储，不依赖 minio/S3 ──
+      COMMON_STORAGETYPE: local
     volumes:
       - milvus_data:/var/lib/milvus
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9091/healthz || exit 1"]
+      # 镜像内无 wget，只有 curl（旧配置用 wget 会导致 healthcheck 永远失败）
+      test: ["CMD-SHELL", "curl -sf http://localhost:9091/healthz || exit 1"]
       interval: 20s
       timeout: 15s
       retries: 10
@@ -167,6 +173,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       # ── 上传 ───────────────────────────────────────
       UPLOAD_DIR: /app/data/raw
+      MAX_UPLOAD_MB: "100"
+      MAX_PARSE_LINES: "200000"
       # ── LLM ────────────────────────────────────────
       LLM_PROVIDER: mock
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
@@ -177,12 +185,17 @@ services:
       MILVUS_HOST: milvus
       MILVUS_PORT: "19530"
       MILVUS_COLLECTION: knowledge_docs
-      MILVUS_DIM: "1536"
+      MILVUS_DIM: "${MILVUS_DIM:-512}"
       MILVUS_USER: ""
       MILVUS_PASSWORD: ""
       # ── Embedding ──────────────────────────────────
-      EMBEDDING_PROVIDER: deepseek
+      EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-auto}"
       EMBEDDING_BATCH_SIZE: "32"
+      EMBEDDING_DIM: "${MILVUS_DIM:-512}"
+      EMBEDDING_API_URL: "${EMBEDDING_API_URL:-}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY:-}"
+      EMBEDDING_API_MODEL: "${EMBEDDING_API_MODEL:-text-embedding-3-small}"
+      EMBEDDING_HASH_FALLBACK: "true"
       # ── MinIO ──────────────────────────────────────
       MINIO_ENABLED: "true"
       MINIO_ENDPOINT: minio:9000
@@ -244,7 +257,11 @@ services:
       MILVUS_HOST: milvus
       MILVUS_PORT: "19530"
       MILVUS_COLLECTION: knowledge_docs
-      MILVUS_DIM: "1536"
+      # 与 backend 保持一致（默认 512，HashingEmbedder 输出维度）
+      MILVUS_DIM: "${MILVUS_DIM:-512}"
+      EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-auto}"
+      EMBEDDING_DIM: "${MILVUS_DIM:-512}"
+      EMBEDDING_HASH_FALLBACK: "true"
       MINIO_ENABLED: "true"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin

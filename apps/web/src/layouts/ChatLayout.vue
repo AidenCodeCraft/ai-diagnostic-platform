@@ -651,6 +651,39 @@ async function reanalyzeWithClarification(text: string) {
   }
 }
 
+/** 轮询异步分析任务状态，直到 completed / failed / 超时 */
+async function waitForAnalysis(
+  analysisId: number,
+  onProgress?: (text: string) => void,
+  timeoutMs = 300_000,
+): Promise<any> {
+  const startedAt = Date.now()
+  const deadline = startedAt + timeoutMs
+  let lastPhase = ''
+  while (Date.now() < deadline) {
+    const res = await chatApi.getAnalysis(analysisId)
+    const data = res.data || {}
+    if (data.status === 'completed') {
+      return (await chatApi.getAnalysisResult(analysisId)).data
+    }
+    if (data.status === 'failed') {
+      throw new Error(data.error_message || '分析失败')
+    }
+    const elapsed = Date.now() - startedAt
+    const phase = elapsed < 15000
+      ? '正在解析日志并提取关键错误片段…'
+      : elapsed < 60000
+        ? '规则引擎匹配 + 知识库检索中…'
+        : 'AI 正在生成诊断结论…'
+    if (phase !== lastPhase) {
+      lastPhase = phase
+      onProgress?.(phase)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  throw new Error('分析超时，请稍后重试')
+}
+
 async function processFiles(files: FileAttachment[], text: string) {
   loadingPhase.value = 'uploading'
 
@@ -748,12 +781,14 @@ async function processFiles(files: FileAttachment[], text: string) {
       try {
         updateThinking('正在解析日志并提取关键错误片段…')
 
-        if (import.meta.env.DEV) console.log(`[processFiles] runAnalysis: logId=${logId} model=${selectedModel.value} query=${text?.slice(0, 50)}`)
-        const analysisRes = await chatApi.runAnalysis(logId, selectedModel.value, text)
-        if (analysisRes.data?.id) {
-          updateThinking('规则引擎匹配 + 知识库检索中…')
+        if (import.meta.env.DEV) console.log(`[processFiles] runAnalysisAsync: logId=${logId} model=${selectedModel.value} query=${text?.slice(0, 50)}`)
+        const queued = await chatApi.runAnalysisAsync(logId, selectedModel.value, text)
+        const analysisId = queued.data?.id
+        if (!analysisId) throw new Error('分析任务创建失败')
+        updateThinking('规则引擎匹配 + 知识库检索中…')
 
-          const detail = (await chatApi.getAnalysisResult(analysisRes.data.id)).data
+        const detail = await waitForAnalysis(analysisId, updateThinking)
+        if (detail) {
           lastAnalysis.value = detail
           const sources = detail.sources || detail.knowledge_sources || detail.references || []
 

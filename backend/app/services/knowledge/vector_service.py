@@ -52,7 +52,6 @@ class VectorService:
     """
 
     _COLLECTION_NAME = settings.MILVUS_COLLECTION or "knowledge_docs"
-    _VECTOR_DIM = settings.MILVUS_DIM or 1536
     _EMBEDDING_LOAD_TIMEOUT = 10.0
 
     def __init__(self):
@@ -60,9 +59,13 @@ class VectorService:
         self._collection: Optional[Any] = None  # pymilvus.Collection
         self._embedding = None
         self._embedding_load_started = False
+        self._dim = int(getattr(settings, "MILVUS_DIM", 512) or 512)
         self._connect()
         if self._connected:
             self._ensure_embedding()
+            if self._embedding is not None:
+                self._dim = int(self._embedding.dimension)
+            self._ensure_collection()
 
     # ==================================================================
     # Connection Management
@@ -98,9 +101,6 @@ class VectorService:
                 "[VectorService] Connected to Milvus at %s:%s",
                 settings.MILVUS_HOST, settings.MILVUS_PORT,
             )
-
-            # 确保 collection 存在
-            self._ensure_collection()
             return True
 
         except Exception as exc:
@@ -154,41 +154,95 @@ class VectorService:
         return False
 
     def _ensure_collection(self) -> None:
-        """确保 collection 存在，不存在则创建。"""
+        """确保 collection 存在、有向量索引且已加载。
+
+        注意顺序：Milvus 2.4+ 禁止在 embedding 字段没有索引时 load collection
+        （报 `code=700 index not found`），因此必须「建/取 collection →
+        确保索引存在 → load」，旧实现先 load 再 create_index 会永久失败。
+        对历史上「已创建但无索引」的 collection 会自动补建索引（自愈）。
+        """
         if not self._connected:
             return
 
         try:
             if utility.has_collection(self._COLLECTION_NAME):
                 self._collection = Collection(self._COLLECTION_NAME)
-                self._collection.load()
-                logger.info("[VectorService] Collection '%s' loaded", self._COLLECTION_NAME)
-                return
+                existing_dim = self._read_collection_dim()
+                if existing_dim:
+                    self._dim = existing_dim
+                logger.info(
+                    "[VectorService] Collection '%s' exists (dim=%d), ensuring index",
+                    self._COLLECTION_NAME, self._dim,
+                )
+            else:
+                # 创建新的 collection
+                fields = [
+                    FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=False),
+                    FieldSchema(name="doc_id", dtype=DataType.INT64),
+                    FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=2000),
+                    FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=self._dim),
+                ]
+                schema = CollectionSchema(fields, description="Knowledge document embeddings")
+                self._collection = Collection(self._COLLECTION_NAME, schema)
+                logger.info(
+                    "[VectorService] Collection '%s' created (dim=%d)",
+                    self._COLLECTION_NAME, self._dim,
+                )
 
-            # 创建新的 collection
-            fields = [
-                FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=False),
-                FieldSchema(name="doc_id", dtype=DataType.INT64),
-                FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=2000),
-                FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=self._VECTOR_DIM),
-            ]
-            schema = CollectionSchema(fields, description="Knowledge document embeddings")
-
-            self._collection = Collection(self._COLLECTION_NAME, schema)
+            # 必须先建索引，后 load（Milvus 2.4+ 不允许无索引 load）
+            self._ensure_vector_index()
             self._collection.load()
-
-            # 创建 IVF_FLAT 索引（适合中等规模数据）
-            index_params = {
-                "metric_type": "IP",  # Inner Product (余弦相似度的代理)
-                "index_type": "IVF_FLAT",
-                "params": {"nlist": 128},
-            }
-            self._collection.create_index("embedding", index_params)
-            logger.info("[VectorService] Collection '%s' created with index", self._COLLECTION_NAME)
+            logger.info(
+                "[VectorService] Collection '%s' loaded (dim=%d)",
+                self._COLLECTION_NAME, self._dim,
+            )
 
         except Exception as exc:
             logger.error("[VectorService] Failed to ensure collection: %s", exc)
             self._connected = False
+
+    def _ensure_vector_index(self) -> bool:
+        """确保 embedding 字段存在向量索引（幂等）。
+
+        Returns:
+            是否本次新建了索引。
+        """
+        if self._collection is None:
+            return False
+
+        # 索引已存在则直接返回
+        try:
+            for index in self._collection.indexes:
+                field_name = getattr(index, "field_name", None)
+                if field_name is None:
+                    field_name = (getattr(index, "params", None) or {}).get("field_name")
+                if field_name == "embedding":
+                    return False
+        except Exception as exc:  # noqa: BLE001 - 读不到索引列表时尝试补建
+            logger.warning("[VectorService] Read collection indexes failed: %s", exc)
+
+        # 创建 IVF_FLAT 索引（适合中等规模数据）
+        index_params = {
+            "metric_type": "IP",  # Inner Product (余弦相似度的代理)
+            "index_type": "IVF_FLAT",
+            "params": {"nlist": 128},
+        }
+        self._collection.create_index("embedding", index_params)
+        logger.info(
+            "[VectorService] Created IVF_FLAT/IP index for collection '%s'",
+            self._COLLECTION_NAME,
+        )
+        return True
+
+    def _read_collection_dim(self) -> Optional[int]:
+        """读取已有 collection 的 embedding 维度。"""
+        try:
+            for field in self._collection.schema.fields:
+                if field.name == "embedding":
+                    return int(field.params.get("dim", 0)) or None
+        except Exception:  # noqa: BLE001 - 读取失败时保留配置维度
+            return None
+        return None
 
     # ==================================================================
     # Public API
@@ -231,6 +285,13 @@ class VectorService:
             start_time = time.time()
             query_embedding = self._embedding.embed(query)
             embed_time = time.time() - start_time
+            if len(query_embedding) != self._dim:
+                logger.error(
+                    "[VectorService] Query embedding dim mismatch: got %d, expected %d; "
+                    "please align EMBEDDING_DIM/MILVUS_DIM",
+                    len(query_embedding), self._dim,
+                )
+                return []
 
             # 2. 执行向量搜索
             search_params = {"metric_type": "IP", "params": {"nprobe": 16}}
@@ -254,11 +315,13 @@ class VectorService:
                 return []
 
             # 3. 格式化结果
+            # 注意：pymilvus 2.5.x 的 Hit.get(field_name) 不接受 default 参数
+            #（旧代码 hit.entity.get("doc_id", 0) 会抛 TypeError 导致 search 永远返回空）。
             return [
                 {
-                    "id": hit.entity.get("doc_id", 0),
+                    "id": int(hit.entity.get("doc_id") or 0),
                     "score": float(hit.score),
-                    "content": hit.entity.get("content", ""),
+                    "content": hit.entity.get("content") or "",
                 }
                 for hit in results[0]
             ]
@@ -308,6 +371,13 @@ class VectorService:
                 return 0
 
             embeddings = self._embedding.embed_batch(chunks)
+            if embeddings and len(embeddings[0]) != self._dim:
+                logger.error(
+                    "[VectorService] Embedding dim mismatch: got %d, expected %d; "
+                    "please align EMBEDDING_DIM/MILVUS_DIM or recreate the collection",
+                    len(embeddings[0]), self._dim,
+                )
+                return 0
 
             # 3. 构建插入数据
             # 使用 (doc_id, chunk_index) 组合作为主键
@@ -414,11 +484,17 @@ class VectorService:
             return False
         if not self._connected:
             return False
+        if self._collection is None or self._embedding is None:
+            return False
         return self.health_check()
 
     @property
     def collection_name(self) -> str:
         return self._COLLECTION_NAME
+
+    @property
+    def dimension(self) -> int:
+        return self._dim
 
     @property
     def collection_info(self) -> Optional[Dict[str, Any]]:

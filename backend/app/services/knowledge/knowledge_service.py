@@ -8,8 +8,11 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.core.logging_config import get_logger
 from app.models import KnowledgeDocument, KnowledgeDocumentMeta
 from app.services.knowledge.templates import guess_section_key
+
+logger = get_logger(__name__)
 
 
 class KnowledgeService:
@@ -19,8 +22,51 @@ class KnowledgeService:
         self.db = db
 
     # ------------------------------------------------------------------
+    # Vector index sync（Milvus 启用时随 CRUD 自动维护）
+    # ------------------------------------------------------------------
+
+    def _sync_index(self, doc_id: int, content: str) -> None:
+        """同步文档向量索引；失败不影响主流程。"""
+        try:
+            from app.core.config import settings
+            if not settings.MILVUS_ENABLED:
+                return
+            from app.services.knowledge.document_indexer import DocumentIndexer
+            DocumentIndexer(self.db).index_document(doc_id, content=content)
+        except Exception as exc:  # noqa: BLE001 - 索引失败不阻断 CRUD
+            logger.warning("[KnowledgeService] index sync failed for doc %s: %s", doc_id, exc)
+
+    def reindex(self, doc_id: int, content: Optional[str] = None) -> None:
+        """显式重建文档向量索引（内容被外部修改后调用）。"""
+        if content is None:
+            doc = self.get(doc_id)
+            content = str(doc.content or "")
+        self._sync_index(doc_id, content)
+
+    def _remove_index(self, doc_id: int) -> None:
+        """删除文档向量索引；失败不影响主流程。"""
+        try:
+            from app.core.config import settings
+            if not settings.MILVUS_ENABLED:
+                return
+            from app.services.knowledge.vector_service import get_vector_service
+            get_vector_service().delete_document(doc_id)
+        except Exception as exc:  # noqa: BLE001 - 索引失败不阻断 CRUD
+            logger.warning("[KnowledgeService] index remove failed for doc %s: %s", doc_id, exc)
+
+    # ------------------------------------------------------------------
     # Create
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _apply_project_filter(query, project_id: Optional[int]):
+        """项目过滤：仅返回指定项目 + 全局（project_id 为空）的文档。"""
+        if project_id is None:
+            return query
+        return query.filter(or_(
+            KnowledgeDocument.project_id == project_id,
+            KnowledgeDocument.project_id.is_(None),
+        ))
 
     def _attach_quality(self, docs: List[KnowledgeDocument]) -> None:
         """把 meta.quality_score 附加到文档对象上（供列表/详情展示）。"""
@@ -50,6 +96,7 @@ class KnowledgeService:
         self.db.add(doc)
         self.db.commit()
         self.db.refresh(doc)
+        self._sync_index(int(doc.id), str(doc.content or ""))
         return doc
 
     # ------------------------------------------------------------------
@@ -73,8 +120,10 @@ class KnowledgeService:
         doc_type: Optional[str] = None,
         status: Optional[str] = None,
         parent_id: Optional[int] = None,
+        project_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         query = self.db.query(KnowledgeDocument)
+        query = self._apply_project_filter(query, project_id)
 
         # 文件夹层级过滤
         if parent_id is not None:
@@ -113,6 +162,7 @@ class KnowledgeService:
         query_text: str,
         page: int = 1,
         page_size: int = 20,
+        project_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Run one consistent hybrid search for every caller.
 
@@ -126,13 +176,12 @@ class KnowledgeService:
                 MilvusRetriever,
             )
 
-            docs = (
+            docs_query = (
                 self.db.query(KnowledgeDocument)
                 .filter(KnowledgeDocument.status == "active")
-                .order_by(KnowledgeDocument.updated_at.desc())
-                .limit(1000)
-                .all()
             )
+            docs_query = self._apply_project_filter(docs_query, project_id)
+            docs = docs_query.order_by(KnowledgeDocument.updated_at.desc()).limit(1000).all()
             sparse = BM25Retriever()
             sparse.index([
                 (int(doc.id), f"{doc.title or ''}\n{doc.content or ''}")
@@ -161,7 +210,7 @@ class KnowledgeService:
             logger = __import__("app.core.logging_config", fromlist=["get_logger"]).get_logger(__name__)
             logger.debug("[KnowledgeService] Hybrid search unavailable, falling back to keyword: %s", exc)
 
-        items = self._keyword_search_bm25(query_text, page_size)
+        items = self._keyword_search_bm25(query_text, page_size, project_id=project_id)
         if items:
             total = len(items)
             return {"items": items[:page_size], "total": total, "page": page, "page_size": page_size}
@@ -172,12 +221,13 @@ class KnowledgeService:
         self,
         query_text: str,
         limit: int = 5,
+        project_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """纯关键词搜索 — 使用 BM25 替换旧的 ILIKE 回退"""
-        return self._keyword_search_bm25(query_text, limit)
+        return self._keyword_search_bm25(query_text, limit, project_id=project_id)
 
     def _keyword_search_bm25(
-        self, query_text: str, limit: int = 5,
+        self, query_text: str, limit: int = 5, project_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """BM25 关键词检索 — 替换旧的 ILIKE 短语+分词回退。
 
@@ -188,13 +238,12 @@ class KnowledgeService:
 
         try:
             # 获取所有活跃文档
-            docs = (
+            docs_query = (
                 self.db.query(KnowledgeDocument)
                 .filter(KnowledgeDocument.status == "active")
-                .order_by(KnowledgeDocument.updated_at.desc())
-                .limit(1000)
-                .all()
             )
+            docs_query = self._apply_project_filter(docs_query, project_id)
+            docs = docs_query.order_by(KnowledgeDocument.updated_at.desc()).limit(1000).all()
             if not docs:
                 return []
 
@@ -223,27 +272,30 @@ class KnowledgeService:
                             str(doc.content), query_text,
                         ),
                     })
-            return items or self._keyword_search_phrase(query_text, limit)
+            return items or self._keyword_search_phrase(query_text, limit, project_id=project_id)
         except Exception as e:
             logger = __import__("app.core.logging_config", fromlist=["get_logger"]).get_logger(__name__)
             logger.debug("[KnowledgeService] BM25 search failed, falling back to ILIKE: %s", e)
             # 最终回退到旧的 ILIKE
-            return self._keyword_search_phrase(query_text, limit) or []
+            return self._keyword_search_phrase(query_text, limit, project_id=project_id) or []
 
-    def _keyword_search_phrase(self, query_text: str, limit: int) -> list:
+    def _keyword_search_phrase(
+        self, query_text: str, limit: int, project_id: Optional[int] = None,
+    ) -> list:
         """Exact phrase ILIKE search."""
         if not query_text.strip():
             return []
         pattern = f"%{query_text}%"
+        query = self.db.query(KnowledgeDocument).filter(
+            KnowledgeDocument.status == "active",
+            or_(
+                KnowledgeDocument.title.ilike(pattern),
+                KnowledgeDocument.content.ilike(pattern),
+            ),
+        )
+        query = self._apply_project_filter(query, project_id)
         docs = (
-            self.db.query(KnowledgeDocument)
-            .filter(
-                KnowledgeDocument.status == "active",
-                or_(
-                    KnowledgeDocument.title.ilike(pattern),
-                    KnowledgeDocument.content.ilike(pattern),
-                ),
-            )
+            query
             .order_by(KnowledgeDocument.updated_at.desc())
             .limit(limit)
             .all()
@@ -406,6 +458,7 @@ class KnowledgeService:
                 setattr(doc, field, data[field])
         self.db.commit()
         self.db.refresh(doc)
+        self._sync_index(int(doc.id), str(doc.content or ""))
         return doc
 
     # ------------------------------------------------------------------
@@ -423,6 +476,7 @@ class KnowledgeService:
         self.db.flush()  # 确保子节点删除已写入数据库，避免 FK 约束冲突
         self.db.delete(doc)
         self.db.commit()
+        self._remove_index(doc_id)
 
     def _delete_children(self, parent_id: int) -> None:
         """Recursively delete all child documents of a given parent."""
@@ -435,6 +489,7 @@ class KnowledgeService:
             self._delete_children(int(child.id))  # type: ignore[arg-type]  # 递归删除孙节点
             self.db.delete(child)
             self.db.flush()  # 每个子节点立即 flush，确保递归删除时序正确
+            self._remove_index(int(child.id))  # type: ignore[arg-type]
 
     # ------------------------------------------------------------------
     # Tree

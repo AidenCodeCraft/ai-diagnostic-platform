@@ -268,3 +268,42 @@
 | 6 | 事件持久化与查询 | 新模型 + API + `parsing_service.py` | 可按维度检索事件 |
 | 7 | 规则持久化 | `rule_engine.py` + `api/system/rules.py` | 重启后规则保留 |
 | 8 | 引用定位/权限/评估 | 前端 + 后端 | 跳转章节；多租户；指标 |
+
+---
+
+## 6. 本轮实现状态（2026-11-12）
+
+> 按 §5 清单逐项落地。✅ 完成；⚠️ 部分完成（受环境/数据限制）。
+
+| 优先级 | 事项 | 状态 | 实现说明 |
+| --- | --- | --- | --- |
+| P0 | Embedding 可用化 + 维度对齐 | ✅ | `EMBEDDING_*` 接入 Settings；支持 `auto/local/api/hash`；BGE 加载加超时回退；`MILVUS_DIM`/`EMBEDDING_DIM` 默认 512；补 `requests` |
+| P0 | 入库自动索引 | ✅ | `KnowledgeService.create/update/delete` + 标准化后 `reindex()`；Milvus 关闭时自动跳过 |
+| P0 | 上传校验/编码/zip/大文件 | ✅ | 上传大小上限（413）、二进制拒绝、zip/gz 解压、编码探测（UTF-8/GBK/UTF-16）、解析限行 `MAX_PARSE_LINES` |
+| P0 | 分析异步化 + 进度 | ✅ | `POST /analyses/async` + 线程池；前端轮询 `GET /analyses/{id}` 并分阶段展示进度 |
+| P1 | 事件持久化与查询 | ✅ | `log_events` 表 + 迁移 `f3a4b5c6d7e8`；`/logs/{id}/events/query` 支持分页/级别/模块/错误/关键字过滤 |
+| P1 | 规则持久化 | ✅ | JSON 文件（`RULES_FILE`，原子写入）；增删规则重启保留 |
+| P2 | 引用定位到行号 | ✅ | 引用链接携带 `data-line`；文档面板按 `start_line` 定位段落并高亮 |
+| P2 | 多租户/项目过滤 | ⚠️ 部分 | 知识检索/知识列表/日志列表支持 `project_id`（含全局文档）；聊天链路暂未传项目 |
+| P2 | 知识库种子 + 批量分析 | ✅ | `scripts/seed_knowledge.py`（可 `--reset`）；`POST /analyses/batch` |
+| P2 | 服务端 PDF 导出 | ✅ | `GET /reports/{id}/pdf` 已实现（中文 CID 字体）；reportlab 已安装（5.1.0），部署镜像重建+重启后真实接口 200（3099 B/1 页/STSong-Light）。见 [Environment-Real-Verification](Environment-Real-Verification.md) |
+| P2 | MinIO 日志存储 | ✅ | `LogStorage` 抽象 + 本地回退 + `materialize()`；MinIO 实机已全链路验证（SDK/存储类/部署 API PASS=49/0），并修复已解析日志删除 500 的 P1 bug |
+| P3 | Milvus 向量服务 | ✅ | compose 改 v2.4.0 内嵌 etcd + local storage（原缺 etcd 配置一直 unhealthy）；`setuptools==80.9.0` 修复 pymilvus `pkg_resources`；`VectorService` 索引/load 顺序与 `Hit.get` 两处 bug 已修；API insert/search 实测命中 |
+| P3 | BGE 本地嵌入 | ✅ | `sentence-transformers`/`torch` 已装；经 hf-mirror 真实下载 BGE-small-zh（dim=512），语义相似度/离线加载/Milvus 联合检索均实测通过 |
+| P3 | 检索评估基线 | ✅ | `tests/eval/test_retrieval_quality.py`（Recall@3 ≥ 0.75） |
+
+### 验证结果
+
+- 后端全量：**466 passed / 1 skipped**（467 collected，38.5s）；
+- 真实环境验证后全量：**473 passed / 18 skipped / 0 failed**（新增 7 个删除链路测试；skip 为默认跳过的真实外部服务用例）；
+- 前端：`vue-tsc --noEmit` 通过、`npm run build` 成功（17.38s）；
+- 新增测试覆盖：Embedding provider、自动索引、日志接入/编码/zip、事件持久化、规则持久化、异步/批量分析、项目过滤、种子脚本、PDF 回退、检索基线。
+- 真实环境验证（2026-11-12）：PDF / MinIO / Milvus / BGE 四项缺口全部安装并实机验证通过，详见 [Environment-Real-Verification.md](Environment-Real-Verification.md)。
+
+### 已知限制
+
+1. 部署依赖已补齐：`reportlab`、`minio`、`setuptools==80.9.0` 均在 `requirements.txt`；本地 venv 已验证。**生产 Docker 部署仍需重建镜像并重启容器**（旧镜像不含新依赖/新路由），PDF 缺依赖时返回 501、MinIO 缺服务时自动回退本地。
+2. 聊天链路未按项目过滤知识（会话模型暂无 project 字段）。
+3. BGE 本地模型已实测（hf-mirror 下载、`HF_HUB_OFFLINE=1` 离线可加载）；但 Docker 镜像默认不含 torch/sentence-transformers，容器内本地 BGE 需 `requirements-ml.txt` + 缓存挂载，否则 `EMBEDDING_PROVIDER=auto` 会回退哈希嵌入。
+4. `ai-diagnostic-worker` 容器 healthcheck 与 keep-alive 进程不匹配（unhealthy，既有配置问题）。
+5. `diagnostic-logs` bucket 需首次部署初始化（`LogStorage` 不自动建桶，上传失败静默回退本地）。

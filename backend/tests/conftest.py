@@ -9,6 +9,10 @@ Provides:
 import importlib
 import os
 
+# 测试环境强制使用确定性哈希嵌入：避免下载 BGE 模型导致离线/CI 阻塞
+os.environ.setdefault("EMBEDDING_PROVIDER", "hash")
+os.environ.setdefault("EMBEDDING_HASH_FALLBACK", "true")
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine

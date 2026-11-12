@@ -80,6 +80,9 @@ def _standardize(db: Session, doc_id: int, profile_override=None) -> Dict[str, A
         merged["status"] = "draft" if doc.status == "draft" else "active"
         merged["source"] = "manual_override" if profile_override else "template"
         KnowledgeProfileService(db).upsert(doc_id, merged)
+
+    # 规范化后内容已变化，重新同步向量索引（Milvus 启用时）
+    KnowledgeService(db).reindex(doc_id, doc.content or "")
     return fmt
 
 
@@ -172,6 +175,7 @@ def list_documents(
     doc_type: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
     parent_id: Optional[int] = Query(default=None),
+    project_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """List knowledge documents with optional filters."""
@@ -182,6 +186,7 @@ def list_documents(
         parent_id=parent_id,
         doc_type=doc_type,
         status=status,
+        project_id=project_id,
     )
 
 
@@ -190,10 +195,13 @@ def search_documents(
     q: str = Query(..., min_length=1),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    project_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """Search knowledge documents by keyword."""
-    return KnowledgeService(db).search(query_text=q, page=page, page_size=page_size)
+    return KnowledgeService(db).search(
+        query_text=q, page=page, page_size=page_size, project_id=project_id,
+    )
 
 
 @router.get("/categories")

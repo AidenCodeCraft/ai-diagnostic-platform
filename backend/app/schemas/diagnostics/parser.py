@@ -16,6 +16,7 @@ class ParsedEventSchema(BaseModel):
     classification: str = "unknown"
     timestamp: Optional[datetime] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    line_no: int = 0
 
 
 class ParseResult(BaseModel):
@@ -55,6 +56,7 @@ class ParseResult(BaseModel):
                 classification=getattr(e, "classification", "unknown"),
                 timestamp=getattr(e, "timestamp", None),
                 metadata=getattr(e, "metadata", {}),
+                line_no=getattr(e, "line_no", 0),
             )
             for e in events
         ]

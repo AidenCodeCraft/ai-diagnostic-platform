@@ -146,6 +146,15 @@ export const chatApi = {
     // 诊断流水线（解析+RAG+LLM）可能需要 60-120s，给足超时
     return client.post('/analyses/run', null, { params, timeout: 180000 })
   },
+  runAnalysisAsync(logId: number, model?: string, userQuery?: string) {
+    const params: any = { log_id: logId }
+    if (model) params.model = model
+    if (userQuery) params.user_query = userQuery
+    return client.post('/analyses/async', null, { params, timeout: 30000 })
+  },
+  getAnalysis(analysisId: number) {
+    return client.get(`/analyses/${analysisId}`, { timeout: 15000 })
+  },
   getAnalysisResult(analysisId: number) {
     return client.get(`/analyses/${analysisId}/result`, { timeout: 30000 })
   },
@@ -171,5 +180,9 @@ export interface ChatSource {
   title: string
   source: string
   excerpt: string
+  section?: string
+  section_key?: string
+  start_line?: number
+  end_line?: number
   images?: ChatImage[]
 }

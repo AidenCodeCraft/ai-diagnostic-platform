@@ -3,8 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from app.core.config import settings
+from app.core.logging_config import get_logger
 from app.services.parser.registry import ParserRegistry
 from app.services.parser.log_reader import LogReader
+
+logger = get_logger(__name__)
 
 
 class LogParserService:
@@ -27,13 +31,25 @@ class LogParserService:
         return [e.to_dict() for e in events]
 
     def parse_file(self, path: str | Path, force_source: Optional[str] = None) -> List[Dict[str, object]]:
-        text = self._reader.read_all(path)
+        text = self._read_capped(path)
         return self.parse_text(text, force_source=force_source)
 
     def parse_structured(self, path: str | Path, force_source: Optional[str] = None) -> list:
         """Parse a file and return raw ParsedEvent objects (new API)."""
-        text = self._reader.read_all(path)
+        text = self._read_capped(path)
         return self._registry.parse_text(text, force_source=force_source)
+
+    def _read_capped(self, path: str | Path) -> str:
+        """读取日志文本（编码自动探测 + 大文件限行）。"""
+        text, truncated = self._reader.read_all_capped(
+            path, max_lines=settings.MAX_PARSE_LINES,
+        )
+        if truncated:
+            logger.warning(
+                "[ParserService] file %s exceeded %d lines; parsing truncated content",
+                path, settings.MAX_PARSE_LINES,
+            )
+        return text
 
     def stream_parse(self, path: str | Path, force_source: Optional[str] = None) -> list:
         """Parse a large file line-by-line (memory-efficient)."""

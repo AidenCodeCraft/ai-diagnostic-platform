@@ -1,12 +1,13 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import session as session_module
 from app.models import Log
 from app.schemas import LogResponse, LogUpdate
 from app.services import LogService
+from app.services.diagnostics.log_service import LogUploadError
 
 
 def get_db_session():
@@ -36,14 +37,17 @@ def upload_log(
     db: Session = Depends(get_db_session),
 ) -> Log:
     """Upload a log file and persist the metadata in the database."""
-    return LogService(db).upload_log(
-        file=file,
-        project_id=project_id,
-        upload_user_id=upload_user_id,
-        device=device,
-        version=version,
-        description=description,
-    )
+    try:
+        return LogService(db).upload_log(
+            file=file,
+            project_id=project_id,
+            upload_user_id=upload_user_id,
+            device=device,
+            version=version,
+            description=description,
+        )
+    except LogUploadError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 # ------------------------------------------------------------------
@@ -52,9 +56,12 @@ def upload_log(
 
 
 @router.get("", response_model=List[LogResponse])
-def list_logs(db: Session = Depends(get_db_session)) -> List[Log]:
-    """List all uploaded logs ordered by creation time descending."""
-    return LogService(db).list_logs()
+def list_logs(
+    project_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db_session),
+) -> List[Log]:
+    """List uploaded logs (optionally filtered by project)."""
+    return LogService(db).list_logs(project_id=project_id)
 
 
 @router.get("/{log_id}", response_model=LogResponse)

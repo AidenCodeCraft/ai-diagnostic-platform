@@ -3,11 +3,18 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import session as session_module
 from app.schemas import AnalysisResponse, AnalysisListResponse
 from app.services import AnalysisTaskService
+
+
+class BatchAnalysisRequest(BaseModel):
+    log_ids: List[int] = Field(..., min_length=1, max_length=100)
+    model: Optional[str] = None
+    user_query: Optional[str] = Field(default=None, max_length=2000)
 
 
 def get_db_session():
@@ -60,6 +67,35 @@ def run_analysis(
         raise HTTPException(status_code=400, detail=f"日志文件不存在: {exc}") from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"分析失败: {str(exc)[:200]}") from exc
+
+
+@router.post("/async", response_model=Dict[str, Any])
+def run_analysis_async(
+    log_id: int = Query(...),
+    model: Optional[str] = Query(default=None),
+    user_query: Optional[str] = Query(default=None, max_length=2000),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """异步执行分析：立即返回 pending，前端轮询 /analyses/{id} 获取状态。"""
+    try:
+        return AnalysisTaskService(db).run_analysis_async(
+            log_id=log_id, model=model, user_query=user_query,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"分析任务创建失败: {str(exc)[:200]}") from exc
+
+
+@router.post("/batch", response_model=Dict[str, Any])
+def run_batch_analysis(
+    body: BatchAnalysisRequest,
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """批量异步分析：逐条创建任务并立即返回 pending 列表。"""
+    return AnalysisTaskService(db).run_batch_async(
+        body.log_ids, model=body.model, user_query=body.user_query,
+    )
 
 
 # ------------------------------------------------------------------

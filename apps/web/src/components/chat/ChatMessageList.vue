@@ -190,6 +190,7 @@ let tooltipTimer: ReturnType<typeof setTimeout> | null = null
 
 // ── 右侧文档预览面板 ──────────────────────────────────────────
 const docPanel = reactive({
+  lineNo: 0,
   visible: false,
   loading: false,
   error: '',
@@ -217,10 +218,11 @@ function scheduleTooltipHide() {
   }, 200)
 }
 
-async function openDocPanel(docId: number, title: string, anchorId: string) {
+async function openDocPanel(docId: number, title: string, anchorId: string, lineNo = 0) {
   docPanel.visible = true
   docPanel.title = title
   docPanel.anchorId = anchorId
+  docPanel.lineNo = lineNo
   docPanel.error = ''
 
   // 检查缓存
@@ -274,6 +276,7 @@ function scrollToDocAnchor() {
             h.scrollIntoView({ behavior: 'smooth', block: 'start' })
             h.classList.add('doc-anchor-highlight')
             setTimeout(() => h.classList.remove('doc-anchor-highlight'), 3000)
+            tryScrollToLine(body)
             return
           }
         }
@@ -285,6 +288,7 @@ function scrollToDocAnchor() {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' })
             el.classList.add('doc-anchor-highlight')
             setTimeout(() => el.classList.remove('doc-anchor-highlight'), 3000)
+            tryScrollToLine(body)
             return
           }
         }
@@ -298,11 +302,15 @@ function scrollToDocAnchor() {
               parent.scrollIntoView({ behavior: 'smooth', block: 'center' })
               parent.classList.add('doc-anchor-highlight')
               setTimeout(() => parent.classList.remove('doc-anchor-highlight'), 3000)
+              tryScrollToLine(body)
               return
             }
           }
         }
       }
+
+      // 无锚点 / 锚点未命中时：按 start_line 精确定位
+      if (tryScrollToLine(body)) return
 
       // 无锚点时滚动到顶部
       body.scrollTop = 0
@@ -310,9 +318,37 @@ function scrollToDocAnchor() {
   })
 }
 
+/** 按引用命中的 start_line 在已渲染文档中定位到对应段落并高亮 */
+function tryScrollToLine(body: HTMLElement): boolean {
+  const lineNo = docPanel.lineNo || 0
+  if (lineNo <= 0) return false
+  const lines = (docPanel.content || '').split('\n')
+  const rawLine = (lines[lineNo - 1] || '').trim()
+  if (!rawLine) return false
+  const cleaned = rawLine
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^[-*+>]\s+/, '')
+    .replace(/^\d+\.\s+/, '')
+    .trim()
+  const needle = cleaned.slice(0, 60)
+  if (needle.length < 2) return false
+
+  const candidates = body.querySelectorAll('p, li, td, th, h1, h2, h3, h4, h5, h6')
+  for (const el of candidates) {
+    if ((el.textContent || '').includes(needle)) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('doc-anchor-highlight')
+      setTimeout(() => el.classList.remove('doc-anchor-highlight'), 3000)
+      return true
+    }
+  }
+  return false
+}
+
 function closeDocPanel() {
   docPanel.visible = false
   docPanel.anchorId = ''
+  docPanel.lineNo = 0
 }
 
 // ── Vue 模板级事件委托（处理 v-html 中的 ref-link 元素） ──
@@ -363,6 +399,7 @@ function handleRefClickFor(el: HTMLElement) {
   const docIdStr = el.getAttribute('data-doc-id')
   const title = el.getAttribute('data-title') || ''
   const anchorId = el.getAttribute('data-anchor') || ''
+  const lineNo = parseInt(el.getAttribute('data-line') || '0', 10) || 0
 
   if (!docIdStr) return
 
@@ -370,7 +407,7 @@ function handleRefClickFor(el: HTMLElement) {
   if (isNaN(docId)) return
 
   tooltip.visible = false
-  openDocPanel(docId, title, anchorId)
+  openDocPanel(docId, title, anchorId, lineNo)
 }
 
 function handleRefMouseEnterFor(el: HTMLElement) {
@@ -585,11 +622,17 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
   // 构建双重映射表
   // sourceMap: doc_id → source info
   // titleMap: doc_title → source info（用于 LLM 输出 ref://FAQ 时的反查）
-  const sourceMap = new Map<string, { id: number; title: string; excerpt: string; source: string }>()
-  const titleMap = new Map<string, { id: number; title: string; excerpt: string; source: string }>()
+  const sourceMap = new Map<string, { id: number; title: string; excerpt: string; source: string; start_line?: number }>()
+  const titleMap = new Map<string, { id: number; title: string; excerpt: string; source: string; start_line?: number }>()
   for (const s of sources) {
     if (s.id && s.title) {
-      const info = { id: s.id, title: s.title, excerpt: s.excerpt || '', source: s.source || '知识库' }
+      const info = {
+        id: s.id,
+        title: s.title,
+        excerpt: s.excerpt || '',
+        source: s.source || '知识库',
+        start_line: typeof s.start_line === 'number' ? s.start_line : undefined,
+      }
       sourceMap.set(String(s.id), info)
       // 按标题建立映射（用于 ref://FAQ 等非数字 ID 的反查）
       titleMap.set(s.title.toLowerCase(), info)
@@ -659,6 +702,7 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
       const sourceLabel = info?.source || '知识库'
       const anchorAttr = anchor ? ` data-anchor="${escapeAttr(anchor)}"` : ''
       const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
+      const lineAttr = info?.start_line ? ` data-line="${info.start_line}"` : ''
 
       // 同一 docId 使用相同的全局序号，否则分配新序号
       let displayNum: string
@@ -693,14 +737,18 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
       const excerpt = info?.excerpt || ''
       const sourceLabel = info?.source || '知识库'
       const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
+      const lineAttr = info?.start_line ? ` data-line="${info.start_line}"` : ''
 
-      const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(docTitle)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr} href="javascript:void(0)">${escapeHtml(docTitle)}</a>`
+      const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(docTitle)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${lineAttr} href="javascript:void(0)">${escapeHtml(docTitle)}</a>`
 
       if (sectionTitle && rawSectionId) {
         const sectionResolved = resolveDocId(rawSectionId)
         const sectionId = sectionResolved?.docId || rawSectionId
         const sectionAnchorAttr = sectionAnchor ? ` data-anchor="${escapeAttr(sectionAnchor)}"` : ''
-        const sectionLink = `<a class="ref-link ref-source-section" data-doc-id="${escapeAttr(sectionId)}" data-title="${escapeAttr(sectionTitle)}" data-source="${escapeAttr(sourceLabel)}"${sectionAnchorAttr}${excerptAttr} href="javascript:void(0)">${escapeHtml(sectionTitle)}</a>`
+        const sectionLineAttr = sectionResolved?.info?.start_line
+          ? ` data-line="${sectionResolved.info.start_line}"`
+          : lineAttr
+        const sectionLink = `<a class="ref-link ref-source-section" data-doc-id="${escapeAttr(sectionId)}" data-title="${escapeAttr(sectionTitle)}" data-source="${escapeAttr(sourceLabel)}"${sectionAnchorAttr}${excerptAttr}${sectionLineAttr} href="javascript:void(0)">${escapeHtml(sectionTitle)}</a>`
         return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档中\u201C${sectionLink}\u201D部分</span></span>`
       }
       return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span></span>`
@@ -744,13 +792,17 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
       const excerpt = info?.excerpt || ''
       const sourceLabel = info?.source || '知识库'
       const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
+      const lineAttr = info?.start_line ? ` data-line="${info.start_line}"` : ''
 
-      const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(docTitle)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr} href="javascript:void(0)">${escapeHtml(docTitle)}</a>`
+      const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(docTitle)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${lineAttr} href="javascript:void(0)">${escapeHtml(docTitle)}</a>`
 
       if (sectionTitle) {
         const sectionResolved = resolveDocId(sectionTitle)
         const sectionId = sectionResolved?.docId || docId
-        const sectionLink = `<a class="ref-link ref-source-section" data-doc-id="${escapeAttr(sectionId)}" data-title="${escapeAttr(sectionTitle)}" data-source="${escapeAttr(sourceLabel)}" data-anchor="${escapeAttr(encodeURIComponent(sectionTitle))}"${excerptAttr} href="javascript:void(0)">${escapeHtml(sectionTitle)}</a>`
+        const sectionLineAttr = sectionResolved?.info?.start_line
+          ? ` data-line="${sectionResolved.info.start_line}"`
+          : lineAttr
+        const sectionLink = `<a class="ref-link ref-source-section" data-doc-id="${escapeAttr(sectionId)}" data-title="${escapeAttr(sectionTitle)}" data-source="${escapeAttr(sourceLabel)}" data-anchor="${escapeAttr(encodeURIComponent(sectionTitle))}"${excerptAttr}${sectionLineAttr} href="javascript:void(0)">${escapeHtml(sectionTitle)}</a>`
         return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档中\u201C${sectionLink}\u201D部分</span></span>`
       }
       return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span></span>`
@@ -773,6 +825,7 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
       const sourceLabel = info?.source || '知识库'
       const anchorAttr = anchor ? ` data-anchor="${escapeAttr(anchor)}"` : ''
       const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
+      const lineAttr = info?.start_line ? ` data-line="${info.start_line}"` : ''
 
       // 纯数字文本 → 序号样式（使用全局序号映射）
       if (/^\d{1,2}$/.test(linkText.trim())) {
@@ -784,10 +837,10 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
           docSeqMap.set(docId, globalSeq)
           displayNum = String(globalSeq)
         }
-        return `<a class="ref-link ref-seq" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(title)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${anchorAttr} href="javascript:void(0)" title="点击查看文档">${displayNum}</a>`
+        return `<a class="ref-link ref-seq" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(title)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${anchorAttr}${lineAttr} href="javascript:void(0)" title="点击查看文档">${displayNum}</a>`
       }
       // 文档名链接 → 参考来源样式
-      return `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(linkText.trim())}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${anchorAttr} href="javascript:void(0)">${escapeHtml(linkText.trim())}</a>`
+      return `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(linkText.trim())}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${anchorAttr}${lineAttr} href="javascript:void(0)">${escapeHtml(linkText.trim())}</a>`
     },
   )
 
@@ -795,7 +848,8 @@ function processRefLinks(html: string, sources: any[], _messageId?: string | num
   // 且不在流式输出中（避免过早追加），且不是无匹配响应，在末尾追加兜底参考来源
   if (sourceMap.size > 0 && !isStreaming && !html.includes('class="ref-link') && !html.includes('href="ref://') && html.trim().length > 0 && !/知识库中暂无/.test(html)) {
     const sourceLines = Array.from(sourceMap.values()).map((info) => {
-      const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(String(info.id))}" data-title="${escapeAttr(info.title)}" data-source="${escapeAttr(info.source)}" data-excerpt="${escapeAttr(info.excerpt)}" href="javascript:void(0)">${escapeHtml(info.title)}</a>`
+      const lineAttr = info.start_line ? ` data-line="${info.start_line}"` : ''
+      const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(String(info.id))}" data-title="${escapeAttr(info.title)}" data-source="${escapeAttr(info.source)}" data-excerpt="${escapeAttr(info.excerpt)}"${lineAttr} href="javascript:void(0)">${escapeHtml(info.title)}</a>`
       return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span></span>`
     })
     html += `<br>${sourceLines.join('<br>')}`

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,9 @@ from app.core.logging_config import get_logger
 from app.models import Analysis, Log
 
 logger = get_logger(__name__)
+
+# 轻量线程池：避免长分析阻塞 HTTP 请求；生产可替换为 Celery/RQ
+_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="analysis")
 
 
 class AnalysisTaskService:
@@ -79,14 +83,83 @@ class AnalysisTaskService:
             self.db.commit()
             raise
 
+    def run_analysis_async(
+        self, log_id: int, model: Optional[str] = None,
+        user_query: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """创建分析任务并在后台线程执行，立即返回 pending 状态。
+
+        前端通过 GET /analyses/{id} 轮询状态，完成后取 /result。
+        """
+        log = self._get_log(log_id)
+        analysis = Analysis(
+            log_id=log.id,
+            status="pending",
+            model=model or "mock",
+        )
+        self.db.add(analysis)
+        self.db.commit()
+        self.db.refresh(analysis)
+
+        analysis_id = int(analysis.id)
+        _EXECUTOR.submit(self._execute_async, analysis_id, user_query or "")
+        return {
+            "id": analysis_id,
+            "log_id": log_id,
+            "status": "pending",
+            "model": model or "mock",
+        }
+
+    def run_batch_async(
+        self, log_ids: List[int], model: Optional[str] = None,
+        user_query: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """批量创建异步分析任务（逐条提交，单条失败不影响其他）。"""
+        items = []
+        for log_id in log_ids:
+            try:
+                items.append(self.run_analysis_async(
+                    log_id, model=model, user_query=user_query,
+                ))
+            except Exception as exc:  # noqa: BLE001 - 批量任务单条失败可接受
+                items.append({
+                    "log_id": log_id,
+                    "status": "failed",
+                    "error": str(exc)[:300],
+                })
+        return {"items": items, "total": len(items)}
+
+    @staticmethod
+    def _execute_async(analysis_id: int, user_query: str) -> None:
+        """后台执行入口：使用独立 DB 会话，更新 running → completed|failed。"""
+        from app.database import session as session_module
+
+        db = session_module.create_session()
+        try:
+            service = AnalysisTaskService(db)
+            analysis = service.get_analysis(analysis_id)
+            setattr(analysis, "status", "running")
+            db.commit()
+            try:
+                service._execute_analysis(analysis, user_query=user_query)
+                setattr(analysis, "status", "completed")
+                db.commit()
+            except Exception as exc:  # noqa: BLE001 - 后台任务需记录失败
+                logger.exception("[AnalysisAsync] analysis %d failed", analysis_id)
+                setattr(analysis, "status", "failed")
+                setattr(analysis, "error_message", str(exc)[:2000])
+                db.commit()
+        finally:
+            db.close()
+
     def _execute_analysis(
         self, analysis: Analysis, user_query: str = "",
     ) -> Dict[str, Any]:
         """Core analysis: verify → pipeline(parse → rules → RAG → LLM) → persist."""
         log = self._get_log(int(analysis.log_id))  # type: ignore[arg-type]
 
-        from pathlib import Path
-        file_path = Path(str(log.file_path))
+        from app.services.diagnostics.log_storage import LogStorage
+        file_path = LogStorage().materialize(str(log.file_path))
         if not file_path.exists():
             raise FileNotFoundError(f"Log file not found: {log.file_path}")
 

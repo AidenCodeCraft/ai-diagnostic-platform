@@ -33,7 +33,7 @@ def test_prompt_build_no_errors():
 
 
 def test_prompt_version():
-    assert DiagnosticPrompt.VERSION == "2.0"
+    assert DiagnosticPrompt.VERSION == "3.0"
 
 
 # ------------------------------------------------------------------

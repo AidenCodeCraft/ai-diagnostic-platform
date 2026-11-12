@@ -56,14 +56,16 @@ class ParserRegistry:
     ) -> List[ParsedEvent]:
         """Parse multi-line text, auto-detecting parser per line unless forced."""
         events: List[ParsedEvent] = []
-        for line in text.splitlines():
+        for line_no, line in enumerate(text.splitlines(), start=1):
             stripped = line.strip()
             if not stripped:
                 continue
             try:
-                events.append(self.parse_line(stripped, force_source))
+                event = self.parse_line(stripped, force_source)
             except Exception:
-                events.append(BaseParser._fallback_event(stripped))
+                event = BaseParser._fallback_event(stripped)
+            event.line_no = line_no
+            events.append(event)
         return events
 
     def parse_lines(

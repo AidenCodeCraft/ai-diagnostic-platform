@@ -42,8 +42,9 @@ class AgentService:
         if not log:
             raise ValueError("log not found")
 
-        # Build context
-        file_path = str(log.file_path)  # resolve Column[str] → str for type safety
+        # Build context（MinIO 引用会先下载到本地）
+        from app.services.diagnostics.log_storage import LogStorage
+        file_path = str(LogStorage().materialize(str(log.file_path)))
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             log_content = f.read()
 
