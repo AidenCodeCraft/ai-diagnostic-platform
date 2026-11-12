@@ -56,7 +56,6 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # 复制应用代码（.dockerignore 排除 tests/、__pycache__/ 等）
 COPY backend/ .
-COPY plugins/ /plugins/
 
 # 清理
 RUN rm -f .env .env.* && mkdir -p /app/data/raw
