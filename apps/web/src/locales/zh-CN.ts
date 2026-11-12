@@ -30,7 +30,6 @@ export default {
   nav: {
     newChat: '新对话',
     knowledgeBase: '知识库',
-    pluginManager: '插件管理',
     diagnosticReports: '诊断报告',
     adminPanel: '管理后台',
     recentChats: '最近对话',
@@ -147,20 +146,6 @@ export default {
     pinned: '已置顶',
     backToList: '知识库',
     acceptTypes: '支持 .md, .txt, .pdf',
-  },
-
-  // 插件
-  plugins: {
-    title: '插件管理',
-    name: '插件名称',
-    type: '类型',
-    status: '状态',
-    description: '描述',
-    actions: '操作',
-    enabled: '已启用',
-    disabled: '已禁用',
-    toggleNotImplemented: '插件管理功能开发中',
-    noPlugins: '暂无插件',
   },
 
   // 报告

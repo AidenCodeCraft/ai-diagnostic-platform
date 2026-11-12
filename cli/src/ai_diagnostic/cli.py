@@ -263,7 +263,6 @@ def stats():
             ("已完成", data.get("analysis_completed", "-")),
             ("失败", data.get("analysis_failed", "-")),
             ("知识文档", data.get("total_knowledge", "-")),
-            ("活跃插件", data.get("active_plugins", "-")),
         ]
 
         for label, value in metrics:

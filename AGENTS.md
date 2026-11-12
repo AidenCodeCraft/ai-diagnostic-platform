@@ -9,7 +9,7 @@
 - `backend/` — FastAPI 后端服务（Python 3.12）。应用入口对象为 `app.main:app`。
 - `apps/web/` — Vue 3 + TypeScript + Vite + Element Plus 前端界面（中文界面），目前是唯一已实现的前端客户端。
 - `cli/` — Python SDK 及 `diag` 命令行工具（`src/` 布局，详见 `cli/pyproject.toml`）。
-- `plugins/` — 插件 SDK（`sdk/`）及内置解析器（`builtin/`）。
+- 插件系统已移除（按产品决策）：不再提供插件 SDK/管理；如需专用解析器，直接扩展 `backend/app/services/parser/`。
 - `deploy/` — Docker Compose 编排（postgres + redis + backend + frontend），访问地址为 `http://localhost`。
 - `docs/` — 大量规格文档（SAD、API、插件、Agent、测试、编码规范等）。在猜测约定前请先阅读这些文档。
 - `apps/desktop`（Tauri）与 `apps/mobile`（Flutter）目前仅为占位目录，尚未实现。
@@ -34,7 +34,7 @@
 - 分层结构：API 路由 → Service 服务层 → Repository 仓储 → DB 数据库。路由中不得包含业务逻辑或直接写 SQL，请使用 SQLAlchemy ORM。
 - LLM 调用**必须**经由 Provider 抽象层（`services/providers/`：DeepSeek / Mock / OpenAI 兼容），不得直接调用 SDK。默认 Provider 为 `mock`。
 - 提示词（Prompt）以版本化文件形式存放于 `services/prompts/`，并通过提示词加载器加载 — 严禁在代码中硬编码提示词字符串。
-- 插件遵循固定的生命周期，共 6 种类型（parser / rule / agent / llm / knowledge / report）；内置解析器通过 PluginManager 自动注册。
+- 无插件机制：新增日志格式直接在 `backend/app/services/parser/` 扩展 `BaseParser` 并注册到 `ParserRegistry`。
 - 后端配置来源于 `.env`（请将 `.env.example` 复制为 `.env`）。切勿提交 `.env` 或任何密钥。生产环境中 `SECRET_KEY` 必须是随机的 64 字符字符串；`MILVUS_ENABLED` / `MINIO_ENABLED` 默认关闭。
 
 ## 工具链注意事项

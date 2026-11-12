@@ -87,7 +87,7 @@ const stats = ref<AdminStats>({
   total_users: 0, total_projects: 0, total_logs: 0,
   total_analyses: 0, total_knowledge: 0,
   analysis_completed: 0, analysis_failed: 0,
-  analysis_trend: [], total_log_size_bytes: 0, active_plugins: 0,
+  analysis_trend: [], total_log_size_bytes: 0,
 })
 
 const loading = ref(true)

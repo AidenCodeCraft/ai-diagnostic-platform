@@ -20,7 +20,6 @@ const router = createRouter({
       children: [
         { path: '/chat', name: 'Chat', component: () => import('@/views/ChatView.vue'), meta: { title: 'AI 诊断' } },
         { path: '/knowledge', name: 'Knowledge', component: () => import('@/views/KnowledgeBase.vue'), meta: { title: '知识库' } },
-        { path: '/plugins', name: 'Plugins', component: () => import('@/views/PluginManager.vue'), meta: { title: '插件管理' } },
         { path: '/reports', name: 'Reports', component: () => import('@/views/ReportList.vue'), meta: { title: '诊断报告' } },
       ],
     },

@@ -1,5 +1,7 @@
 # Plugin Development Specification
 
+> ⚠️ **已废弃（2026-11）**：插件系统已按产品决策移除，代码与插件管理功能均已删除。本文档仅作历史参考，不再适用。
+
 AI Diagnostic Platform
 
 Version: 1.0

@@ -28,7 +28,6 @@ export default {
   nav: {
     newChat: 'New Chat',
     knowledgeBase: 'Knowledge Base',
-    pluginManager: 'Plugins',
     diagnosticReports: 'Reports',
     adminPanel: 'Admin',
     recentChats: 'Recent Chats',
@@ -141,19 +140,6 @@ export default {
     pinned: 'Pinned',
     backToList: 'Knowledge Base',
     acceptTypes: 'Supports .md, .txt, .pdf',
-  },
-
-  plugins: {
-    title: 'Plugin Manager',
-    name: 'Name',
-    type: 'Type',
-    status: 'Status',
-    description: 'Description',
-    actions: 'Actions',
-    enabled: 'Enabled',
-    disabled: 'Disabled',
-    toggleNotImplemented: 'Plugin management is under development',
-    noPlugins: 'No plugins',
   },
 
   reports: {

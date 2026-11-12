@@ -49,7 +49,6 @@ export interface AdminStats {
   analysis_trend: Array<{ date: string; count: number }>
   total_log_size_bytes: number
   total_log_size_mb?: number
-  active_plugins?: number
   active_users_30d?: number
   knowledge_by_category?: Array<{ category: string; count: number }>
 }

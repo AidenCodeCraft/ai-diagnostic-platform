@@ -58,23 +58,6 @@
         </div>
       </el-tab-pane>
 
-      <!-- 插件状态 -->
-      <el-tab-pane label="插件状态" name="plugins">
-        <div class="audit-table-wrap">
-          <el-table :data="plugins" stripe v-loading="pluginsLoading">
-            <el-table-column prop="name" label="插件名称" min-width="140" />
-            <el-table-column prop="type" label="类型" width="100" />
-            <el-table-column prop="version" label="版本" width="80" />
-            <el-table-column prop="enabled" label="状态" width="80">
-              <template #default="{ row }">
-                <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div v-if="!pluginsLoading && plugins.length === 0" class="empty-hint">暂无插件数据</div>
-        </div>
-      </el-tab-pane>
-
       <!-- 规则管理 -->
       <el-tab-pane label="诊断规则" name="rules">
         <div class="audit-table-wrap">
@@ -151,13 +134,11 @@ const activeTab = ref('analyses')
 
 const analyses = ref<any[]>([])
 const bugCases = ref<any[]>([])
-const plugins = ref<any[]>([])
 const rules = ref<any[]>([])
 const drafts = ref<any[]>([])
 
 const analysesLoading = ref(false)
 const bugsLoading = ref(false)
-const pluginsLoading = ref(false)
 const rulesLoading = ref(false)
 const draftsLoading = ref(false)
 
@@ -213,19 +194,6 @@ async function fetchBugCases() {
     console.error('[Audit] fetchBugCases failed:', e?.response?.data?.detail || e?.message || e)
   } finally {
     bugsLoading.value = false
-  }
-}
-
-async function fetchPlugins() {
-  pluginsLoading.value = true
-  try {
-    const { data } = await client.get('/plugins')
-    plugins.value = Array.isArray(data) ? data : data.plugins || []
-  } catch (e: any) {
-    plugins.value = []
-    console.error('[Audit] fetchPlugins failed:', e?.response?.data?.detail || e?.message || e)
-  } finally {
-    pluginsLoading.value = false
   }
 }
 
@@ -307,7 +275,6 @@ async function openDraft(row: any) {
 onMounted(() => {
   fetchAnalyses()
   fetchBugCases()
-  fetchPlugins()
   fetchRules()
   fetchDrafts()
 })

@@ -124,7 +124,7 @@ v1.0.0 — 企业版
 - **左侧边栏**（参考 ChatGPT）：
   - 顶部：搜索 + 侧栏展开/收缩（圆形按钮 flex 并排）
   - 「新对话」按钮
-  - 知识库 / 插件管理 / 诊断报告入口
+  - 知识库 / 诊断报告入口
   - 最近对话列表（自动归档 + 智能标题生成 + hover 更多操作）
   - 对话菜单：重命名 / 置顶 / 分析 / 删除
   - 底部用户区（头像 + 用户名 → 设置/帮助/退出）
@@ -157,17 +157,12 @@ v1.0.0 — 企业版
 
 状态：⏳ 计划中
 
-### Commit 014 — 插件系统
+### Commit 014 — 插件系统（已移除）
 
-- 插件 SDK：PluginBase / PluginManifest / PluginManager
-- 6 种插件类型：parser / rule / agent / llm / knowledge / report
-- 完整生命周期：install → load → initialize → running → disable → uninstall
-- 内置插件：USB 日志解析器（8 种错误模式）、Bluetooth 日志解析器（5 种错误模式）
-- 插件管理 API（list / stats / toggle）
-- 模型列表 API（`GET /plugins/models`）
-- 插件自动注册内置解析器
+- 原插件 SDK / 内置解析器（USB、Bluetooth）/ 插件管理 API 已按产品决策移除
+- 当前不提供插件机制；如需专用解析器，直接扩展 `backend/app/services/parser/`
 
-状态：✅ 完成
+状态：❌ 已移除
 
 ### Commit 015 — 生产部署
 
@@ -190,7 +185,6 @@ v1.0.0 — 企业版
 | 🔴 P0 | 项目管理 | ✅ |
 | 🔴 P0 | Milvus 向量搜索 | ✅ |
 | 🔴 P0 | 对话式交互界面 | ✅ |
-| 🔴 P0 | 模型插件化管理 | ✅ |
 | 🔴 P0 | 左侧边栏重构 | ✅ |
 | 🔴 P0 | 多轮实时对话 | ✅ |
 | 🟡 P1 | 多格式知识导入 | ✅ |
@@ -213,7 +207,6 @@ v1.0.0 — 企业版
 | LLM 集成 | 12 |
 | 知识库 | 18 |
 | 报告系统 | 6 |
-| 插件系统 | 20 |
 | 项目管理 | 7 |
 | 用户认证 | 7 |
 | 健康检查 & 配置 | 8 |
@@ -297,10 +290,6 @@ backend/          — FastAPI 后端
       prompts/    — Prompt 模板
     database/     — 数据库会话管理
   migrations/     — Alembic 迁移（11 个版本）
-
-plugins/          — 插件 SDK + 内置插件
-  sdk/            — PluginBase / PluginManifest / PluginManager
-  builtin/        — USB / Bluetooth 解析器
 
 deploy/           — Docker Compose + 部署文档
 ```
@@ -405,7 +394,6 @@ docker compose up -d --build
 | 🔴 P0 | 知识库管理 | ✅ 完成 |
 | 🟡 P1 | Bug 案例系统 | ✅ 完成 |
 | 🔴 P0 | 核心对话功能（阶段三） | 🚧 进行中 |
-| 🟢 P2 | 插件市场 | ⏳ 计划中 |
 | 🟢 P2 | 开放 API | ✅ 完成 |
 
 ### 阶段三 P0：基础多轮对话 — 🚧 进行中
@@ -440,7 +428,6 @@ docker compose up -d --build
 
 - 桌面客户端（Tauri + Rust）
 - 移动客户端（Flutter + Dart）
-- 插件市场
 - 多语言国际化
 
 ---

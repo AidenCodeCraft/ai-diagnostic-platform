@@ -27,7 +27,6 @@ from app.api.diagnostics.reports import router as reports_router
 
 # ── Knowledge ────────────────────────────────────────────────
 from app.api.knowledge import router as knowledge_router
-from app.api.knowledge.plugins import router as plugins_router
 from app.api.knowledge.vector import router as vector_router
 
 # ── System ───────────────────────────────────────────────────
@@ -67,7 +66,6 @@ api_router.include_router(reports_router)
 
 # Knowledge
 api_router.include_router(knowledge_router)
-api_router.include_router(plugins_router)
 api_router.include_router(vector_router)
 
 # System

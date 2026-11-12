@@ -81,7 +81,6 @@ def get_stats(
         "analysis_failed": failed,
         "analysis_trend": analysis_trend,
         "total_log_size_bytes": total_log_size,
-        "active_plugins": 0,
     }
 
 
