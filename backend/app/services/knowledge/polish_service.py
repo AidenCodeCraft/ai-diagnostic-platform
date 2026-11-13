@@ -16,13 +16,15 @@ from typing import Any, Dict, List, Optional
 from app.core.config import settings
 from app.services.knowledge.format_service import KnowledgeFormatService
 from app.services.knowledge.normalizer import Normalizer
-from app.services.knowledge.templates import get_template
+from app.services.knowledge.templates import build_alias_map, get_template
 from app.services.prompts.knowledge_polish import KnowledgePolishPrompt
 
 logger = logging.getLogger(__name__)
 
 # 关键 token：型号（FC09/L13C）、数字（9206/-5007）等，润色后必须保留
 _KEY_TOKEN_RE = re.compile(r"[A-Za-z]{1,10}\d+[A-Za-z0-9._/-]*|\b\d{2,}\b")
+_NUMBER_PREFIX_RE = re.compile(r"^\s*\d+[.、)]\s*")
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 
 
 class KnowledgePolishService:
@@ -76,11 +78,14 @@ class KnowledgePolishService:
                 notes.append("AI 润色失败，已回退为规则规范化")
 
         if not polished:
-            normalized = Normalizer().normalize(content, doc_type)
+            # 规则回退：先对原始草稿做多条目编号，再规范化
+            numbered_input = self._number_parallel_items(content, doc_type)
+            normalized = Normalizer().normalize(numbered_input, doc_type)
             polished = normalized.normalized_content
             notes.append("已按模板规则完成结构化整理")
             notes.extend(normalized.notes)
 
+        polished = self._number_parallel_items(polished, doc_type)
         preview = KnowledgeFormatService().preview(polished, doc_type, title)
         result = dict(preview)
         result["polished_content"] = preview.get("normalized_content", polished)
@@ -188,6 +193,75 @@ class KnowledgePolishService:
             logger.info("[Polish] LLM output missing key tokens: %s", missing[:10])
             return False
         return True
+
+    @classmethod
+    def _number_parallel_items(cls, content: str, doc_type: Optional[str]) -> str:
+        """自由格式下为多条并列内容统一编号（1.、2.、3.）。
+
+        结构化模板（case/faq）已有章节区分，不做编号以免破坏章节匹配。
+        """
+        template = get_template(doc_type)
+        if template is not None and not template.free_form:
+            return content
+        lines = (content or "").splitlines()
+        if not lines:
+            return content
+        alias_map = build_alias_map(template) if template else {}
+
+        # 1) 有 H2 标题：给非模板章节编号
+        h2_indexes: List[int] = []
+        for index, line in enumerate(lines):
+            match = _HEADING_RE.match(line.strip())
+            if match and len(match.group(1)) == 2:
+                h2_indexes.append(index)
+        editable = []
+        for index in h2_indexes:
+            match = _HEADING_RE.match(lines[index].strip())
+            title = _NUMBER_PREFIX_RE.sub("", match.group(2).strip())
+            if title in alias_map:
+                continue
+            editable.append((index, title))
+        if len(editable) >= 2:
+            for number, (index, title) in enumerate(editable, start=1):
+                lines[index] = f"## {number}. {title}"
+            return "\n".join(lines)
+        if h2_indexes:
+            return content
+
+        # 2) 无标题：按空行分块，给普通段落编号
+        blocks: List[List[str]] = []
+        current: List[str] = []
+        for line in lines:
+            if line.strip():
+                current.append(line)
+            elif current:
+                blocks.append(current)
+                current = []
+        if current:
+            blocks.append(current)
+        if len(blocks) < 2:
+            return content
+
+        def _numberable(block: List[str]) -> bool:
+            first = block[0].lstrip()
+            return not first.startswith(("#", "|", "```", "- ", "* ", "+ ", ">", "!"))
+
+        candidates = [block for block in blocks if _numberable(block)]
+        if len(candidates) < 2:
+            return content
+
+        number = 1
+        rebuilt: List[str] = []
+        for block in blocks:
+            if block in candidates:
+                first = _NUMBER_PREFIX_RE.sub("", block[0].strip())
+                rebuilt.append(f"{number}. {first}")
+                rebuilt.extend(block[1:])
+                number += 1
+            else:
+                rebuilt.extend(block)
+            rebuilt.append("")
+        return "\n".join(rebuilt).strip()
 
     @staticmethod
     def _dedupe(items: List[str]) -> List[str]:

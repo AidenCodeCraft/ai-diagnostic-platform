@@ -186,17 +186,12 @@
             <el-button :type="editMode === 'split' ? 'primary' : ''" @click="editMode = 'split'; refreshPreview()">分屏</el-button>
             <el-button :type="editMode === 'preview' ? 'primary' : ''" @click="editMode = 'preview'; refreshPreview()">预览</el-button>
           </el-button-group>
-          <el-button @click="aiPolish" :loading="polishing" :disabled="polishing">AI润色</el-button>
-          <el-button v-if="polishSnapshot !== null" type="warning" plain @click="undoPolish">撤销AI润色</el-button>
-          <el-tag v-if="polishSnapshot !== null" size="small" type="success" effect="plain">已润色</el-tag>
+          <el-button v-if="polishSnapshot === null" @click="aiPolish" :loading="polishing" :disabled="polishing">AI润色</el-button>
+          <el-button v-else type="warning" plain @click="undoPolish">撤销AI润色</el-button>
           <el-button @click="showGuide = true">格式说明</el-button>
           <el-button @click="cancelEdit">取消</el-button>
           <el-button type="primary" @click="save" :loading="saving">{{ editingId ? '保存' : '创建' }}</el-button>
         </div>
-      </div>
-      <div v-if="currentTemplate" class="format-hint">
-        <span class="format-hint-text">格式要求：{{ currentTemplate.guide }}</span>
-        <el-button link type="primary" size="small" @click="showGuide = true">查看示例 / 插入模板</el-button>
       </div>
       <div class="editor-body" :class="'mode-' + editMode">
         <div v-if="polishing" class="polish-overlay">
@@ -279,8 +274,39 @@
       <template #footer><el-button @click="showRename = false">取消</el-button><el-button type="primary" @click="doRename">确认</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="showGuide" :title="guideTitle" width="760px" top="6vh">
-      <div v-if="currentTemplate" class="guide-body">
+    <el-dialog v-model="showGuide" :title="guideTitle" width="820px" top="6vh">
+      <div v-if="editingTemplate" class="guide-body">
+        <el-form label-width="92px" label-position="left">
+          <el-form-item label="类型名称">
+            <el-input v-model="templateDraft.name" size="small" />
+          </el-form-item>
+          <el-form-item label="格式说明">
+            <el-input v-model="templateDraft.guide" type="textarea" :rows="2" placeholder="给用户的格式填写说明" />
+          </el-form-item>
+          <el-form-item label="结构项">
+            <div class="template-sections">
+              <div v-for="(section, index) in templateDraft.sections" :key="index" class="template-section-row">
+                <el-input v-model="section.title" placeholder="章节名称" size="small" style="width:170px" />
+                <el-input v-model="section.key" placeholder="键（可留空）" size="small" style="width:150px" />
+                <el-select v-model="section.level" size="small" style="width:110px">
+                  <el-option label="必填" value="required" />
+                  <el-option label="建议" value="recommended" />
+                  <el-option label="可选" value="optional" />
+                </el-select>
+                <el-button size="small" type="danger" text :disabled="templateDraft.sections.length <= 1" @click="removeTemplateSection(index)">删除</el-button>
+              </div>
+              <el-button size="small" @click="addTemplateSection">+ 新增结构项</el-button>
+            </div>
+          </el-form-item>
+          <el-form-item label="模板骨架">
+            <el-input v-model="templateDraft.skeleton" type="textarea" :rows="5" placeholder="新建时预填的 Markdown 骨架" />
+          </el-form-item>
+          <el-form-item label="填写示例">
+            <el-input v-model="templateDraft.example" type="textarea" :rows="4" placeholder="示例 Markdown" />
+          </el-form-item>
+        </el-form>
+      </div>
+      <div v-else-if="currentTemplate" class="guide-body">
         <h4>格式要求</h4>
         <p class="guide-text">{{ currentTemplate.guide }}</p>
         <h4>章节结构</h4>
@@ -301,13 +327,21 @@
       <div v-else class="guide-body">
         <p class="guide-text">自由格式：建议使用小标题分节、条目化表达，便于阅读与检索。</p>
       </div>
-      <div class="guide-body">
+      <div v-if="!editingTemplate" class="guide-body">
         <h4>发布标准</h4>
         <p class="guide-text">无「错误」级问题即可发布（必填章节齐全、正则可编译）。质量分表示完整度：≥60 良好，40–59 可用但建议完善，低于 40 信息不足。</p>
       </div>
       <template #footer>
-        <el-button @click="showGuide = false">关闭</el-button>
-        <el-button type="primary" @click="insertSkeleton">插入模板骨架</el-button>
+        <template v-if="editingTemplate">
+          <el-button @click="editingTemplate = false">取消</el-button>
+          <el-button :loading="savingTemplate" @click="resetTemplate">恢复默认</el-button>
+          <el-button type="primary" :loading="savingTemplate" @click="saveTemplate">保存格式</el-button>
+        </template>
+        <template v-else>
+          <el-button @click="showGuide = false">关闭</el-button>
+          <el-button v-if="currentTemplate" @click="startEditTemplate">编辑格式</el-button>
+          <el-button type="primary" @click="insertSkeleton">追加模板骨架</el-button>
+        </template>
       </template>
     </el-dialog>
   </div>
@@ -410,6 +444,15 @@ let polishAbort: AbortController | null = null
 const editorKey = ref(0)  // 整体替换编辑内容时重建编辑器，避免内容追加/不同步
 const templates = ref<KnowledgeTemplateInfo[]>([])
 const showGuide = ref(false)
+const editingTemplate = ref(false)
+const savingTemplate = ref(false)
+const templateDraft = ref<{
+  name: string
+  guide: string
+  skeleton: string
+  example: string
+  sections: Array<{ title: string; key: string; level: string }>
+}>({ name: '', guide: '', skeleton: '', example: '', sections: [] })
 let previewTimer: ReturnType<typeof setTimeout> | null = null
 
 const currentTemplate = computed(
@@ -458,25 +501,104 @@ function replaceEditorContent(text: string) {
   nextTick(() => refreshPreview())
 }
 
+function startEditTemplate() {
+  if (!currentTemplate.value) return
+  templateDraft.value = {
+    name: currentTemplate.value.name,
+    guide: currentTemplate.value.guide,
+    skeleton: currentTemplate.value.skeleton,
+    example: currentTemplate.value.example,
+    sections: currentTemplate.value.sections.map(section => ({
+      title: section.title,
+      key: section.key,
+      level: section.level,
+    })),
+  }
+  editingTemplate.value = true
+}
+
+function addTemplateSection() {
+  templateDraft.value.sections.push({ title: '', key: '', level: 'optional' })
+}
+
+function removeTemplateSection(index: number) {
+  templateDraft.value.sections.splice(index, 1)
+}
+
+async function saveTemplate() {
+  if (!currentTemplate.value) return
+  const sections = templateDraft.value.sections.filter(section => section.title.trim())
+  if (!sections.length) {
+    ElMessage.warning('至少保留一个结构项')
+    return
+  }
+  savingTemplate.value = true
+  try {
+    await knowledgeApi.updateTemplate(currentTemplate.value.doc_type, {
+      name: templateDraft.value.name,
+      guide: templateDraft.value.guide,
+      skeleton: templateDraft.value.skeleton,
+      example: templateDraft.value.example,
+      sections,
+    })
+    await loadTemplates()
+    editingTemplate.value = false
+    ElMessage.success('格式说明已保存')
+  } catch (e: any) {
+    ElMessage.error('保存失败: ' + (e?.response?.data?.detail || e?.message))
+  } finally {
+    savingTemplate.value = false
+  }
+}
+
+async function resetTemplate() {
+  if (!currentTemplate.value) return
+  try {
+    await ElMessageBox.confirm(
+      '恢复默认会清除该类型的自定义格式说明，确定继续？',
+      '确认恢复',
+      { type: 'warning', confirmButtonText: '恢复默认', cancelButtonText: '取消' },
+    )
+  } catch { return }
+  savingTemplate.value = true
+  try {
+    await knowledgeApi.resetTemplate(currentTemplate.value.doc_type)
+    await loadTemplates()
+    editingTemplate.value = false
+    ElMessage.success('已恢复默认格式说明')
+  } catch (e: any) {
+    ElMessage.error('恢复失败: ' + (e?.response?.data?.detail || e?.message))
+  } finally {
+    savingTemplate.value = false
+  }
+}
+
 async function insertSkeleton() {
   const skeleton = skeletonFor(form.value.doc_type)
   if (!skeleton) {
     ElMessage.info('该类型为自由格式，没有固定模板')
     return
   }
-  if (form.value.content.trim()) {
+  const hasContent = !!form.value.content.trim()
+  if (hasContent) {
     try {
       await ElMessageBox.confirm(
-        '使用模板会替换当前编辑内容（不是追加），确定继续？',
-        '确认',
-        { type: 'warning', confirmButtonText: '替换', cancelButtonText: '取消' },
+        '将把模板骨架追加到当前编辑内容末尾（不会替换原有内容），确定继续？',
+        '确认追加',
+        { type: 'info', confirmButtonText: '追加', cancelButtonText: '取消' },
       )
     } catch { return }
   }
   polishSnapshot.value = null
   showGuide.value = false
-  replaceEditorContent(skeleton)
-  ElMessage.success('已用模板骨架替换当前内容')
+  if (hasContent) {
+    const merged = `${form.value.content.replace(/\s+$/, '')}\n\n${skeleton}`
+    replaceEditorContent(merged)
+    ElMessage.success('已将模板骨架追加到内容末尾')
+  } else {
+    replaceEditorContent(skeleton)
+    ElMessage.success('已插入模板骨架')
+  }
 }
 
 function defaultEditMode(_docType: string): 'edit' | 'split' {
@@ -1035,12 +1157,8 @@ function toggleSort() {
 .preview-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-shrink: 0; }
 .preview-header-left { display: flex; align-items: center; gap: 8px; }
 .preview-header-right { display: flex; gap: 8px; }
-.format-hint {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  margin: 0 0 10px; padding: 8px 12px; border-radius: 8px;
-  background: #f8fafc; border: 1px solid #e5e7eb; color: #4b5563; font-size: 13px;
-}
-.format-hint-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.template-sections { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.template-section-row { display: flex; align-items: center; gap: 8px; }
 .guide-body h4 { margin: 14px 0 8px; font-size: 14px; color: #1f2937; }
 .guide-body h4:first-child { margin-top: 0; }
 .guide-text { margin: 0; color: #4b5563; font-size: 13px; line-height: 1.8; }

@@ -52,7 +52,8 @@ class Normalizer:
             body_lines = body_lines[1:]
 
         blocks = self._split_h2_blocks(body_lines)
-        if template is not None and not template.free_form and blocks:
+        if template is not None and template.sections and blocks:
+            # 自定义结构项（含自由格式模板）同样参与章节重排
             blocks = self._reorder(blocks, template)
 
         body = self._join_blocks(blocks)

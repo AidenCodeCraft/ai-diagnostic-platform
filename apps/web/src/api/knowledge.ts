@@ -41,7 +41,16 @@ export interface KnowledgeTemplateInfo {
   skeleton: string
   guide: string
   example: string
+  is_customized?: boolean
   sections: KnowledgeTemplateSection[]
+}
+
+export interface KnowledgeTemplateUpdate {
+  name?: string
+  guide?: string
+  skeleton?: string
+  example?: string
+  sections?: Array<{ title: string; key?: string; level?: string }>
 }
 
 export interface FormatPreview {
@@ -120,6 +129,14 @@ export const knowledgeApi = {
   /** 知识模板契约（含骨架 / 格式说明 / 示例） */
   templates() {
     return client.get<{ templates: KnowledgeTemplateInfo[] }>('/knowledge/templates')
+  },
+  /** 自定义格式说明（说明 / 结构项 / 骨架 / 示例） */
+  updateTemplate(docType: string, data: KnowledgeTemplateUpdate) {
+    return client.put<KnowledgeTemplateInfo>(`/knowledge/templates/${docType}`, data)
+  },
+  /** 恢复内置格式说明 */
+  resetTemplate(docType: string) {
+    return client.delete<KnowledgeTemplateInfo>(`/knowledge/templates/${docType}`)
   },
   /** AI 润色：按模板规范化内容（LLM 不可用时后端自动回退规则整理） */
   polish(data: { content: string; doc_type?: string; title?: string }, signal?: AbortSignal) {

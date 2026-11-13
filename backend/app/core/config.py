@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     MAX_ANALYSIS_CHARS: int = 400_000  # 送入分析流水线的最大字符数
     RULES_FILE: str = "data/rules/diagnostic_rules.json"  # 规则持久化文件
     KNOWLEDGE_INDEX_ASYNC: bool = True  # 知识入库后异步同步向量索引（避免保存阻塞）
+    # 格式说明自定义覆盖（放在 data/raw 下，Docker 部署时属于持久化卷）
+    KNOWLEDGE_TEMPLATE_FILE: str = "data/raw/knowledge_template_overrides.json"
 
     # ── LLM ─────────────────────────────────────────────────
     LLM_PROVIDER: str = "mock"

@@ -67,8 +67,37 @@ class Validator:
                 status_hint="active",
             )
 
-        # 自由格式模板（基础知识 / 代码逻辑）：不强制分节，按自由文档校验
+        # 自由格式模板（基础知识 / 代码逻辑）：默认不强制分节；
+        # 但如果用户自定义了「必填结构项」且内容已分节，则按自定义结构校验。
         if template.free_form:
+            # 规范化自动补的「## 正文」不算用户分节，不触发自定义必填校验
+            structured = any(
+                s.level == 2 and (s.title or "").strip() != "正文"
+                for s in sections
+            )
+            required = [s for s in template.sections if s.level == LEVEL_REQUIRED]
+            if required and structured:
+                issues: List[Issue] = []
+                for spec in required:
+                    sec = by_key.get(spec.key)
+                    if sec is None:
+                        issues.append(Issue(
+                            "MISSING_REQUIRED_SECTION", ERROR,
+                            f"缺少必填章节：{spec.title}", spec.key,
+                        ))
+                    elif not (sec.content or "").strip():
+                        issues.append(Issue(
+                            "EMPTY_REQUIRED_SECTION", ERROR,
+                            f"必填章节为空：{spec.title}", spec.key,
+                        ))
+                quality = self._quality(
+                    template, by_key, profile_draft, doc_type, image_count, feedback_ratio,
+                )
+                return ValidationResult(
+                    issues=issues,
+                    quality_score=quality,
+                    status_hint="draft" if any(i.level == ERROR for i in issues) else "active",
+                )
             has_content = any((s.content or "").strip() for s in sections)
             issues = [] if has_content else [Issue("EMPTY_CONTENT", WARN, "内容为空")]
             quality = self._quality(

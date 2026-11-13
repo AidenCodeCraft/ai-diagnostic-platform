@@ -144,6 +144,30 @@ class TestKnowledgePolish:
         assert result["source"] == "rule"
         assert any("一致性校验" in note for note in result["notes"])
 
+    def test_numbers_multiple_free_form_paragraphs(self):
+        content = "第一条说明：设备适用 FC09。\n\n第二条说明：设备适用 L13C。"
+        numbered = KnowledgePolishService._number_parallel_items(content, "knowledge")
+        assert numbered.startswith("1. ")
+        assert "\n\n2. " in numbered
+
+    def test_numbers_multiple_free_form_sections(self):
+        content = "## 安装要求\n\n内容A\n\n## 使用限制\n\n内容B"
+        numbered = KnowledgePolishService._number_parallel_items(content, "knowledge")
+        assert "## 1. 安装要求" in numbered
+        assert "## 2. 使用限制" in numbered
+
+    def test_structured_template_keeps_sections(self):
+        content = "## 现象\n\na\n\n## 原因\n\nb"
+        assert KnowledgePolishService._number_parallel_items(content, "case") == content
+
+    def test_rule_polish_numbers_parallel_content(self, monkeypatch):
+        monkeypatch.setattr(KnowledgePolishService, "_default_provider", lambda self: None)
+        content = "第一条说明：设备适用 FC09。\n\n第二条说明：设备适用 L13C。"
+        result = KnowledgePolishService().polish(content, "knowledge")
+        polished = result["polished_content"]
+        assert "1. " in polished
+        assert "2. " in polished
+
     def test_empty_content_raises(self):
         try:
             KnowledgePolishService().polish("   ", "case")

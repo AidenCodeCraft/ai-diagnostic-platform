@@ -276,8 +276,54 @@ TEMPLATES: Dict[str, KnowledgeTemplate] = {
 }
 
 
+def _merge_override(base: KnowledgeTemplate, override: Dict) -> KnowledgeTemplate:
+    """把用户自定义覆盖合并到内置模板上。"""
+    sections = base.sections
+    if isinstance(override.get("sections"), list):
+        merged_sections = []
+        for item in override["sections"]:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            key = str(item.get("key") or "").strip() or title
+            level = str(item.get("level") or LEVEL_OPTIONAL).strip().lower()
+            if level not in (LEVEL_REQUIRED, LEVEL_RECOMMENDED, LEVEL_OPTIONAL):
+                level = LEVEL_OPTIONAL
+            aliases = tuple(
+                str(alias).strip() for alias in (item.get("aliases") or ())
+                if str(alias).strip()
+            )
+            merged_sections.append(SectionSpec(key, title, level, aliases))
+        sections = tuple(merged_sections)
+
+    def _text(field: str, default: str) -> str:
+        return str(override[field]) if field in override else default
+
+    return KnowledgeTemplate(
+        doc_type=base.doc_type,
+        name=_text("name", base.name),
+        sections=sections,
+        free_form=bool(override["free_form"]) if "free_form" in override else base.free_form,
+        skeleton=_text("skeleton", base.skeleton),
+        guide=_text("guide", base.guide),
+        example=_text("example", base.example),
+    )
+
+
 def get_template(doc_type: Optional[str]) -> Optional[KnowledgeTemplate]:
-    return TEMPLATES.get((doc_type or "").strip().lower())
+    key = (doc_type or "").strip().lower()
+    base = TEMPLATES.get(key)
+    if base is None:
+        return None
+    try:
+        from app.services.knowledge.template_store import get_override
+
+        override = get_override(key)
+    except Exception:  # noqa: BLE001 - 覆盖读取失败时使用内置模板
+        override = None
+    return _merge_override(base, override) if override else base
 
 
 def guess_section_key(title: str) -> str:
@@ -306,20 +352,33 @@ def build_alias_map(template: Optional[KnowledgeTemplate]) -> Dict[str, str]:
     return alias_map
 
 
+def template_to_dict(t: KnowledgeTemplate, customized: bool = False) -> Dict:
+    return {
+        "doc_type": t.doc_type,
+        "name": t.name,
+        "free_form": t.free_form,
+        "skeleton": t.skeleton,
+        "guide": t.guide,
+        "example": t.example,
+        "is_customized": customized,
+        "sections": [
+            {"key": s.key, "title": s.title, "level": s.level, "aliases": list(s.aliases)}
+            for s in t.sections
+        ],
+    }
+
+
 def list_templates() -> List[Dict]:
-    """返回全部模板契约（供前端加载）。"""
-    return [
-        {
-            "doc_type": t.doc_type,
-            "name": t.name,
-            "free_form": t.free_form,
-            "skeleton": t.skeleton,
-            "guide": t.guide,
-            "example": t.example,
-            "sections": [
-                {"key": s.key, "title": s.title, "level": s.level, "aliases": list(s.aliases)}
-                for s in t.sections
-            ],
-        }
-        for t in TEMPLATES.values()
-    ]
+    """返回全部模板契约（含用户自定义覆盖，供前端加载）。"""
+    try:
+        from app.services.knowledge.template_store import load_overrides
+
+        overrides = load_overrides()
+    except Exception:  # noqa: BLE001
+        overrides = {}
+    result = []
+    for key in TEMPLATES:
+        template = get_template(key)
+        if template is not None:
+            result.append(template_to_dict(template, customized=key in overrides))
+    return result

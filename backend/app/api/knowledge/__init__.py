@@ -296,8 +296,37 @@ def feedback_image(
 
 @router.get("/templates")
 def get_templates() -> Dict[str, Any]:
-    """返回全部知识模板契约（章节与必填级别）。"""
+    """返回全部知识模板契约（含用户自定义的格式说明/结构项/骨架/示例）。"""
     return {"templates": list_templates()}
+
+
+@router.put("/templates/{doc_type}")
+def update_template(doc_type: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """编辑某文档类型的格式说明（说明/结构项/骨架/示例均可自定义）。"""
+    from app.services.knowledge.template_store import upsert_override
+    from app.services.knowledge.templates import get_template, template_to_dict
+
+    try:
+        upsert_override(doc_type, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    template = get_template(doc_type)
+    if template is None:
+        raise HTTPException(status_code=404, detail="template not found")
+    return template_to_dict(template, customized=True)
+
+
+@router.delete("/templates/{doc_type}")
+def reset_template(doc_type: str) -> Dict[str, Any]:
+    """删除自定义覆盖，恢复内置格式说明。"""
+    from app.services.knowledge.template_store import reset_override
+    from app.services.knowledge.templates import get_template, template_to_dict
+
+    reset_override(doc_type)
+    template = get_template(doc_type)
+    if template is None:
+        raise HTTPException(status_code=404, detail="template not found")
+    return template_to_dict(template, customized=False)
 
 
 @router.get("/{doc_id}/sections")
