@@ -36,10 +36,6 @@ class TestKnowledgeStandardizationApi:
         assert "symptom" in keys
         assert "root_cause" in keys
 
-        profile = client.get(f"/api/v1/knowledge/{doc['id']}/profile").json()
-        assert profile["source"] == "template"
-        assert "潜江" in (profile["symptom"] or "")
-
         items = client.get("/api/v1/knowledge").json()["items"]
         item = next(i for i in items if i["id"] == doc["id"])
         assert item["quality_score"] is not None

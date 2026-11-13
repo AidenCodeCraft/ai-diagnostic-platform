@@ -190,15 +190,6 @@
           <el-button v-if="polishSnapshot !== null" type="warning" plain @click="undoPolish">撤销AI润色</el-button>
           <el-tag v-if="polishSnapshot !== null" size="small" type="success" effect="plain">已润色</el-tag>
           <el-button @click="showGuide = true">格式说明</el-button>
-          <el-tooltip placement="bottom" effect="light">
-            <template #content>
-              <div style="max-width:340px;line-height:1.7">
-                进阶覆盖：手动修正系统自动生成的「诊断剧本」（现象、日志关键词、正则、根因、解决方案等）。
-                不填写则使用模板/日志解析自动生成的结果；填写后会覆盖自动值，用于提升日志定位与诊断准确率。
-              </div>
-            </template>
-            <el-button @click="showProfile = true">进阶覆盖</el-button>
-          </el-tooltip>
           <el-button @click="cancelEdit">取消</el-button>
           <el-button type="primary" @click="save" :loading="saving">{{ editingId ? '保存' : '创建' }}</el-button>
         </div>
@@ -208,19 +199,34 @@
         <el-button link type="primary" size="small" @click="showGuide = true">查看示例 / 插入模板</el-button>
       </div>
       <div class="editor-body" :class="'mode-' + editMode">
+        <div v-if="polishing" class="polish-overlay">
+          <div class="polish-spin" />
+          <div class="polish-title">AI 润色中…</div>
+          <div class="polish-elapsed">已用时 {{ polishElapsed }} 秒</div>
+          <div class="polish-tip">内容较多时可能需要 1~2 分钟，请耐心等待</div>
+          <el-button size="small" @click="cancelPolish">取消润色</el-button>
+        </div>
         <div v-show="editMode !== 'preview'" class="editor-pane">
           <v-md-editor :key="editorKey" ref="editorRef" v-model="form.content" height="100%" left-toolbar="undo redo | bold italic strikethrough | h2 h3 h4 | ul ol | link image | code quote | table hr | fullscreen" :disabled-menus="[]" @upload-image="handleUploadImage" />
         </div>
         <div v-show="editMode !== 'edit'" class="preview-pane">
           <div class="preview-pane-header">
             <span>提交后预览</span>
-            <span class="preview-quality">
-              质量分
-              <b>{{ previewResult ? Math.round(previewResult.quality_score) : '—' }}</b>
-              <el-tag v-if="previewResult" :type="previewResult.status_hint === 'active' ? 'success' : 'warning'" size="small">
-                {{ previewResult.status_hint === 'active' ? '可发布' : '待完善' }}
-              </el-tag>
-            </span>
+            <el-tooltip placement="left" effect="light">
+              <template #content>
+                <div style="max-width:340px;line-height:1.7">
+                  发布标准：无「错误」级问题即可发布（必填章节齐全、正则可编译）。<br />
+                  质量分表示完整度：≥60 良好；40–59 可用但建议完善；低于 40 信息不足。
+                </div>
+              </template>
+              <span class="preview-quality">
+                质量分
+                <b>{{ previewResult ? Math.round(previewResult.quality_score) : '—' }}</b>
+                <el-tag v-if="previewResult" :type="previewResult.status_hint === 'active' ? 'success' : 'warning'" size="small">
+                  {{ previewResult.status_hint === 'active' ? '可发布' : '待完善' }}
+                </el-tag>
+              </span>
+            </el-tooltip>
           </div>
           <div class="preview-pane-body">
             <div v-if="previewLoading" class="preview-loading">规范化中…</div>
@@ -295,48 +301,13 @@
       <div v-else class="guide-body">
         <p class="guide-text">自由格式：建议使用小标题分节、条目化表达，便于阅读与检索。</p>
       </div>
+      <div class="guide-body">
+        <h4>发布标准</h4>
+        <p class="guide-text">无「错误」级问题即可发布（必填章节齐全、正则可编译）。质量分表示完整度：≥60 良好，40–59 可用但建议完善，低于 40 信息不足。</p>
+      </div>
       <template #footer>
         <el-button @click="showGuide = false">关闭</el-button>
         <el-button type="primary" @click="insertSkeleton">插入模板骨架</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 诊断剧本（结构化诊断信息），随知识条目保存 -->
-    <el-dialog v-model="showProfile" title="进阶覆盖 · 诊断配置（可选）" width="640px" top="6vh">
-      <div class="profile-tip">
-        系统会根据模板/日志解析自动生成诊断剧本；这里填写的字段会覆盖自动值，只需补充或修正关键字段即可。
-      </div>
-      <el-form label-width="110px" label-position="left">
-        <el-form-item label="现象/问题">
-          <el-input v-model="profileForm.symptom" type="textarea" :rows="2" placeholder="如：设备黑屏、程序版本号查询" />
-        </el-form-item>
-        <el-form-item label="环境">
-          <el-input v-model="profileForm.environment" placeholder="设备/芯片/固件版本（可选）" />
-        </el-form-item>
-        <el-form-item label="日志关键词">
-          <el-input v-model="profileForm.log_keywords" type="textarea" :rows="2" placeholder="每行一个，如：version、版本号、firmware" />
-        </el-form-item>
-        <el-form-item label="日志正则">
-          <el-input v-model="profileForm.log_patterns" type="textarea" :rows="2" placeholder="每行一个正则，如：(?i)(version|版本号)\\s*[:=]\\s*[\\w.\\-]+" />
-        </el-form-item>
-        <el-form-item label="排除正则">
-          <el-input v-model="profileForm.negative_patterns" type="textarea" :rows="2" placeholder="每行一个，用于排除误命中" />
-        </el-form-item>
-        <el-form-item label="判定说明">
-          <el-input v-model="profileForm.expected" type="textarea" :rows="2" placeholder="命中后如何判定，如：提取 x.y.z 版本号" />
-        </el-form-item>
-        <el-form-item label="根因">
-          <el-input v-model="profileForm.root_cause" type="textarea" :rows="2" />
-        </el-form-item>
-        <el-form-item label="解决方案">
-          <el-input v-model="profileForm.solution" type="textarea" :rows="2" />
-        </el-form-item>
-        <el-form-item label="置信度">
-          <el-slider v-model="profileForm.confidence" :min="0" :max="1" :step="0.05" style="width:100%" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showProfile = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -427,82 +398,15 @@ const createLabel = computed(() => {
   return labels[form.value.doc_type] || '新建文件'
 })
 
-// ── 诊断剧本（结构化诊断信息）──
-const showProfile = ref(false)
-const profileForm = ref({
-  symptom: '',
-  environment: '',
-  log_keywords: '',
-  log_patterns: '',
-  negative_patterns: '',
-  expected: '',
-  root_cause: '',
-  solution: '',
-  confidence: 0.8,
-})
-
-function _splitLines(s: string): string[] {
-  return s.split('\n').map(x => x.trim()).filter(Boolean)
-}
-
-function resetProfile() {
-  profileForm.value = {
-    symptom: '', environment: '',
-    log_keywords: '', log_patterns: '', negative_patterns: '',
-    expected: '', root_cause: '', solution: '',
-    confidence: 0.8,
-  }
-}
-
-function fillProfile(p: any) {
-  profileForm.value = {
-    symptom: p?.symptom || '',
-    environment: p?.environment || '',
-    log_keywords: (p?.log_keywords || []).join('\n'),
-    log_patterns: (p?.log_patterns || []).join('\n'),
-    negative_patterns: (p?.negative_patterns || []).join('\n'),
-    expected: p?.expected || '',
-    root_cause: p?.root_cause || '',
-    solution: p?.solution || '',
-    confidence: typeof p?.confidence === 'number' ? p.confidence : 0.8,
-  }
-}
-
-async function loadProfileForDoc(id: number) {
-  try {
-    const { data } = await knowledgeApi.getProfile(id)
-    fillProfile(data)
-  } catch {
-    resetProfile()
-  }
-}
-
-function buildProfilePayload() {
-  const f = profileForm.value
-  const hasAny = [f.symptom, f.environment, f.log_keywords, f.log_patterns,
-    f.negative_patterns, f.expected, f.root_cause, f.solution].some(v => v && v.trim())
-  if (!hasAny) return undefined
-  return {
-    symptom: f.symptom.trim(),
-    environment: f.environment.trim(),
-    log_keywords: _splitLines(f.log_keywords),
-    log_patterns: _splitLines(f.log_patterns),
-    negative_patterns: _splitLines(f.negative_patterns),
-    expected: f.expected.trim(),
-    root_cause: f.root_cause.trim(),
-    solution: f.solution.trim(),
-    confidence: f.confidence,
-    status: 'active',
-    source: 'manual',
-  }
-}
-
 // ── 编辑模式 / 提交后预览 / AI 润色 / 模板说明 ──
 const editMode = ref<'edit' | 'split' | 'preview'>('edit')
 const previewResult = ref<any>(null)
 const previewLoading = ref(false)
 const polishing = ref(false)
 const polishSnapshot = ref<string | null>(null)
+const polishElapsed = ref(0)
+let polishTimer: ReturnType<typeof setInterval> | null = null
+let polishAbort: AbortController | null = null
 const editorKey = ref(0)  // 整体替换编辑内容时重建编辑器，避免内容追加/不同步
 const templates = ref<KnowledgeTemplateInfo[]>([])
 const showGuide = ref(false)
@@ -614,13 +518,16 @@ async function aiPolish() {
     return
   }
   polishing.value = true
+  polishElapsed.value = 0
+  polishAbort = new AbortController()
+  polishTimer = setInterval(() => { polishElapsed.value += 1 }, 1000)
   try {
     const before = form.value.content
     const { data } = await knowledgeApi.polish({
       content: before,
       doc_type: form.value.doc_type,
       title: form.value.title,
-    })
+    }, polishAbort.signal)
     const polished = data.polished_content || data.normalized_content || before
     if (polished === before) {
       ElMessage.info('内容已符合模板格式，无需润色')
@@ -635,10 +542,20 @@ async function aiPolish() {
       ElMessage.warning('AI 服务暂不可用（请检查 系统配置 → LLM 配置 的 API Key），已按模板规则完成结构化整理')
     }
   } catch (e: any) {
-    ElMessage.error('AI 润色失败: ' + (e?.response?.data?.detail || e?.message))
+    if (e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError') {
+      ElMessage.info('已取消 AI 润色')
+    } else {
+      ElMessage.error('AI 润色失败: ' + (e?.response?.data?.detail || e?.message))
+    }
   } finally {
     polishing.value = false
+    polishAbort = null
+    if (polishTimer) { clearInterval(polishTimer); polishTimer = null }
   }
+}
+
+function cancelPolish() {
+  polishAbort?.abort()
 }
 
 function undoPolish() {
@@ -909,11 +826,9 @@ function openItem(row: any) {
       form.value = { title: row.title, doc_type: row.doc_type || 'note', content: '' }
       loadDocumentContent(row.id)
     }
-    loadProfileForDoc(row.id)
   }
 }
 function enterEdit() {
-  if (editingId.value) loadProfileForDoc(editingId.value)
   polishSnapshot.value = null
   editMode.value = defaultEditMode(form.value.doc_type)
   viewState.value = 'edit'
@@ -924,7 +839,7 @@ function enterEdit() {
 // 更多菜单操作
 // ============================================================
 async function handleRowAction(cmd: string, row: any) {
-  if (cmd === 'edit') { form.value = { title: row.title, doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; polishSnapshot.value = null; editMode.value = defaultEditMode(form.value.doc_type); viewState.value = 'edit'; loadProfileForDoc(row.id); nextTick(() => refreshPreview()) }
+  if (cmd === 'edit') { form.value = { title: row.title, doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; polishSnapshot.value = null; editMode.value = defaultEditMode(form.value.doc_type); viewState.value = 'edit'; nextTick(() => refreshPreview()) }
   else if (cmd === 'rename') { renameId.value = row.id; renameName.value = row.title; showRename.value = true }
   else if (cmd === 'pin') {
     try {
@@ -949,7 +864,6 @@ async function handleCreateCommand(cmd: string) {
   if (!templates.value.length) await loadTemplates()
   editingId.value = null
   form.value = { title: '', doc_type: docType, content: skeletonFor(docType) }
-  resetProfile()
   polishSnapshot.value = null
   editMode.value = 'split'
   viewState.value = 'edit'
@@ -964,8 +878,6 @@ async function save() {
   try {
     const data: any = { ...form.value }
     if (currentFolder.value) data.parent_id = currentFolder.value.id
-    const profile = buildProfilePayload()
-    if (profile) data.profile = profile
     let resp: any = null
     if (editingId.value) {
       resp = (await knowledgeApi.update(editingId.value, data)).data
@@ -1137,11 +1049,6 @@ function toggleSort() {
   background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
   font-size: 13px; line-height: 1.7;
 }
-.profile-tip {
-  margin-bottom: 14px; padding: 10px 12px; border-radius: 8px;
-  background: #f0f7ff; border: 1px solid #d6e8ff;
-  color: #4b5563; font-size: 13px; line-height: 1.7;
-}
 .preview-header-title { font-size: 18px; font-weight: 600; color: #1f2937; }
 .preview-layout { position: relative; display: flex; gap: 0; height: calc(100vh - 180px); }
 
@@ -1250,7 +1157,13 @@ function toggleSort() {
   .preview-body { padding: 16px; }
 }
 .kb-editor-page { display: flex; flex-direction: column; height: calc(100vh - 140px); }
-.editor-body { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.editor-body { flex: 1; min-height: 0; display: flex; gap: 12px; position: relative; }
+.polish-overlay { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(255, 255, 255, 0.85); border-radius: 8px; }
+.polish-spin { width: 36px; height: 36px; border: 3px solid #e5e7eb; border-top-color: #409eff; border-radius: 50%; animation: polish-rotate 0.9s linear infinite; }
+@keyframes polish-rotate { to { transform: rotate(360deg); } }
+.polish-title { font-size: 15px; font-weight: 600; color: #303133; }
+.polish-elapsed { font-size: 13px; color: #606266; }
+.polish-tip { font-size: 12px; color: #909399; }
 .editor-pane { flex: 1; min-width: 0; height: 100%; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
 .preview-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background: #fff; }
 .preview-pane-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #f0f0f0; font-size: 13px; color: #374151; }

@@ -172,7 +172,7 @@ def seed(db, reset: bool = False) -> Dict[str, int]:
             "category": item["category"],
             "doc_type": item["doc_type"],
             "source": "seed",
-        })
+        }, auto_index=False)
         standardize_document(db, int(doc.id))
         stats["created"] += 1
     return stats

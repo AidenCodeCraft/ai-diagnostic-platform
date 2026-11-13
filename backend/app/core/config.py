@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     MAX_PARSE_LINES: int = 200_000    # 解析阶段最多读取行数（防大文件爆内存）
     MAX_ANALYSIS_CHARS: int = 400_000  # 送入分析流水线的最大字符数
     RULES_FILE: str = "data/rules/diagnostic_rules.json"  # 规则持久化文件
+    KNOWLEDGE_INDEX_ASYNC: bool = True  # 知识入库后异步同步向量索引（避免保存阻塞）
 
     # ── LLM ─────────────────────────────────────────────────
     LLM_PROVIDER: str = "mock"
@@ -84,7 +85,8 @@ class Settings(BaseSettings):
 
     @field_validator("DEBUG", "MILVUS_ENABLED", "MINIO_ENABLED", "OLLAMA_ENABLED",
                      "MINIO_SECURE", "RATE_LIMIT_ENABLED", "LOG_DESENSITIZE_ENABLED",
-                     "PROMETHEUS_METRICS_ENABLED", "EMBEDDING_HASH_FALLBACK", mode="before")
+                     "PROMETHEUS_METRICS_ENABLED", "EMBEDDING_HASH_FALLBACK",
+                     "KNOWLEDGE_INDEX_ASYNC", mode="before")
     @classmethod
     def parse_bool(cls, v: object) -> bool:
         if isinstance(v, bool):

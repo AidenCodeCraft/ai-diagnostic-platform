@@ -96,7 +96,7 @@ KB 命中条目 → 取该条目的 KnowledgeDiagnosisProfile
 | 改动 | 位置 |
 | --- | --- |
 | 新增 `KnowledgeProfileCreate/Update/Response`，`KnowledgeCreate/Update` 加可选 `profile` | `schemas/knowledge/knowledge.py` |
-| create/update 时同步 upsert profile；新增 `GET/PUT /knowledge/{doc_id}/profile` | `api/knowledge/__init__.py` |
+| create/update 时自动 upsert profile（`GET/PUT /knowledge/{doc_id}/profile` 已于 2026-11-13 移除，仅内部生成） | `api/knowledge/__init__.py` |
 | 审核队列：`GET /knowledge/profiles/drafts`、`POST /knowledge/profiles/{id}/approve`、`POST .../reject` | `api/knowledge/`（阶段 C） |
 | 结果返回增加 `detections` 与 `evidence` | `analysis_task_service.py`（阶段 B） |
 

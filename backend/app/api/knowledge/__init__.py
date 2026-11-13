@@ -18,8 +18,6 @@ from app.schemas import (
     KnowledgeSearchResult,
     KnowledgeTreeResponse,
     KnowledgeImageResponse,
-    KnowledgeProfileCreate,
-    KnowledgeProfileResponse,
 )
 from app.services import (
     KnowledgeService,
@@ -54,10 +52,10 @@ def _ingest_images(db: Session, doc_id: int, content: str, base_dir=None) -> Non
         doc_id, content, base_dir=base_dir,
     )
     if new_content != content:
-        KnowledgeService(db).update(doc_id, {"content": new_content})
+        KnowledgeService(db).update(doc_id, {"content": new_content}, auto_index=False)
 
 
-def _standardize(db: Session, doc_id: int, profile_override=None) -> Dict[str, Any]:
+def _standardize(db: Session, doc_id: int) -> Dict[str, Any]:
     """入库强制规范化：内容规范化、分节/元信息落库、诊断剧本生成。"""
     doc = KnowledgeService(db).get(doc_id)
     fmt = KnowledgeFormatService().preview(doc.content or "", doc.doc_type, doc.title)
@@ -77,16 +75,12 @@ def _standardize(db: Session, doc_id: int, profile_override=None) -> Dict[str, A
     })
 
     merged = dict(fmt["profile_draft"])
-    if profile_override:
-        for key, value in profile_override.items():
-            if value is not None:
-                merged[key] = value
     meaningful = any(
         merged.get(k) for k in ("symptom", "log_keywords", "log_patterns", "root_cause", "solution")
     )
-    if meaningful or profile_override:
+    if meaningful:
         merged["status"] = "draft" if doc.status == "draft" else "active"
-        merged["source"] = "manual_override" if profile_override else "template"
+        merged["source"] = "template"
         KnowledgeProfileService(db).upsert(doc_id, merged)
 
     # 规范化后内容已变化，重新同步向量索引（Milvus 启用时）
@@ -120,13 +114,12 @@ def create_document(
 ) -> Any:
     """创建知识条目：入库前强制规范化 + 校验（图片、分节、质量分、诊断剧本）。"""
     data = body.model_dump()
-    profile_data = data.pop("profile", None)
     content = data.get("content") or ""
-    doc = KnowledgeService(db).create(data)
+    doc = KnowledgeService(db).create(data, auto_index=False)
     if content:
         _ingest_images(db, doc.id, content)
     if content and (doc.doc_type or "") != "folder":
-        fmt = _standardize(db, doc.id, profile_data)
+        fmt = _standardize(db, doc.id)
         return _doc_payload(db, doc.id, fmt)
     return _doc_payload(db, doc.id)
 
@@ -158,11 +151,11 @@ def upload_document(
             "doc_type": doc_type,
             "source": file.filename,
             "parent_id": parent_id,
-        })
+        }, auto_index=False)
         if content:
             _ingest_images(db, doc.id, content, base_dir=tmp_path.parent)
         if content and (doc_type or "") != "folder":
-            fmt = _standardize(db, doc.id, None)
+            fmt = _standardize(db, doc.id)
             return _doc_payload(db, doc.id, fmt)
         return _doc_payload(db, doc.id)
     finally:
@@ -301,37 +294,6 @@ def feedback_image(
     return {"ok": True, "image_id": image_id, "feedback": feedback}
 
 
-# ------------------------------------------------------------------
-# Diagnosis profile (「诊断剧本」结构化信息)
-# ------------------------------------------------------------------
-
-
-@router.get("/{doc_id}/profile", response_model=Optional[KnowledgeProfileResponse])
-def get_profile(
-    doc_id: int,
-    db: Session = Depends(get_db_session),
-) -> Any:
-    """获取知识条目的诊断剧本；不存在返回 null。"""
-    profile = KnowledgeProfileService(db).get(doc_id)
-    if not profile:
-        return None
-    return KnowledgeProfileService.to_dict(profile)
-
-
-@router.put("/{doc_id}/profile", response_model=KnowledgeProfileResponse)
-def save_profile(
-    doc_id: int,
-    body: KnowledgeProfileCreate,
-    db: Session = Depends(get_db_session),
-) -> Any:
-    """新增/更新知识条目的诊断剧本。"""
-    try:
-        profile = KnowledgeProfileService(db).upsert(doc_id, body.model_dump())
-        return KnowledgeProfileService.to_dict(profile)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
 @router.get("/templates")
 def get_templates() -> Dict[str, Any]:
     """返回全部知识模板契约（章节与必填级别）。"""
@@ -388,14 +350,13 @@ def update_document(
     """更新知识条目：内容变更时强制重新规范化 + 校验。"""
     try:
         data = body.model_dump(exclude_unset=True)
-        profile_data = data.pop("profile", None)
         if data.get("content"):
             data["content"] = KnowledgeImageService(db).process_document_images(
                 doc_id, data["content"],
             )
-        doc = KnowledgeService(db).update(doc_id, data)
-        if (data.get("content") or data.get("doc_type") or profile_data) and (doc.doc_type or "") != "folder":
-            fmt = _standardize(db, doc_id, profile_data)
+        doc = KnowledgeService(db).update(doc_id, data, auto_index=False)
+        if (data.get("content") or data.get("doc_type")) and (doc.doc_type or "") != "folder":
+            fmt = _standardize(db, doc_id)
             return _doc_payload(db, doc_id, fmt)
         return _doc_payload(db, doc_id)
     except ValueError as exc:

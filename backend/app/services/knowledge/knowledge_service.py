@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import or_
@@ -13,6 +14,31 @@ from app.models import KnowledgeDocument, KnowledgeDocumentMeta
 from app.services.knowledge.templates import guess_section_key
 
 logger = get_logger(__name__)
+
+# 向量索引后台线程池：保存知识时不必等待 Milvus 连接/embedding/insert/flush
+_INDEX_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="kb-index")
+
+
+def _index_document_in_background(doc_id: int) -> None:
+    from app.database import session as session_module
+    from app.services.knowledge.document_indexer import DocumentIndexer
+
+    db = session_module.create_session()
+    try:
+        DocumentIndexer(db).index_document(doc_id)
+    except Exception as exc:  # noqa: BLE001 - 后台任务仅记录日志
+        logger.warning("[KnowledgeService] background index failed for doc %s: %s", doc_id, exc)
+    finally:
+        db.close()
+
+
+def _remove_index_in_background(doc_id: int) -> None:
+    try:
+        from app.services.knowledge.vector_service import get_vector_service
+
+        get_vector_service().delete_document(doc_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[KnowledgeService] background index remove failed for doc %s: %s", doc_id, exc)
 
 
 class KnowledgeService:
@@ -26,10 +52,17 @@ class KnowledgeService:
     # ------------------------------------------------------------------
 
     def _sync_index(self, doc_id: int, content: str) -> None:
-        """同步文档向量索引；失败不影响主流程。"""
+        """同步文档向量索引；失败不影响主流程。
+
+        默认异步：保存知识后由后台线程完成 Milvus 索引，避免请求阻塞。
+        设置 KNOWLEDGE_INDEX_ASYNC=false 可恢复同步行为。
+        """
         try:
             from app.core.config import settings
             if not settings.MILVUS_ENABLED:
+                return
+            if getattr(settings, "KNOWLEDGE_INDEX_ASYNC", True):
+                _INDEX_EXECUTOR.submit(_index_document_in_background, doc_id)
                 return
             from app.services.knowledge.document_indexer import DocumentIndexer
             DocumentIndexer(self.db).index_document(doc_id, content=content)
@@ -48,6 +81,9 @@ class KnowledgeService:
         try:
             from app.core.config import settings
             if not settings.MILVUS_ENABLED:
+                return
+            if getattr(settings, "KNOWLEDGE_INDEX_ASYNC", True):
+                _INDEX_EXECUTOR.submit(_remove_index_in_background, doc_id)
                 return
             from app.services.knowledge.vector_service import get_vector_service
             get_vector_service().delete_document(doc_id)
@@ -82,7 +118,9 @@ class KnowledgeService:
         for doc in docs:
             setattr(doc, "quality_score", quality_map.get(int(doc.id)))
 
-    def create(self, data: Dict[str, Any]) -> KnowledgeDocument:
+    def create(
+        self, data: Dict[str, Any], auto_index: bool = True,
+    ) -> KnowledgeDocument:
         doc = KnowledgeDocument(
             title=data["title"],
             content=data["content"],
@@ -96,7 +134,8 @@ class KnowledgeService:
         self.db.add(doc)
         self.db.commit()
         self.db.refresh(doc)
-        self._sync_index(int(doc.id), str(doc.content or ""))
+        if auto_index:
+            self._sync_index(int(doc.id), str(doc.content or ""))
         return doc
 
     # ------------------------------------------------------------------
@@ -456,14 +495,17 @@ class KnowledgeService:
     # Update
     # ------------------------------------------------------------------
 
-    def update(self, doc_id: int, data: Dict[str, Any]) -> KnowledgeDocument:
+    def update(
+        self, doc_id: int, data: Dict[str, Any], auto_index: bool = True,
+    ) -> KnowledgeDocument:
         doc = self.get(doc_id)
         for field in ("title", "content", "category", "source", "doc_type", "project_id", "status", "is_pinned"):
             if field in data and data[field] is not None:
                 setattr(doc, field, data[field])
         self.db.commit()
         self.db.refresh(doc)
-        self._sync_index(int(doc.id), str(doc.content or ""))
+        if auto_index:
+            self._sync_index(int(doc.id), str(doc.content or ""))
         return doc
 
     # ------------------------------------------------------------------

@@ -40,6 +40,28 @@ class TestKnowledgeIndexSync:
         svc.delete(doc.id)
         assert removed == [doc.id]
 
+    def test_create_can_skip_auto_index(self, db_session, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            KnowledgeService, "_sync_index",
+            lambda self, doc_id, content: calls.append(doc_id),
+        )
+        KnowledgeService(db_session).create({
+            "title": "延迟索引", "content": "内容", "doc_type": "manual",
+        }, auto_index=False)
+        assert calls == []
+
+    def test_update_can_skip_auto_index(self, db_session, monkeypatch):
+        svc = KnowledgeService(db_session)
+        doc = svc.create({"title": "t", "content": "c", "doc_type": "manual"})
+        calls = []
+        monkeypatch.setattr(
+            KnowledgeService, "_sync_index",
+            lambda self, doc_id, content: calls.append(doc_id),
+        )
+        svc.update(doc.id, {"content": "新内容"}, auto_index=False)
+        assert calls == []
+
     def test_reindex_uses_stored_content(self, db_session, monkeypatch):
         svc = KnowledgeService(db_session)
         doc = svc.create({"title": "t", "content": "原始内容", "doc_type": "manual"})

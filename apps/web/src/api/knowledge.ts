@@ -73,24 +73,8 @@ export interface KnowledgeDoc {
   created_at: string
 }
 
-export interface KnowledgeProfile {
-  id?: number
-  doc_id?: number
-  symptom?: string | null
-  environment?: string | null
-  log_keywords?: string[]
-  log_patterns?: string[]
-  negative_patterns?: string[]
-  expected?: string | null
-  root_cause?: string | null
-  solution?: string | null
-  confidence?: number
-  status?: string
-  source?: string
-}
-
 export const knowledgeApi = {
-  create(data: { title: string; content: string; category?: string; doc_type?: string; parent_id?: number; profile?: KnowledgeProfile }) {
+  create(data: { title: string; content: string; category?: string; doc_type?: string; parent_id?: number }) {
     return client.post<KnowledgeDoc>('/knowledge', data)
   },
   list(params?: { page?: number; page_size?: number; category?: string; doc_type?: string; parent_id?: number; sort?: 'updated_asc' | 'updated_desc' }) {
@@ -129,13 +113,6 @@ export const knowledgeApi = {
   feedbackImage(imageId: number, feedback: 'irrelevant') {
     return client.post(`/knowledge/images/${imageId}/feedback`, { feedback })
   },
-  /** 诊断剧本（结构化诊断信息） */
-  getProfile(docId: number) {
-    return client.get<KnowledgeProfile | null>(`/knowledge/${docId}/profile`)
-  },
-  saveProfile(docId: number, data: KnowledgeProfile) {
-    return client.put<KnowledgeProfile>(`/knowledge/${docId}/profile`, data)
-  },
   /** 不落库：规范化 + 校验，返回「提交后格式」预览 */
   formatPreview(data: { content: string; doc_type?: string; title?: string }) {
     return client.post<FormatPreview>('/knowledge/format/preview', data)
@@ -145,9 +122,9 @@ export const knowledgeApi = {
     return client.get<{ templates: KnowledgeTemplateInfo[] }>('/knowledge/templates')
   },
   /** AI 润色：按模板规范化内容（LLM 不可用时后端自动回退规则整理） */
-  polish(data: { content: string; doc_type?: string; title?: string }) {
+  polish(data: { content: string; doc_type?: string; title?: string }, signal?: AbortSignal) {
     return client.post<FormatPreview & { polished_content: string; source: 'llm' | 'rule' }>(
-      '/knowledge/polish', data, { timeout: 120000 },
+      '/knowledge/polish', data, { timeout: 120000, signal },
     )
   },
 }

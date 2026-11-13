@@ -6,38 +6,6 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class KnowledgeProfileCreate(BaseModel):
-    """知识条目「诊断剧本」的结构化字段。"""
-
-    symptom: Optional[str] = None
-    environment: Optional[str] = Field(default=None, max_length=300)
-    log_keywords: Optional[List[str]] = None
-    log_patterns: Optional[List[str]] = None
-    negative_patterns: Optional[List[str]] = None
-    expected: Optional[str] = None
-    root_cause: Optional[str] = None
-    solution: Optional[str] = None
-    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    status: Optional[str] = None
-    source: Optional[str] = None
-
-
-class KnowledgeProfileResponse(BaseModel):
-    id: int
-    doc_id: int
-    symptom: Optional[str] = None
-    environment: Optional[str] = None
-    log_keywords: List[str] = []
-    log_patterns: List[str] = []
-    negative_patterns: List[str] = []
-    expected: Optional[str] = None
-    root_cause: Optional[str] = None
-    solution: Optional[str] = None
-    confidence: float = 0.8
-    status: str = "active"
-    source: str = "manual"
-
-
 class KnowledgeCreate(BaseModel):
     title: str = Field(..., max_length=200)
     content: str
@@ -46,7 +14,6 @@ class KnowledgeCreate(BaseModel):
     doc_type: str = Field(default="manual", max_length=50)
     project_id: Optional[int] = None
     parent_id: Optional[int] = None
-    profile: Optional[KnowledgeProfileCreate] = None
 
 
 class KnowledgeUpdate(BaseModel):
@@ -58,7 +25,6 @@ class KnowledgeUpdate(BaseModel):
     project_id: Optional[int] = None
     status: Optional[str] = Field(default=None, max_length=50)
     is_pinned: Optional[bool] = None
-    profile: Optional[KnowledgeProfileCreate] = None
 
 
 class KnowledgeImageResponse(BaseModel):
