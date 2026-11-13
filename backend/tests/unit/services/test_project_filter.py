@@ -43,6 +43,21 @@ class TestKnowledgeProjectFilter:
         assert {"P1 USB", "P2 USB", "Global USB"} <= set(titles)
 
 
+class TestKnowledgeListSort:
+    def test_sort_order_asc_and_desc(self, db_session):
+        service = KnowledgeService(db_session)
+        for index in range(3):
+            service.create({
+                "title": f"文档{index}", "content": f"content {index}", "doc_type": "note",
+            })
+
+        asc = [doc.id for doc in service.list(sort_order="updated_asc")["items"]]
+        desc = [doc.id for doc in service.list(sort_order="updated_desc")["items"]]
+
+        assert asc == list(reversed(desc))
+        assert asc == sorted(asc)
+
+
 class TestLogProjectFilter:
     def test_list_logs_filters_by_project(self, db_session, tmp_path):
         path = tmp_path / "a.log"

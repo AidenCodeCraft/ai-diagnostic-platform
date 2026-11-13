@@ -68,3 +68,28 @@ class TestKnowledgeStandardizationApi:
         resp = client.get("/api/v1/knowledge/templates")
         assert resp.status_code == 200
         assert len(resp.json()["templates"]) == 4
+
+    def test_free_form_knowledge_create_no_warning(self, client):
+        content = (
+            "# 概要说明\n\n"
+            "- 该文档由硬件研发和测试统一维护更新；\n"
+            "- 适用于 FC09 / FC10 / FC12 / L13V / L13C / D3C 设备\n\n"
+            "|术语|解释|\n|---|---|\n|VO通道|Video Output, 视频预览界面|\n|OSD|叠加到视频上的文字信息|\n"
+        )
+        resp = client.post("/api/v1/knowledge", json={
+            "title": "基础知识示例", "content": content, "doc_type": "knowledge",
+        })
+        assert resp.status_code == 201, resp.text
+        doc = resp.json()
+        assert doc["status"] == "active"
+        assert not any(i["code"] == "UNSTRUCTURED_CONTENT" for i in doc["issues"])
+        assert doc["quality_score"] >= 80
+
+        preview = client.post("/api/v1/knowledge/format/preview", json={
+            "content": content, "doc_type": "knowledge",
+        })
+        assert preview.status_code == 200
+        data = preview.json()
+        assert "## 概要说明" in data["normalized_content"]
+        assert data["notes"]
+        assert not any(i["code"] == "UNSTRUCTURED_CONTENT" for i in data["issues"])

@@ -28,9 +28,40 @@ SessionLocal = sessionmaker(
 )
 
 
+def _apply_compat_migrations() -> None:
+    """兼容性补列：create_all 只建新表，不会给已有表补列。
+
+    对没有 alembic 基线的部署（早期用 create_all 建库）做幂等补列，
+    避免新增字段导致线上 500。生产仍建议使用 Alembic 管理迁移。
+    """
+    from sqlalchemy import inspect, text
+
+    try:
+        inspector = inspect(engine)
+        tables = set(inspector.get_table_names())
+        if "chat_sessions" in tables:
+            columns = {column["name"] for column in inspector.get_columns("chat_sessions")}
+            if "project_id" not in columns:
+                with engine.begin() as conn:
+                    if engine.dialect.name == "postgresql":
+                        conn.execute(text(
+                            "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS "
+                            "project_id INTEGER REFERENCES projects(id)"
+                        ))
+                    else:
+                        conn.execute(text(
+                            "ALTER TABLE chat_sessions ADD COLUMN project_id "
+                            "INTEGER REFERENCES projects(id)"
+                        ))
+                logger.info("Applied compatibility migration: chat_sessions.project_id")
+    except Exception as exc:  # noqa: BLE001 - 补列失败不阻断启动
+        logger.warning("Compatibility migration failed: %s", exc)
+
+
 def init_db() -> None:
     logger.debug("Initializing database tables...")
     Base.metadata.create_all(bind=engine)
+    _apply_compat_migrations()
 
 
 def get_db():

@@ -132,3 +132,62 @@ class TestFormatPreview:
         assert data["template"]["doc_type"] == "case"
         assert "issues" in data
         assert "quality_score" in data
+        assert "notes" in data
+
+
+# 用户实际反馈的自由格式内容（基础知识）
+KNOWLEDGE_MD = """# 概要说明
+
+- 该文档由硬件研发和测试统一维护更新；
+- 该文档针对现场实施人员和相关的测试人员；
+- 该文档适用于FC09 / FC10 / FC12 / L13V / L13C / D3C设备
+
+|术语|解释|
+|---|---|
+|VO通道|Video Output, 视频预览界面,每一个视频显示通道|
+|OSD|叠加到视频上的文字信息|
+|回显|带OSD的通道状态|
+|直通|不带OSD的通道状态, 纯视频画面|
+|IPC|网络摄像头|
+|AHD|模拟摄像头|
+"""
+
+
+class TestFreeFormKnowledge:
+    def test_auto_promotes_h1_to_sections(self):
+        result = Normalizer().normalize(KNOWLEDGE_MD, "knowledge")
+        assert "## 概要说明" in result.normalized_content
+        assert any(section.level == 2 for section in result.sections)
+        assert result.notes
+
+    def test_validator_no_unstructured_warning_for_free_form(self):
+        result = Normalizer().normalize(KNOWLEDGE_MD, "knowledge")
+        validation = Validator().validate(
+            "knowledge", result.sections, result.profile_draft,
+        )
+        assert not validation.has_errors
+        assert validation.status_hint == "active"
+        assert not any(
+            issue.code == "UNSTRUCTURED_CONTENT" for issue in validation.issues
+        )
+        assert validation.quality_score >= 80
+
+    def test_no_heading_content_gets_body_section(self):
+        result = Normalizer().normalize("设备适用于 FC09 / FC10 / FC12 等型号。", "knowledge")
+        assert "## 正文" in result.normalized_content
+        assert result.notes
+
+    def test_free_form_normalize_is_idempotent(self):
+        first = Normalizer().normalize(KNOWLEDGE_MD, "knowledge")
+        second = Normalizer().normalize(first.normalized_content, "knowledge")
+        assert second.normalized_content == first.normalized_content
+        assert second.notes == []
+
+    def test_preview_reports_notes_and_no_warning(self):
+        data = KnowledgeFormatService().preview(KNOWLEDGE_MD, "knowledge")
+        assert "## 概要说明" in data["normalized_content"]
+        assert data["notes"]
+        assert not any(
+            issue["code"] == "UNSTRUCTURED_CONTENT" for issue in data["issues"]
+        )
+        assert data["quality_score"] >= 80

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -29,7 +30,14 @@ from app.services import (
     KnowledgeDocumentMetaService,
     SectionParser,
 )
+from app.services.knowledge.polish_service import KnowledgePolishService
 from app.services.knowledge.templates import list_templates
+
+
+class PolishRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=50000)
+    doc_type: Optional[str] = None
+    title: Optional[str] = None
 
 
 def get_db_session():
@@ -176,9 +184,10 @@ def list_documents(
     status: Optional[str] = Query(default=None),
     parent_id: Optional[int] = Query(default=None),
     project_id: Optional[int] = Query(default=None),
+    sort: str = Query(default="updated_desc", pattern="^(updated_asc|updated_desc)$"),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
-    """List knowledge documents with optional filters."""
+    """List knowledge documents with optional filters and updated-time ordering."""
     return KnowledgeService(db).list(
         page=page,
         page_size=page_size,
@@ -187,6 +196,18 @@ def list_documents(
         doc_type=doc_type,
         status=status,
         project_id=project_id,
+        sort_order=sort,
+    )
+
+
+@router.post("/polish")
+def polish_document(
+    body: PolishRequest,
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """AI 润色 + 模板规范化（LLM 不可用时自动回退规则整理）。"""
+    return KnowledgePolishService(db).polish(
+        body.content, body.doc_type, body.title or "",
     )
 
 

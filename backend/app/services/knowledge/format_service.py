@@ -35,6 +35,7 @@ class KnowledgeFormatService:
             "profile_draft": result.profile_draft,
             "features": result.features,
             "suggested_keywords": result.suggested_keywords,
+            "notes": result.notes,
             "issues": [i.to_dict() for i in validation.issues],
             "quality_score": validation.quality_score,
             "status_hint": validation.status_hint,

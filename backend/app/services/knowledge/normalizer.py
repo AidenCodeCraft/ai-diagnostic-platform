@@ -40,10 +40,14 @@ class Normalizer:
     def normalize(self, content: str, doc_type: Optional[str] = None) -> NormalizeResult:
         template = get_template(doc_type)
         lines = self._clean(content)
+        notes: List[str] = []
 
         title_line: Optional[str] = None
         body_lines = list(lines)
-        if body_lines and body_lines[0].startswith("# ") and not body_lines[0].startswith("## "):
+        if template is not None and template.free_form:
+            # 自由格式（基础知识/代码逻辑）：H1 视为章节标题，自动分节
+            body_lines, notes = self._structure_free_form(body_lines)
+        elif body_lines and body_lines[0].startswith("# ") and not body_lines[0].startswith("## "):
             title_line = body_lines[0]
             body_lines = body_lines[1:]
 
@@ -72,6 +76,7 @@ class Normalizer:
             profile_draft=profile,
             features=features,
             suggested_keywords=suggested,
+            notes=notes,
         )
 
     # ------------------------------------------------------------------
@@ -98,6 +103,31 @@ class Normalizer:
                 blank = False
                 out.append(ln)
         return out
+
+    @staticmethod
+    def _structure_free_form(lines: List[str]) -> tuple[List[str], List[str]]:
+        """自由格式自动分节：H1 → H2；完全没有标题时补充「正文」章节。"""
+        notes: List[str] = []
+        has_heading = any(_HEADING_RE.match(line.strip()) for line in lines)
+        structured: List[str] = []
+        demoted = False
+        for line in lines:
+            match = _HEADING_RE.match(line.strip())
+            if match and len(match.group(1)) == 1:
+                structured.append("## " + match.group(2).strip())
+                demoted = True
+            else:
+                structured.append(line)
+
+        if has_heading:
+            if demoted:
+                notes.append("已将一级标题自动转换为章节（H1 → H2）")
+            return structured, notes
+
+        if any(line.strip() for line in structured):
+            notes.append('已自动补充「## 正文」章节')
+            return ["## 正文", ""] + structured, notes
+        return structured, notes
 
     @staticmethod
     def _split_h2_blocks(lines: List[str]) -> List[Dict[str, object]]:

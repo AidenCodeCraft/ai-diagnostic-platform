@@ -14,7 +14,7 @@
         </el-breadcrumb-item>
         <!-- 当前文件 -->
         <el-breadcrumb-item v-if="viewState === 'preview'" style="font-size:20px;font-weight:600;color:#1f2937">{{ form.title }}</el-breadcrumb-item>
-        <el-breadcrumb-item v-if="viewState === 'edit'" style="font-size:20px;font-weight:600;color:#1f2937">{{ editingId ? form.title : '新建笔记' }}</el-breadcrumb-item>
+        <el-breadcrumb-item v-if="viewState === 'edit'" style="font-size:20px;font-weight:600;color:#1f2937">{{ editingId ? form.title : createLabel }}</el-breadcrumb-item>
       </el-breadcrumb>
     </div>
 
@@ -32,7 +32,9 @@
               <el-dropdown-menu>
                 <el-dropdown-item command="upload">📁 上传文件</el-dropdown-item>
                 <el-dropdown-item command="folder">📂 新建文件夹</el-dropdown-item>
-                <el-dropdown-item command="note">📝 新建笔记</el-dropdown-item>
+                <el-dropdown-item command="note">📄 新建文件</el-dropdown-item>
+                <el-dropdown-item command="faq">❓ 新建FAQ</el-dropdown-item>
+                <el-dropdown-item command="case">🛠️ 新建现场问题</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -40,27 +42,13 @@
       </div>
 
       <div class="kb-toolbar">
-        <div class="toolbar-left">
-          <el-select v-model="filterCategory" placeholder="分类筛选" clearable style="width:160px" @change="fetch">
-            <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
-          </el-select>
-        </div>
+        <div class="toolbar-left"></div>
         <div class="toolbar-right">
           <el-button-group class="view-toggle">
             <el-button :type="viewMode === 'list' ? 'primary' : ''" @click="viewMode = 'list'">☰ 列表</el-button>
             <el-button :type="viewMode === 'grid' ? 'primary' : ''" @click="viewMode = 'grid'">⊞ 网格</el-button>
           </el-button-group>
-          <el-dropdown @command="handleSort" trigger="click">
-            <el-button>排序 ▾</el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="updated_desc">按更新时间 ↓</el-dropdown-item>
-                <el-dropdown-item command="updated_asc">按更新时间 ↑</el-dropdown-item>
-                <el-dropdown-item command="created_desc">按创建时间 ↓</el-dropdown-item>
-                <el-dropdown-item command="created_asc">按创建时间 ↑</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <el-button @click="toggleSort">修改时间 {{ sortOrder === 'updated_asc' ? '↑' : '↓' }}</el-button>
         </div>
       </div>
 
@@ -83,8 +71,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="category" label="分类" width="120"><template #default="{ row }">{{ row.category || '—' }}</template></el-table-column>
-          <el-table-column label="文档类型" width="100"><template #default="{ row }">{{ typeLabel(row.doc_type) }}</template></el-table-column>
+          <el-table-column label="文档类型" width="120"><template #default="{ row }">{{ typeLabel(row.doc_type) }}</template></el-table-column>
           <el-table-column label="质量" width="120">
             <template #default="{ row }">
               <template v-if="row.doc_type === 'folder'">—</template>
@@ -186,26 +173,38 @@
       <div class="kb-header">
         <el-input v-model="form.title" placeholder="标题" style="width:240px;font-size:18px;font-weight:600" />
         <el-select v-model="form.doc_type" style="width:170px;margin-left:8px" @change="onDocTypeChange">
-          <el-option label="现场问题处理示例" value="case" />
+          <el-option label="现场问题示例" value="case" />
           <el-option label="FAQ" value="faq" />
           <el-option label="代码逻辑" value="code_logic" />
           <el-option label="基础知识" value="knowledge" />
           <el-option label="笔记" value="note" />
           <el-option label="手册" value="manual" />
         </el-select>
-        <el-input v-model="form.category" placeholder="分类（可选）" style="width:150px;margin-left:8px" />
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
           <el-button-group class="mode-toggle">
             <el-button :type="editMode === 'edit' ? 'primary' : ''" @click="editMode = 'edit'">编辑</el-button>
             <el-button :type="editMode === 'split' ? 'primary' : ''" @click="editMode = 'split'; refreshPreview()">分屏</el-button>
             <el-button :type="editMode === 'preview' ? 'primary' : ''" @click="editMode = 'preview'; refreshPreview()">预览</el-button>
           </el-button-group>
-          <el-button @click="applyFormat" :loading="formatting">一键格式化</el-button>
-          <el-button v-if="formatSnapshot !== null" @click="undoFormat">撤销格式化</el-button>
-          <el-button @click="showProfile = true">进阶覆盖</el-button>
+          <el-button @click="aiPolish" :loading="polishing">AI润色</el-button>
+          <el-button v-if="polishSnapshot !== null" @click="undoPolish">撤销AI润色</el-button>
+          <el-button @click="showGuide = true">格式说明</el-button>
+          <el-tooltip placement="bottom" effect="light">
+            <template #content>
+              <div style="max-width:340px;line-height:1.7">
+                进阶覆盖：手动修正系统自动生成的「诊断剧本」（现象、日志关键词、正则、根因、解决方案等）。
+                不填写则使用模板/日志解析自动生成的结果；填写后会覆盖自动值，用于提升日志定位与诊断准确率。
+              </div>
+            </template>
+            <el-button @click="showProfile = true">进阶覆盖</el-button>
+          </el-tooltip>
           <el-button @click="cancelEdit">取消</el-button>
           <el-button type="primary" @click="save" :loading="saving">{{ editingId ? '保存' : '创建' }}</el-button>
         </div>
+      </div>
+      <div v-if="currentTemplate" class="format-hint">
+        <span class="format-hint-text">格式要求：{{ currentTemplate.guide }}</span>
+        <el-button link type="primary" size="small" @click="showGuide = true">查看示例 / 插入模板</el-button>
       </div>
       <div class="editor-body" :class="'mode-' + editMode">
         <div v-show="editMode !== 'preview'" class="editor-pane">
@@ -233,6 +232,9 @@
               <div v-if="previewResult.suggested_keywords.length" class="preview-suggest">
                 候选关键词：{{ previewResult.suggested_keywords.join('、') }}（可加入「日志特征」）
               </div>
+              <div v-if="previewResult.notes && previewResult.notes.length" class="preview-notes">
+                <div v-for="(note, i) in previewResult.notes" :key="i">✨ {{ note }}</div>
+              </div>
               <div class="preview-rendered">
                 <component :is="VMdEditor.Preview" :text="previewResult.normalized_content" />
               </div>
@@ -253,7 +255,6 @@
         <template #tip><div style="margin-top:8px;color:#909399">支持 .md, .txt, .pdf</div></template>
       </el-upload>
       <div style="margin-top:12px">
-        <el-input v-model="uploadForm.category" placeholder="分类（可选）" style="margin-bottom:8px" />
         <el-select v-model="uploadForm.doc_type" style="width:100%">
           <el-option label="手册" value="manual" /><el-option label="FAQ" value="faq" /><el-option label="数据手册" value="datasheet" />
         </el-select>
@@ -271,8 +272,39 @@
       <template #footer><el-button @click="showRename = false">取消</el-button><el-button type="primary" @click="doRename">确认</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="showGuide" :title="guideTitle" width="760px" top="6vh">
+      <div v-if="currentTemplate" class="guide-body">
+        <h4>格式要求</h4>
+        <p class="guide-text">{{ currentTemplate.guide }}</p>
+        <h4>章节结构</h4>
+        <el-table :data="currentTemplate.sections" size="small" border>
+          <el-table-column prop="title" label="章节" width="160" />
+          <el-table-column prop="level" label="级别" width="110">
+            <template #default="{ row }">{{ levelLabel(row.level) }}</template>
+          </el-table-column>
+          <el-table-column label="填写说明">
+            <template #default="{ row }">{{ sectionHint(row) }}</template>
+          </el-table-column>
+        </el-table>
+        <h4>填写示例</h4>
+        <div class="guide-example">
+          <component :is="VMdEditor.Preview" :text="currentTemplate.example" />
+        </div>
+      </div>
+      <div v-else class="guide-body">
+        <p class="guide-text">自由格式：建议使用小标题分节、条目化表达，便于阅读与检索。</p>
+      </div>
+      <template #footer>
+        <el-button @click="showGuide = false">关闭</el-button>
+        <el-button type="primary" @click="insertSkeleton">插入模板骨架</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 诊断剧本（结构化诊断信息），随知识条目保存 -->
-    <el-dialog v-model="showProfile" title="诊断配置（可选）" width="640px" top="6vh">
+    <el-dialog v-model="showProfile" title="进阶覆盖 · 诊断配置（可选）" width="640px" top="6vh">
+      <div class="profile-tip">
+        系统会根据模板/日志解析自动生成诊断剧本；这里填写的字段会覆盖自动值，只需补充或修正关键字段即可。
+      </div>
       <el-form label-width="110px" label-position="left">
         <el-form-item label="现象/问题">
           <el-input v-model="profileForm.symptom" type="textarea" :rows="2" placeholder="如：设备黑屏、程序版本号查询" />
@@ -312,7 +344,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch, defineComponent, h } from 'vue'
 import { Search, UploadFilled } from '@element-plus/icons-vue'
-import { knowledgeApi } from '@/api/knowledge'
+import { knowledgeApi, type KnowledgeTemplateInfo } from '@/api/knowledge'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import VMdEditor from '@kangc/v-md-editor'
 
@@ -367,7 +399,6 @@ const TreeNodeItem = defineComponent({
 })
 
 const items = ref<any[]>([])
-const categories = ref<string[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const uploading = ref(false)
@@ -375,7 +406,6 @@ const page = ref(1)
 const pageSize = 20
 const total = ref(0)
 const searchQuery = ref('')
-const filterCategory = ref('')
 const viewMode = ref<'list' | 'grid'>('list')
 const sortOrder = ref('updated_desc')
 const selectedRows = ref<any[]>([])
@@ -387,9 +417,14 @@ const editingId = ref<number | null>(null)
 const renameId = ref<number | null>(null)
 const folderName = ref('')
 const renameName = ref('')
-const uploadForm = ref({ category: '', doc_type: 'manual' })
+const uploadForm = ref({ doc_type: 'manual' })
 const uploadFile = ref<File | null>(null)
-const form = ref({ title: '', category: '', doc_type: 'note', content: '' })
+const form = ref({ title: '', doc_type: 'note', content: '' })
+
+const createLabel = computed(() => {
+  const labels: Record<string, string> = { note: '新建文件', faq: '新建FAQ', case: '新建现场问题' }
+  return labels[form.value.doc_type] || '新建文件'
+})
 
 // ── 诊断剧本（结构化诊断信息）──
 const showProfile = ref(false)
@@ -461,16 +496,76 @@ function buildProfilePayload() {
   }
 }
 
-// ── 编辑模式 / 提交后预览 / 一键格式化 ──
+// ── 编辑模式 / 提交后预览 / AI 润色 / 模板说明 ──
 const editMode = ref<'edit' | 'split' | 'preview'>('edit')
 const previewResult = ref<any>(null)
 const previewLoading = ref(false)
-const formatting = ref(false)
-const formatSnapshot = ref<string | null>(null)
+const polishing = ref(false)
+const polishSnapshot = ref<string | null>(null)
+const templates = ref<KnowledgeTemplateInfo[]>([])
+const showGuide = ref(false)
 let previewTimer: ReturnType<typeof setTimeout> | null = null
 
-function defaultEditMode(docType: string): 'edit' | 'split' {
-  return (docType || '') === 'case' ? 'split' : 'edit'
+const currentTemplate = computed(
+  () => templates.value.find(t => t.doc_type === form.value.doc_type) || null,
+)
+const guideTitle = computed(
+  () => `格式说明${currentTemplate.value ? ' · ' + currentTemplate.value.name : ''}`,
+)
+
+function levelLabel(level: string) {
+  const labels: Record<string, string> = { required: '必填', recommended: '建议', optional: '可选' }
+  return labels[level] || level
+}
+
+function sectionHint(row: { key: string }) {
+  const hints: Record<string, string> = {
+    symptom: '描述现场现象', analysis: '说明原因与分析过程', root_cause: '说明根因/判断依据',
+    solution: '处理步骤与最终结果', features: '适用环境/设备型号等', log_signature: '日志关键词/正则',
+    keywords: '用于检索的关键字', keyword_explain: '解释关键字含义', related: '关联条目',
+    images: '截图或示意', examples: '示例', author: '作者', log_keywords: '日志关键词',
+    log_patterns: '日志正则', negative_patterns: '排除正则', expected: '判定说明', body: '正文',
+  }
+  return hints[row.key] || '—'
+}
+
+async function loadTemplates() {
+  try {
+    const { data } = await knowledgeApi.templates()
+    templates.value = data.templates || []
+  } catch (e: any) {
+    console.warn('[KnowledgeBase] load templates failed:', e?.message)
+  }
+}
+
+/** 新建时的预填骨架；笔记等自由文档给最小正文骨架 */
+function skeletonFor(docType: string): string {
+  const template = templates.value.find(t => t.doc_type === docType)
+  if (template && template.skeleton) return template.skeleton
+  return docType === 'note' ? '## 正文\n\n（在此填写内容）\n' : ''
+}
+
+async function insertSkeleton() {
+  const skeleton = skeletonFor(form.value.doc_type)
+  if (!skeleton) {
+    ElMessage.info('该类型为自由格式，没有固定模板')
+    return
+  }
+  if (form.value.content.trim()) {
+    try {
+      await ElMessageBox.confirm('插入模板会覆盖当前编辑内容，确定继续？', '确认', { type: 'warning' })
+    } catch { return }
+  }
+  form.value.content = skeleton
+  polishSnapshot.value = null
+  showGuide.value = false
+  nextTick(() => refreshPreview())
+  ElMessage.success('已插入模板骨架')
+}
+
+function defaultEditMode(_docType: string): 'edit' | 'split' {
+  // 新建/编辑文件默认分屏（左侧编辑、右侧提交后预览）
+  return 'split'
 }
 
 function schedulePreview() {
@@ -500,40 +595,57 @@ watch(
   () => schedulePreview(),
 )
 
-async function applyFormat() {
-  formatting.value = true
+/** AI 润色：用户写大致内容 → LLM 按模板规范化（不可用时自动回退规则整理） */
+async function aiPolish() {
+  if (!form.value.content.trim()) {
+    ElMessage.warning('请先输入内容，再使用 AI 润色')
+    return
+  }
+  polishing.value = true
   try {
-    const { data } = await knowledgeApi.formatPreview({
-      content: form.value.content,
+    const before = form.value.content
+    const { data } = await knowledgeApi.polish({
+      content: before,
       doc_type: form.value.doc_type,
       title: form.value.title,
     })
-    previewResult.value = data
-    const normalized = data.normalized_content || ''
-    if (normalized === form.value.content) {
-      ElMessage.info('格式已规范，无需调整')
+    const polished = data.polished_content || data.normalized_content || before
+    if (polished === before) {
+      ElMessage.info('内容已符合模板格式，无需润色')
       return
     }
-    formatSnapshot.value = form.value.content
-    form.value.content = normalized
-    ElMessage.success('已按模板规范格式（可撤销）')
-    refreshPreview()
+    polishSnapshot.value = before
+    form.value.content = polished
+    previewResult.value = data
+    if (data.source === 'llm') {
+      ElMessage.success('AI 润色完成，已按模板规范化')
+    } else {
+      ElMessage.warning('AI 服务暂不可用（请检查 系统配置 → LLM 配置 的 API Key），已按模板规则完成结构化整理')
+    }
+    nextTick(() => refreshPreview())
   } catch (e: any) {
-    ElMessage.error('格式化失败: ' + (e?.response?.data?.detail || e?.message))
+    ElMessage.error('AI 润色失败: ' + (e?.response?.data?.detail || e?.message))
   } finally {
-    formatting.value = false
+    polishing.value = false
   }
 }
 
-function undoFormat() {
-  if (formatSnapshot.value === null) return
-  form.value.content = formatSnapshot.value
-  formatSnapshot.value = null
-  ElMessage.info('已撤销格式化')
-  refreshPreview()
+function undoPolish() {
+  if (polishSnapshot.value === null) return
+  form.value.content = polishSnapshot.value
+  polishSnapshot.value = null
+  ElMessage.info('已撤销 AI 润色')
+  nextTick(() => refreshPreview())
 }
 
 function onDocTypeChange() {
+  // 切换类型时，若内容为空或仍是某个模板骨架，则自动套用新类型骨架
+  const content = form.value.content.trim()
+  const isSkeleton = templates.value.some(t => t.skeleton.trim() === content)
+  if (!content || isSkeleton) {
+    form.value.content = skeletonFor(form.value.doc_type)
+  }
+  polishSnapshot.value = null
   refreshPreview()
 }
 
@@ -566,7 +678,7 @@ const folderDepth = ref(0)
 const _kTimeFmt = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 function formatTime(ts: string) { if (!ts) return ''; try { return _kTimeFmt.format(new Date(ts)) } catch { return ts } }
 function formatSize(row: any) { if (row.doc_type === 'folder') return '—'; if (!row.content) return '—'; const bytes = new Blob([row.content]).size; return bytes < 1024 ? bytes + ' B' : (bytes / 1024).toFixed(1) + ' KB' }
-function typeLabel(docType: string) { const map: Record<string, string> = { note: '笔记', folder: '文件夹', manual: '手册', faq: 'FAQ', bug_report: 'Bug', datasheet: '数据手册' }; return map[docType] || docType || '—' }
+function typeLabel(docType: string) { const map: Record<string, string> = { note: '笔记', folder: '文件夹', manual: '手册', faq: 'FAQ', case: '现场问题示例', code_logic: '代码逻辑', knowledge: '基础知识', bug_report: 'Bug', datasheet: '数据手册' }; return map[docType] || docType || '—' }
 
 // ============================================================
 // Markdown TOC — 改为响应式数组（非 v-html）
@@ -681,7 +793,6 @@ function selectTreeNode(node: any) {
     // 文档 → 切换预览
     form.value = {
       title: node.title,
-      category: node.category || '',
       doc_type: node.doc_type || 'note',
       content: '',  // 需要从后端获取完整内容
     }
@@ -738,11 +849,10 @@ function checkPathDepth() {
 async function fetch() {
   loading.value = true
   try {
-    const params: any = { page: page.value, page_size: pageSize, category: filterCategory.value || undefined }
+    const params: any = { page: page.value, page_size: pageSize, sort: sortOrder.value }
     if (currentFolder.value) params.parent_id = currentFolder.value.id
     const { data } = await knowledgeApi.list(params)
     items.value = data.items; total.value = data.total
-    const catResp = await knowledgeApi.categories(); categories.value = catResp.data
   } catch {} finally { loading.value = false }
 }
 async function doSearch() {
@@ -775,16 +885,17 @@ function enterFolder(row: any) {
   fetch()
 }
 function openItem(row: any) {
+  polishSnapshot.value = null
   if (row.doc_type === 'folder') { enterFolder(row) }
   else {
     editingId.value = row.id
     viewState.value = 'preview'
     // 优先使用列表中的 content；如果为空则从后端获取完整内容
     if (row.content) {
-      form.value = { title: row.title, category: row.category || '', doc_type: row.doc_type || 'note', content: row.content }
+      form.value = { title: row.title, doc_type: row.doc_type || 'note', content: row.content }
       nextTick(afterPreviewRender)
     } else {
-      form.value = { title: row.title, category: row.category || '', doc_type: row.doc_type || 'note', content: '' }
+      form.value = { title: row.title, doc_type: row.doc_type || 'note', content: '' }
       loadDocumentContent(row.id)
     }
     loadProfileForDoc(row.id)
@@ -792,6 +903,7 @@ function openItem(row: any) {
 }
 function enterEdit() {
   if (editingId.value) loadProfileForDoc(editingId.value)
+  polishSnapshot.value = null
   editMode.value = defaultEditMode(form.value.doc_type)
   viewState.value = 'edit'
   nextTick(() => refreshPreview())
@@ -801,7 +913,7 @@ function enterEdit() {
 // 更多菜单操作
 // ============================================================
 async function handleRowAction(cmd: string, row: any) {
-  if (cmd === 'edit') { form.value = { title: row.title, category: row.category || '', doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; editMode.value = defaultEditMode(form.value.doc_type); viewState.value = 'edit'; loadProfileForDoc(row.id); nextTick(() => refreshPreview()) }
+  if (cmd === 'edit') { form.value = { title: row.title, doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; polishSnapshot.value = null; editMode.value = defaultEditMode(form.value.doc_type); viewState.value = 'edit'; loadProfileForDoc(row.id); nextTick(() => refreshPreview()) }
   else if (cmd === 'rename') { renameId.value = row.id; renameName.value = row.title; showRename.value = true }
   else if (cmd === 'pin') {
     try {
@@ -818,13 +930,22 @@ async function doRename() { if (!renameName.value.trim() || !renameId.value) ret
 // ============================================================
 // 创建
 // ============================================================
-function handleCreateCommand(cmd: string) {
-  if (cmd === 'upload') showUpload.value = true
-  else if (cmd === 'folder') showFolder.value = true
-  else if (cmd === 'note') { editingId.value = null; form.value = { title: '', category: '', doc_type: 'note', content: '' }; resetProfile(); formatSnapshot.value = null; editMode.value = 'edit'; viewState.value = 'edit'; nextTick(() => refreshPreview()) }
+async function handleCreateCommand(cmd: string) {
+  if (cmd === 'upload') { showUpload.value = true; return }
+  if (cmd === 'folder') { showFolder.value = true; return }
+  // note = 新建文件（默认笔记）；faq / case 为对应类型的新建入口
+  const docType = cmd === 'faq' ? 'faq' : cmd === 'case' ? 'case' : 'note'
+  if (!templates.value.length) await loadTemplates()
+  editingId.value = null
+  form.value = { title: '', doc_type: docType, content: skeletonFor(docType) }
+  resetProfile()
+  polishSnapshot.value = null
+  editMode.value = 'split'
+  viewState.value = 'edit'
+  nextTick(() => refreshPreview())
 }
 function handleFileSelect(f: any) { uploadFile.value = f.raw }
-async function doUpload() { if (!uploadFile.value) return; uploading.value = true; try { const fd = new FormData(); fd.append('file', uploadFile.value); if (uploadForm.value.category) fd.append('category', uploadForm.value.category); fd.append('doc_type', uploadForm.value.doc_type); if (currentFolder.value) fd.append('parent_id', currentFolder.value.id.toString()); await knowledgeApi.upload(fd); ElMessage.success('上传成功'); showUpload.value = false; await fetch() } catch (e: any) { ElMessage.error(e?.response?.data?.detail || '上传失败') } finally { uploading.value = false } }
+async function doUpload() { if (!uploadFile.value) return; uploading.value = true; try { const fd = new FormData(); fd.append('file', uploadFile.value); fd.append('doc_type', uploadForm.value.doc_type); if (currentFolder.value) fd.append('parent_id', currentFolder.value.id.toString()); await knowledgeApi.upload(fd); ElMessage.success('上传成功'); showUpload.value = false; await fetch() } catch (e: any) { ElMessage.error(e?.response?.data?.detail || '上传失败') } finally { uploading.value = false } }
 function createFolder() { if (!folderName.value.trim()) return; if (!checkPathDepth()) { showFolder.value = false; return } const data: any = { title: folderName.value, content: '', doc_type: 'folder' }; if (currentFolder.value) data.parent_id = currentFolder.value.id; knowledgeApi.create(data).then(() => { ElMessage.success('文件夹已创建'); showFolder.value = false; folderName.value = ''; fetch() }).catch(() => ElMessage.error('创建失败')) }
 
 async function save() {
@@ -842,7 +963,7 @@ async function save() {
     }
     viewState.value = 'list'
     editingId.value = null
-    formatSnapshot.value = null
+    polishSnapshot.value = null
     await fetch()
     showSaveResult(resp)
   } catch (e: any) {
@@ -859,6 +980,7 @@ let pasteHandler: ((e: ClipboardEvent) => void) | null = null
 onMounted(() => {
   fetch()
   loadTree()
+  loadTemplates()
 
   // 延迟绑定：等待 v-md-editor 渲染出 textarea
   nextTick(() => {
@@ -955,7 +1077,10 @@ async function remove(id: number) {
   try { await knowledgeApi.delete(id); ElMessage.success('已删除'); await fetch() } catch (e: any) { ElMessage.error(e.response?.data?.detail || '删除失败') }
 }
 function handleSelection(rows: any[]) { selectedRows.value = rows }
-function handleSort(cmd: string) { sortOrder.value = cmd; fetch() }
+function toggleSort() {
+  sortOrder.value = sortOrder.value === 'updated_desc' ? 'updated_asc' : 'updated_desc'
+  fetch()
+}
 </script>
 
 <style scoped>
@@ -987,6 +1112,25 @@ function handleSort(cmd: string) { sortOrder.value = cmd; fetch() }
 .preview-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-shrink: 0; }
 .preview-header-left { display: flex; align-items: center; gap: 8px; }
 .preview-header-right { display: flex; gap: 8px; }
+.format-hint {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 0 0 10px; padding: 8px 12px; border-radius: 8px;
+  background: #f8fafc; border: 1px solid #e5e7eb; color: #4b5563; font-size: 13px;
+}
+.format-hint-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guide-body h4 { margin: 14px 0 8px; font-size: 14px; color: #1f2937; }
+.guide-body h4:first-child { margin-top: 0; }
+.guide-text { margin: 0; color: #4b5563; font-size: 13px; line-height: 1.8; }
+.guide-example {
+  max-height: 320px; overflow-y: auto; padding: 12px 16px;
+  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+  font-size: 13px; line-height: 1.7;
+}
+.profile-tip {
+  margin-bottom: 14px; padding: 10px 12px; border-radius: 8px;
+  background: #f0f7ff; border: 1px solid #d6e8ff;
+  color: #4b5563; font-size: 13px; line-height: 1.7;
+}
 .preview-header-title { font-size: 18px; font-weight: 600; color: #1f2937; }
 .preview-layout { position: relative; display: flex; gap: 0; height: calc(100vh - 180px); }
 
@@ -1107,6 +1251,11 @@ function handleSort(cmd: string) { sortOrder.value = cmd; fetch() }
 .preview-issue.error { color: #dc2626; }
 .preview-issue.warn { color: #d97706; }
 .preview-suggest { font-size: 12px; color: #6b7280; margin-bottom: 8px; }
+.preview-notes {
+  margin-bottom: 8px; padding: 8px 10px; border-radius: 6px;
+  background: #f0f9ff; border: 1px solid #dbeafe;
+  color: #2563eb; font-size: 12px; line-height: 1.8;
+}
 .preview-rendered { font-size: 14px; line-height: 1.7; color: #374151; }
 .mode-toggle .el-button { padding: 6px 10px; }
 .card-quality { font-size: 11px; color: #2563eb; margin-top: 4px; }

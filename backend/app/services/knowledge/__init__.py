@@ -18,8 +18,10 @@ from app.services.knowledge.document_meta_service import (
 from app.services.knowledge.normalizer import Normalizer, NormalizeResult
 from app.services.knowledge.validator import Validator, Issue, ValidationResult
 from app.services.knowledge.format_service import KnowledgeFormatService
+from app.services.knowledge.polish_service import KnowledgePolishService
 
 __all__ = [
+    "KnowledgePolishService",
     "KnowledgeService",
     "DocumentImporter",
     "KnowledgeImageService",

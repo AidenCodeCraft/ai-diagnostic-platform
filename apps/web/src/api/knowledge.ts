@@ -27,6 +27,23 @@ export interface FormatSection {
   content: string
 }
 
+export interface KnowledgeTemplateSection {
+  key: string
+  title: string
+  level: 'required' | 'recommended' | 'optional'
+  aliases?: string[]
+}
+
+export interface KnowledgeTemplateInfo {
+  doc_type: string
+  name: string
+  free_form: boolean
+  skeleton: string
+  guide: string
+  example: string
+  sections: KnowledgeTemplateSection[]
+}
+
 export interface FormatPreview {
   title: string
   doc_type: string | null
@@ -35,6 +52,7 @@ export interface FormatPreview {
   profile_draft: Record<string, any>
   features: Record<string, string>
   suggested_keywords: string[]
+  notes: string[]
   issues: KnowledgeIssue[]
   quality_score: number
   status_hint: 'active' | 'draft'
@@ -75,7 +93,7 @@ export const knowledgeApi = {
   create(data: { title: string; content: string; category?: string; doc_type?: string; parent_id?: number; profile?: KnowledgeProfile }) {
     return client.post<KnowledgeDoc>('/knowledge', data)
   },
-  list(params?: { page?: number; page_size?: number; category?: string; doc_type?: string; parent_id?: number }) {
+  list(params?: { page?: number; page_size?: number; category?: string; doc_type?: string; parent_id?: number; sort?: 'updated_asc' | 'updated_desc' }) {
     return client.get('/knowledge', { params })
   },
   get(id: number) {
@@ -122,8 +140,14 @@ export const knowledgeApi = {
   formatPreview(data: { content: string; doc_type?: string; title?: string }) {
     return client.post<FormatPreview>('/knowledge/format/preview', data)
   },
-  /** 知识模板契约 */
+  /** 知识模板契约（含骨架 / 格式说明 / 示例） */
   templates() {
-    return client.get<{ templates: any[] }>('/knowledge/templates')
+    return client.get<{ templates: KnowledgeTemplateInfo[] }>('/knowledge/templates')
+  },
+  /** AI 润色：按模板规范化内容（LLM 不可用时后端自动回退规则整理） */
+  polish(data: { content: string; doc_type?: string; title?: string }) {
+    return client.post<FormatPreview & { polished_content: string; source: 'llm' | 'rule' }>(
+      '/knowledge/polish', data, { timeout: 120000 },
+    )
   },
 }

@@ -121,6 +121,7 @@ class KnowledgeService:
         status: Optional[str] = None,
         parent_id: Optional[int] = None,
         project_id: Optional[int] = None,
+        sort_order: str = "updated_desc",
     ) -> Dict[str, Any]:
         query = self.db.query(KnowledgeDocument)
         query = self._apply_project_filter(query, project_id)
@@ -142,8 +143,12 @@ class KnowledgeService:
             query = query.filter(KnowledgeDocument.status == "active")
 
         total = query.count()
+        if sort_order == "updated_asc":
+            ordering = (KnowledgeDocument.updated_at.asc(), KnowledgeDocument.id.asc())
+        else:
+            ordering = (KnowledgeDocument.updated_at.desc(), KnowledgeDocument.id.desc())
         items = (
-            query.order_by(KnowledgeDocument.updated_at.desc())
+            query.order_by(*ordering)
             .offset((page - 1) * page_size)
             .limit(page_size)
             .all()

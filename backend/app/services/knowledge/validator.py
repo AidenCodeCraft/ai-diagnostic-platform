@@ -67,6 +67,19 @@ class Validator:
                 status_hint="active",
             )
 
+        # 自由格式模板（基础知识 / 代码逻辑）：不强制分节，按自由文档校验
+        if template.free_form:
+            has_content = any((s.content or "").strip() for s in sections)
+            issues = [] if has_content else [Issue("EMPTY_CONTENT", WARN, "内容为空")]
+            quality = self._quality(
+                template, by_key, profile_draft, doc_type, image_count, feedback_ratio,
+            )
+            return ValidationResult(
+                issues=issues,
+                quality_score=quality,
+                status_hint="active",
+            )
+
         # 纯文本 / 无章节内容：不强制模板（前端可先「一键格式化」），仅提示
         structured = any(s.level == 2 for s in sections)
         if not structured:
@@ -108,6 +121,19 @@ class Validator:
         ]
         if low_info:
             issues.append(Issue("LOW_INFO", WARN, "信息量不足：" + "、".join(low_info)))
+
+        # 模板占位符未替换提示（新建预填骨架后直接保存时给出明确提醒）
+        placeholders = ("（请", "（在此", "（说明", "（填写")
+        placeholder_sections = [
+            spec.title for spec in template.sections
+            if by_key.get(spec.key)
+            and any(marker in (by_key[spec.key].content or "") for marker in placeholders)
+        ]
+        if placeholder_sections:
+            issues.append(Issue(
+                "PLACEHOLDER_CONTENT", WARN,
+                "存在未替换的模板占位符：" + "、".join(placeholder_sections),
+            ))
 
         quality = self._quality(template, by_key, profile_draft, doc_type, image_count, feedback_ratio)
         status_hint = "draft" if any(i.level == ERROR for i in issues) else "active"
