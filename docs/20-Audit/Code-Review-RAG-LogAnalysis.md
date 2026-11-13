@@ -314,3 +314,30 @@
 5. ✅ 已修复：`diagnostic-logs` bucket 首次部署不自动创建 → `LogStorage._create_client()` 自动 `make_bucket`（并发幂等；无权限时回退本地并告警）。
 6. ✅ 已修复：`VectorService` embedding 加载超时硬编码 10s 且超时永久降级 → 改读 `settings.EMBEDDING_LOAD_TIMEOUT`，超时后下次请求可继续等待/回填，失败可重试。
 7. 镜像版本已固定 tag（minio 去除 `:latest`）；生产/CI 建议进一步固定 digest 或使用内网 registry（`deploy/README.md`「镜像版本与离线部署」）。
+
+---
+
+## 7. A/C/D 收尾完成（2026-11-13）
+
+在 §6 基础上继续完成前端 UI（A）、逻辑边界（C）与测试缺口（D）：
+
+| 类别 | 事项 | 实现 |
+| --- | --- | --- |
+| A | 报告 PDF 下载 | `ReportList.vue` 新增「导出PDF」按钮；`reportApi.exportPdf` blob 下载；服务端 501 时提示安装 reportlab |
+| A | 批量分析 UI | 新增管理后台「日志分析」页：多选日志 → 批量分析 → 轮询状态 / 查看结果 / 重试；含事件分页查询 |
+| A | 种子数据入口 | 系统配置「数据管理」Tab：导入示例知识 / 重置并重建（`POST /admin/knowledge/seed`） |
+| C | 聊天项目过滤 | `ChatSession.project_id`（迁移 `a7b8c9d0e1f2`）；ChatService → DiagnosticChatAgent → KnowledgeService.search 全链路传递 |
+| C | 异步任务恢复/重试 | 启动时把超时中断的 pending/running 任务标记失败；新增 `POST /analyses/{id}/retry` |
+| C | `/logs/{id}/events` | 优先返回已持久化事件，避免重复解析与 MinIO 重复下载 |
+| C | 路径泄露 | `LogResponse` 移除 `file_path` 字段，测试同步更新 |
+| D | PDF 实测 | reportlab 已安装：真实 PDF API 用例通过（2 passed） |
+| D | 前端自动化 | Vitest + @vue/test-utils + jsdom：SSE 解析 / 格式化 / 锚点行提取共 9 个用例 |
+| D | 真实环境 | Milvus 3 / MinIO 5 / BGE 6（+1 skip）/ PDF 2 全部通过；新增 `RUN_LIVE_LLM` 可选真实 LLM E2E |
+| D | 回归修复 | 修复 `VectorService` 类属性误删回归；BGE + Milvus 联合索引/检索通过 |
+
+### 最终验证（2026-11-13）
+
+- 后端默认全量：**498 passed / 19 skipped**
+- 真实环境套件（`RUN_REAL_MILVUS` / `RUN_REAL_MINIO` / `RUN_REAL_BGE` / `RUN_REAL_PDF_API`）：**16 passed / 1 skipped**
+- 前端：**Vitest 9 passed**；`vue-tsc --noEmit` 通过；`npm run build` 成功
+- 真实 LLM E2E（可选）：`RUN_LIVE_LLM=1 pytest tests/e2e/test_live_llm.py`（需配置 DeepSeek Key）

@@ -90,6 +90,14 @@ export const adminApi = {
     return client.put('/admin/config/system', config)
   },
 
+  // ── 数据管理 ──────────────────────────────────────────────
+  /** 导入知识库示例数据（reset=true 时先删除同名示例再重建） */
+  seedKnowledge(reset = false) {
+    return client.post<{ created: number; skipped: number; deleted: number }>(
+      '/admin/knowledge/seed', null, { params: { reset } },
+    )
+  },
+
   // ── 用户管理 ──────────────────────────────────────────────
   /** 获取用户列表（支持分页、搜索、筛选） */
   listUsers(params?: {

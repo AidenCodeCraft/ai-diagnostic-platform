@@ -187,3 +187,14 @@ def save_system_config(body: Dict[str, Any]):
     }
     _save_config(config)
     return {"ok": True, "message": "系统参数已保存"}
+
+
+@router.post("/knowledge/seed")
+def seed_knowledge(
+    reset: bool = Query(default=False),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """导入知识库示例数据（四类模板）；reset=true 时先删除同名示例再重建。"""
+    from app.services.knowledge.seed_service import seed
+
+    return seed(db, reset=reset)

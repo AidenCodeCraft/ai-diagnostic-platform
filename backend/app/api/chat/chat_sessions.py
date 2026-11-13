@@ -32,6 +32,7 @@ def create_session(body: Dict[str, Any], db: Session = Depends(get_db_session)):
     return ChatService(db).create_session(
         title=body.get("title"), user_id=body.get("user_id"),
         log_id=body.get("log_id"), model=body.get("model"),
+        project_id=body.get("project_id"),
     )
 
 

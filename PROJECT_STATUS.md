@@ -196,8 +196,10 @@ v1.0.0 — 企业版
 
 ## 测试覆盖
 
-**467 个测试已收集，466 passed / 1 skipped（2026-11-12 全量回归）**
+**517 个测试已收集，498 passed / 19 skipped（2026-11-13 默认全量回归）**
 
+> 真实环境套件（RUN_REAL_MILVUS/RUN_REAL_MINIO/RUN_REAL_BGE/RUN_REAL_PDF_API）：16 passed / 1 skipped。
+> 前端 Vitest：9 passed；`vue-tsc` 与 `npm run build` 通过。
 > 下方分模块数字为早期统计，最新以全量回归结果为准。
 
 | 模块 | 测试数 |

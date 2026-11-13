@@ -23,6 +23,22 @@ if getattr(settings, 'LOG_DESENSITIZE_ENABLED', False):
 async def lifespan(app: FastAPI):
     logger.info("Application starting — seeding users...")
     seed_users()
+
+    # 恢复中断的异步分析任务（进程内线程池无法跨重启持久化）
+    try:
+        from app.database import session as session_module
+        from app.services.diagnostics.analysis_task_service import AnalysisTaskService
+
+        db = session_module.create_session()
+        try:
+            recovered = AnalysisTaskService.recover_interrupted(db)
+            if recovered:
+                logger.warning("Recovered %d interrupted analysis task(s)", recovered)
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001 - 启动恢复失败不应阻断服务
+        logger.exception("Failed to recover interrupted analysis tasks")
+
     yield
     logger.info("Application shutting down")
 

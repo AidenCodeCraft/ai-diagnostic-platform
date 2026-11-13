@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -128,6 +129,40 @@ class AnalysisTaskService:
                     "error": str(exc)[:300],
                 })
         return {"items": items, "total": len(items)}
+
+    @classmethod
+    def recover_interrupted(cls, db: Session, older_than_seconds: int = 600) -> int:
+        """服务重启后把中断的 pending/running 任务标记为失败（避免永久卡住）。
+
+        older_than_seconds: 只处理更新时间早于该阈值的任务，避免误伤其他进程的活跃任务。
+        """
+        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+        cutoff = now_naive - timedelta(seconds=older_than_seconds)
+        stale = (
+            db.query(Analysis)
+            .filter(
+                Analysis.status.in_(["pending", "running"]),
+                Analysis.updated_at < cutoff,
+            )
+            .all()
+        )
+        for analysis in stale:
+            setattr(analysis, "status", "failed")
+            setattr(analysis, "error_message", "任务被中断（服务重启），请重试")
+        if stale:
+            db.commit()
+        return len(stale)
+
+    def retry_analysis(self, analysis_id: int) -> Dict[str, Any]:
+        """重试失败/已完成的分析任务（重新提交后台执行）。"""
+        analysis = self.get_analysis(analysis_id)
+        if analysis.status not in ("failed", "completed"):
+            raise ValueError("只有失败或已完成的任务可以重试")
+        setattr(analysis, "status", "pending")
+        setattr(analysis, "error_message", None)
+        self.db.commit()
+        _EXECUTOR.submit(self._execute_async, int(analysis.id), "")
+        return {"id": analysis.id, "status": "pending"}
 
     @staticmethod
     def _execute_async(analysis_id: int, user_query: str) -> None:

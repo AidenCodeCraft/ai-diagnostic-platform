@@ -364,7 +364,6 @@ def test_milvus_joint_index_search(monkeypatch) -> None:
 
     from app.services.knowledge.vector_service import VectorService
 
-    monkeypatch.setattr(VectorService, "_EMBEDDING_LOAD_TIMEOUT", 300.0)
     service = VectorService()
     assert service.available is True, "VectorService 应可用（Milvus 连接 + BGE 加载）"
     assert service.dimension == 512

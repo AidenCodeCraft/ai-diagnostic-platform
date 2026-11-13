@@ -12,6 +12,7 @@ class ChatSession(Base):
     title = Column(String(200), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     log_id = Column(Integer, ForeignKey("logs.id"), nullable=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)  # 知识检索的项目范围
     model = Column(String(50), nullable=True)
     context = Column(JSON, nullable=True)  # { last_analysis: {...}, analysis_mode: 'chat'|'diagnose' }
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

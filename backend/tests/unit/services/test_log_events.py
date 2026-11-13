@@ -65,3 +65,13 @@ class TestLogEventPersistence:
             assert "log not found" in str(exc)
         else:
             raise AssertionError("expected ValueError")
+
+    def test_parse_log_reads_persisted_events(self, db_session, tmp_path):
+        log = _make_log(db_session, tmp_path)
+        service = ParsingService(db_session)
+        parsed = service.parse_log_with_status(log.id)
+
+        events = service.parse_log(log.id)
+        assert len(events) == parsed["event_count"] > 0
+        assert all("line_no" in event for event in events)
+        assert all(event["log_id"] == log.id for event in events)

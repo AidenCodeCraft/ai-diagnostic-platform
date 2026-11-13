@@ -132,9 +132,13 @@ class DiagnosticChatAgent:
         "（如果用户描述不够具体，请在回答末尾用一两句引导用户补充设备型号、故障现象等关键信息。）"
     )
 
-    def __init__(self, db: Session, provider_name: str = "mock"):
+    def __init__(
+        self, db: Session, provider_name: str = "mock",
+        project_id: Optional[int] = None,
+    ):
         self.db = db
         self.provider_name = provider_name
+        self.project_id = project_id
         self.knowledge = KnowledgeService(db)
         self.references: List[Dict[str, Any]] = []
         self.clarification_questions: List[Dict[str, Any]] = []
@@ -417,7 +421,9 @@ class DiagnosticChatAgent:
             preprocessor = get_preprocessor()
 
             def search_fn(term: str, page_size: int) -> dict:
-                return self.knowledge.search(term, page=1, page_size=page_size)
+                return self.knowledge.search(
+                    term, page=1, page_size=page_size, project_id=self.project_id,
+                )
 
             search_result = preprocessor.process(
                 query=text,

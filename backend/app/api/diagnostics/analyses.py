@@ -118,6 +118,20 @@ def list_analyses(
     )
 
 
+@router.post("/{analysis_id}/retry", response_model=Dict[str, Any])
+def retry_analysis(
+    analysis_id: int,
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """重试失败/已完成的分析任务（后台重新执行）。"""
+    try:
+        return AnalysisTaskService(db).retry_analysis(analysis_id)
+    except ValueError as exc:
+        if "not found" in str(exc):
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/{analysis_id}", response_model=AnalysisResponse)
 def get_analysis(
     analysis_id: int,

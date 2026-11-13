@@ -27,7 +27,7 @@
 
 - `npm install` 后执行 `npm run dev`（Vite 开发服务器）。
 - Vite 开发代理将 `/api` 转发至 `http://localhost:8000`，因此本地开发时需让后端运行在 8000 端口。
-- **未配置** `test` / `lint` / `typecheck` 等 npm 脚本。`vue-tsc` 作为开发依赖存在，可用于手动类型检查（`npx vue-tsc --noEmit`），但不要假设 `npm test` 可用。
+- `npm test` 运行 Vitest（`vitest run`，jsdom 环境，用例位于 `src/__tests__/`）；`npm run build` 构建；未配置 lint/typecheck 脚本，可用 `npx vue-tsc --noEmit` 手动类型检查。
 
 ## 架构与约定（以约定方式强制执行，详见 `docs/08-Coding/Coding-Standard.md`）
 

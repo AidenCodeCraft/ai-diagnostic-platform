@@ -40,8 +40,9 @@ def test_upload_log_deduplicates_filenames(client):
     list_resp = client.get("/api/v1/logs")
     logs = list_resp.json()
     assert len(logs) == 3
-    paths = {log["file_path"] for log in logs}
-    assert len(paths) == 3
+    assert len({log["id"] for log in logs}) == 3
+    # 服务端路径不应通过 API 暴露
+    assert all("file_path" not in log for log in logs)
 
 
 # ------------------------------------------------------------------

@@ -114,6 +114,22 @@
         </div>
       </el-tab-pane>
 
+      <!-- 数据管理 -->
+      <el-tab-pane label="数据管理" name="data">
+        <div class="config-section">
+          <div class="cleanup-card">
+            <div class="cleanup-info">
+              <h4>知识库示例数据</h4>
+              <p>导入 case / faq / code_logic / knowledge 四类示例知识，用于快速验证检索与诊断流程。</p>
+            </div>
+            <div class="cleanup-action">
+              <el-button type="primary" :loading="seeding" @click="seedKnowledge(false)">导入示例知识</el-button>
+              <el-button :loading="seeding" @click="seedKnowledge(true)">重置并重建</el-button>
+            </div>
+          </div>
+        </div>
+      </el-tab-pane>
+
       <!-- 关于 -->
       <el-tab-pane label="关于系统" name="about">
         <div class="config-section">
@@ -154,6 +170,7 @@ interface LLMModel {
 
 const activeTab = ref('llm')
 const saving = ref(false)
+const seeding = ref(false)
 
 const llmModels = ref<LLMModel[]>([
   {
@@ -179,6 +196,27 @@ const cleanupLogDate = ref('')
 const clearingData = ref(false)
 
 const userStore = useUserStore()
+
+async function seedKnowledge(reset: boolean) {
+  if (reset) {
+    try {
+      await ElMessageBox.confirm(
+        '将删除同名示例知识并重新创建，确定继续吗？',
+        '确认重置',
+        { type: 'warning', confirmButtonText: '重置并重建', cancelButtonText: '取消' },
+      )
+    } catch { return }
+  }
+  seeding.value = true
+  try {
+    const { data } = await adminApi.seedKnowledge(reset)
+    ElMessage.success(`示例知识已处理：新增 ${data.created}，跳过 ${data.skipped}，删除 ${data.deleted}`)
+  } catch (err: any) {
+    ElMessage.error('导入失败: ' + (err.response?.data?.detail || err.message))
+  } finally {
+    seeding.value = false
+  }
+}
 
 async function clearAllChatData() {
   try {

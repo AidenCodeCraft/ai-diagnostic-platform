@@ -28,8 +28,15 @@ class ChatService:
     # Sessions
     # ------------------------------------------------------------------
 
-    def create_session(self, title: Optional[str] = None, user_id: Optional[int] = None, log_id: Optional[int] = None, model: Optional[str] = None) -> ChatSession:
-        session = ChatSession(title=title, user_id=user_id, log_id=log_id, model=model or "mock")
+    def create_session(
+        self, title: Optional[str] = None, user_id: Optional[int] = None,
+        log_id: Optional[int] = None, model: Optional[str] = None,
+        project_id: Optional[int] = None,
+    ) -> ChatSession:
+        session = ChatSession(
+            title=title, user_id=user_id, log_id=log_id,
+            project_id=project_id, model=model or "mock",
+        )
         self.db.add(session)
         self.db.commit()
         self.db.refresh(session)
@@ -226,8 +233,10 @@ class ChatService:
         if log_analysis:
             self.update_session(session_id, context={"last_analysis": log_analysis})
 
-        # Enrich with diagnostic context
-        agent = DiagnosticChatAgent(self.db, provider_name)
+        # Enrich with diagnostic context（按会话所属项目过滤知识）
+        agent = DiagnosticChatAgent(
+            self.db, provider_name, project_id=getattr(session, "project_id", None),
+        )
         messages, direct_reply = agent.enrich_messages(session_id, content, messages, resolved_analysis)
 
         if direct_reply is not None:
@@ -267,7 +276,9 @@ class ChatService:
 
         # Enrich with diagnostic context (knowledge search + analysis)
         try:
-            agent = DiagnosticChatAgent(self.db, provider_name)
+            agent = DiagnosticChatAgent(
+                self.db, provider_name, project_id=getattr(session, "project_id", None),
+            )
             messages, direct_reply = agent.enrich_messages(session_id, content, messages, resolved_analysis)
             if agent.references:
                 yield f"data: {json.dumps({'sources': agent.references}, ensure_ascii=False)}\n\n"

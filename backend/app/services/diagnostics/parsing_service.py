@@ -26,8 +26,22 @@ class ParsingService:
     # ------------------------------------------------------------------
 
     def parse_log(self, log_id: int, force_source: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Parse a stored log by ID and return structured events."""
+        """Parse a stored log by ID and return structured events.
+
+        优先读取已持久化的事件（避免每次重新解析/重复下载 MinIO 对象）；
+        传 force_source 或尚未解析时回退到实时解析。
+        """
         log = self._get_log(log_id)
+
+        if not force_source:
+            stored = (
+                self.db.query(LogEvent)
+                .filter(LogEvent.log_id == log_id)
+                .order_by(LogEvent.line_no.asc())
+                .all()
+            )
+            if stored:
+                return [self._event_to_dict(row) for row in stored]
 
         local_path = LogStorage().materialize(str(log.file_path))
         events = self._parser.parse_file(str(local_path), force_source=force_source)

@@ -32,7 +32,6 @@ class LogResponse(BaseModel):
 
     id: int
     filename: str
-    file_path: str
     size: Optional[int] = None
     status: str
     project_id: Optional[int] = None

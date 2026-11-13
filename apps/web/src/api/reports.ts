@@ -25,6 +25,9 @@ export const reportApi = {
   exportMarkdown(id: number) {
     return client.get(`/reports/${id}/markdown`, { responseType: 'text' })
   },
+  exportPdf(id: number) {
+    return client.get(`/reports/${id}/pdf`, { responseType: 'blob' })
+  },
   delete(id: number) {
     return client.delete(`/reports/${id}`)
   },

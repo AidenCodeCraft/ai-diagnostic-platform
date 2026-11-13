@@ -9,9 +9,10 @@
         <el-table-column prop="confidence" label="置信度" width="120"><template #default="{ row }">{{ row.confidence ? (row.confidence * 100).toFixed(0) + '%' : '-' }}</template></el-table-column>
         <el-table-column prop="summary" label="摘要" show-overflow-tooltip />
         <el-table-column prop="created_at" label="时间" width="180"><template #default="{ row }">{{ formatTime(row.created_at) }}</template></el-table-column>
-        <el-table-column label="操作" width="180">
+        <el-table-column label="操作" width="280">
           <template #default="{ row }">
             <el-button size="small" type="success" @click.stop="exportMd(row.id)">导出MD</el-button>
+            <el-button size="small" type="warning" @click.stop="exportPdf(row.id)">导出PDF</el-button>
             <el-button size="small" type="danger" @click.stop="remove(row.id)">删除</el-button>
           </template>
         </el-table-column>
@@ -73,6 +74,20 @@ async function exportMd(id: number) {
     URL.revokeObjectURL(url)
     ElMessage.success('下载成功！')
   } catch { ElMessage.error('导出失败') }
+}
+
+async function exportPdf(id: number) {
+  try {
+    const res = await reportApi.exportPdf(id)
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `report-${id}.pdf`; a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('PDF 下载成功！')
+  } catch (e: any) {
+    if (e?.response?.status === 501) ElMessage.warning('服务端未安装 reportlab，暂无法导出 PDF')
+    else ElMessage.error('导出 PDF 失败')
+  }
 }
 
 async function remove(id: number) {

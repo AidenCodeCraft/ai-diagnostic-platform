@@ -154,6 +154,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted, reactive } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
+import { anchorCandidate } from '@/utils/markdownLine'
 import { useFormat } from '@/composables/useFormat'
 import { chatApi, type ChatImage } from '@/api/chat'
 import { knowledgeApi } from '@/api/knowledge'
@@ -325,13 +326,8 @@ function tryScrollToLine(body: HTMLElement): boolean {
   const lines = (docPanel.content || '').split('\n')
   const rawLine = (lines[lineNo - 1] || '').trim()
   if (!rawLine) return false
-  const cleaned = rawLine
-    .replace(/^#{1,6}\s+/, '')
-    .replace(/^[-*+>]\s+/, '')
-    .replace(/^\d+\.\s+/, '')
-    .trim()
-  const needle = cleaned.slice(0, 60)
-  if (needle.length < 2) return false
+  const needle = anchorCandidate(rawLine)
+  if (!needle) return false
 
   const candidates = body.querySelectorAll('p, li, td, th, h1, h2, h3, h4, h5, h6')
   for (const el of candidates) {
