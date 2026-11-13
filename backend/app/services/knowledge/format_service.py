@@ -13,7 +13,7 @@ _IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
 
 
 class KnowledgeFormatService:
-    """供前端「一键格式化」「分屏预览」与后端入库校验统一复用。"""
+    """供前端「AI润色」「分屏预览」与后端入库校验统一复用。"""
 
     def preview(
         self,

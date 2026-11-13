@@ -13,6 +13,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from app.core.config import settings
 from app.services.knowledge.format_service import KnowledgeFormatService
 from app.services.knowledge.normalizer import Normalizer
 from app.services.knowledge.templates import get_template
@@ -92,23 +93,66 @@ class KnowledgePolishService:
     # ------------------------------------------------------------------
 
     def _default_provider(self):
-        """返回可用的真实 Provider；mock / 未配置 Key 时返回 None。"""
-        try:
-            from app.services.knowledge.provider_registry import ProviderRegistry
-            from app.services.providers.mock_provider import MockProvider
+        """解析后台配置的默认模型并返回可用 Provider；全部不可用时返回 None。
 
-            provider = ProviderRegistry().get_provider(None)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("[Polish] provider resolution failed: %s", exc)
-            return None
-        if isinstance(provider, MockProvider):
-            return None
+        注意：settings.LLM_PROVIDER 默认是 mock（聊天通过 session.model 显式指定
+        模型），因此润色不能直接 get_provider(None)，必须先读取后台「LLM 配置」的
+        models 列表，按 isDefault → 有 api_key → 其余顺序尝试。
+        """
         try:
-            if not provider.health_check():
-                return None
-        except Exception:  # noqa: BLE001
+            from app.services.knowledge.provider_registry import (
+                ProviderRegistry,
+                _load_admin_config,
+            )
+            from app.services.providers.mock_provider import MockProvider
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[Polish] provider imports failed: %s", exc)
             return None
-        return provider
+
+        candidates: List[str] = []
+        try:
+            llm = _load_admin_config().get("llm", {}) or {}
+            models = [
+                model for model in (llm.get("models") or [])
+                if isinstance(model, dict) and model.get("model")
+            ]
+            models.sort(key=lambda model: (
+                0 if model.get("isDefault")
+                else (1 if model.get("api_key") else 2)
+            ))
+            candidates.extend(str(model["model"]) for model in models)
+
+            # 兼容旧版单模型配置 / 顶层 api_key
+            if llm.get("api_key"):
+                candidates.append(str(llm.get("model") or "deepseek"))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[Polish] admin config read failed: %s", exc)
+
+        candidates.append("deepseek")  # 环境变量 DEEPSEEK_API_KEY 场景
+        candidates.append(str(getattr(settings, "LLM_PROVIDER", "mock")))
+
+        seen: set[str] = set()
+        for name in candidates:
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            try:
+                provider = ProviderRegistry().get_provider(name)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[Polish] get_provider(%s) failed: %s", name, exc)
+                continue
+            if isinstance(provider, MockProvider):
+                continue
+            try:
+                if not provider.health_check():
+                    continue
+            except Exception:  # noqa: BLE001
+                continue
+            logger.info("[Polish] using provider model=%s", name)
+            return provider
+
+        logger.warning("[Polish] no usable LLM provider found (falling back to rules)")
+        return None
 
     # ------------------------------------------------------------------
     # Guards

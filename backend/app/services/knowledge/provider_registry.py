@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.services.providers.base import BaseProvider
 from app.services.providers.deepseek_provider import DeepSeekProvider
 from app.services.providers.mock_provider import MockProvider
+from app.services.providers.openai_compatible_provider import OpenAICompatibleProvider
 
 # 与 admin API 使用完全相同的配置文件路径（backend/data/raw/system_config.json）
 # admin API:  backend/app/api/admin/__init__.py → ../../.. → backend/data/raw/
@@ -52,6 +53,7 @@ class ProviderRegistry:
     PROVIDER_MAP: Dict[str, Type[BaseProvider]] = {
         "mock": MockProvider,
         "deepseek": DeepSeekProvider,
+        "openai_compatible": OpenAICompatibleProvider,
     }
 
     def __init__(self, enable_health_tracking: bool = True) -> None:

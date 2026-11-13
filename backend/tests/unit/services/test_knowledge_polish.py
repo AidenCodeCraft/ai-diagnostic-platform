@@ -72,6 +72,48 @@ class TestTemplateAssets:
         assert "PLACEHOLDER_CONTENT" in codes
 
 
+class TestPolishProviderResolution:
+    def test_prefers_admin_default_model(self, monkeypatch):
+        import app.services.knowledge.provider_registry as registry_module
+
+        monkeypatch.setattr(registry_module, "_load_admin_config", lambda: {
+            "llm": {
+                "models": [
+                    {"model": "model-backup", "api_key": "sk-backup"},
+                    {"model": "deepseek-v4-flash", "api_key": "sk-main", "isDefault": True},
+                ],
+            },
+        })
+
+        calls = []
+
+        class _HealthyProvider:
+            def health_check(self):
+                return True
+
+        def _fake_get(self, name=None):
+            calls.append(name)
+            return _HealthyProvider()
+
+        monkeypatch.setattr(registry_module.ProviderRegistry, "get_provider", _fake_get)
+        provider = KnowledgePolishService()._default_provider()
+
+        assert provider is not None
+        assert calls[0] == "deepseek-v4-flash"
+
+    def test_returns_none_when_only_mock_available(self, monkeypatch):
+        import app.services.knowledge.provider_registry as registry_module
+        from app.services.providers.mock_provider import MockProvider
+
+        monkeypatch.setattr(registry_module, "_load_admin_config", lambda: {})
+        monkeypatch.setattr(
+            registry_module.ProviderRegistry,
+            "get_provider",
+            lambda self, name=None: MockProvider(),
+        )
+        assert KnowledgePolishService()._default_provider() is None
+
+
 class TestKnowledgePolish:
     def test_rule_fallback_when_llm_unavailable(self, monkeypatch):
         monkeypatch.setattr(KnowledgePolishService, "_default_provider", lambda self: None)

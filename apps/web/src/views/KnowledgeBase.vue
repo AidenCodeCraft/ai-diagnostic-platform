@@ -186,8 +186,9 @@
             <el-button :type="editMode === 'split' ? 'primary' : ''" @click="editMode = 'split'; refreshPreview()">分屏</el-button>
             <el-button :type="editMode === 'preview' ? 'primary' : ''" @click="editMode = 'preview'; refreshPreview()">预览</el-button>
           </el-button-group>
-          <el-button @click="aiPolish" :loading="polishing">AI润色</el-button>
-          <el-button v-if="polishSnapshot !== null" @click="undoPolish">撤销AI润色</el-button>
+          <el-button @click="aiPolish" :loading="polishing" :disabled="polishing">AI润色</el-button>
+          <el-button v-if="polishSnapshot !== null" type="warning" plain @click="undoPolish">撤销AI润色</el-button>
+          <el-tag v-if="polishSnapshot !== null" size="small" type="success" effect="plain">已润色</el-tag>
           <el-button @click="showGuide = true">格式说明</el-button>
           <el-tooltip placement="bottom" effect="light">
             <template #content>
@@ -208,7 +209,7 @@
       </div>
       <div class="editor-body" :class="'mode-' + editMode">
         <div v-show="editMode !== 'preview'" class="editor-pane">
-          <v-md-editor ref="editorRef" v-model="form.content" height="100%" left-toolbar="undo redo | bold italic strikethrough | h2 h3 h4 | ul ol | link image | code quote | table hr | fullscreen" :disabled-menus="[]" @upload-image="handleUploadImage" />
+          <v-md-editor :key="editorKey" ref="editorRef" v-model="form.content" height="100%" left-toolbar="undo redo | bold italic strikethrough | h2 h3 h4 | ul ol | link image | code quote | table hr | fullscreen" :disabled-menus="[]" @upload-image="handleUploadImage" />
         </div>
         <div v-show="editMode !== 'edit'" class="preview-pane">
           <div class="preview-pane-header">
@@ -502,6 +503,7 @@ const previewResult = ref<any>(null)
 const previewLoading = ref(false)
 const polishing = ref(false)
 const polishSnapshot = ref<string | null>(null)
+const editorKey = ref(0)  // 整体替换编辑内容时重建编辑器，避免内容追加/不同步
 const templates = ref<KnowledgeTemplateInfo[]>([])
 const showGuide = ref(false)
 let previewTimer: ReturnType<typeof setTimeout> | null = null
@@ -545,6 +547,13 @@ function skeletonFor(docType: string): string {
   return docType === 'note' ? '## 正文\n\n（在此填写内容）\n' : ''
 }
 
+/** 整体替换编辑器内容（重建 v-md-editor，避免追加或不同步） */
+function replaceEditorContent(text: string) {
+  form.value.content = text
+  editorKey.value += 1
+  nextTick(() => refreshPreview())
+}
+
 async function insertSkeleton() {
   const skeleton = skeletonFor(form.value.doc_type)
   if (!skeleton) {
@@ -553,14 +562,17 @@ async function insertSkeleton() {
   }
   if (form.value.content.trim()) {
     try {
-      await ElMessageBox.confirm('插入模板会覆盖当前编辑内容，确定继续？', '确认', { type: 'warning' })
+      await ElMessageBox.confirm(
+        '使用模板会替换当前编辑内容（不是追加），确定继续？',
+        '确认',
+        { type: 'warning', confirmButtonText: '替换', cancelButtonText: '取消' },
+      )
     } catch { return }
   }
-  form.value.content = skeleton
   polishSnapshot.value = null
   showGuide.value = false
-  nextTick(() => refreshPreview())
-  ElMessage.success('已插入模板骨架')
+  replaceEditorContent(skeleton)
+  ElMessage.success('已用模板骨架替换当前内容')
 }
 
 function defaultEditMode(_docType: string): 'edit' | 'split' {
@@ -615,14 +627,13 @@ async function aiPolish() {
       return
     }
     polishSnapshot.value = before
-    form.value.content = polished
     previewResult.value = data
+    replaceEditorContent(polished)
     if (data.source === 'llm') {
       ElMessage.success('AI 润色完成，已按模板规范化')
     } else {
       ElMessage.warning('AI 服务暂不可用（请检查 系统配置 → LLM 配置 的 API Key），已按模板规则完成结构化整理')
     }
-    nextTick(() => refreshPreview())
   } catch (e: any) {
     ElMessage.error('AI 润色失败: ' + (e?.response?.data?.detail || e?.message))
   } finally {
@@ -632,10 +643,10 @@ async function aiPolish() {
 
 function undoPolish() {
   if (polishSnapshot.value === null) return
-  form.value.content = polishSnapshot.value
+  const original = polishSnapshot.value
   polishSnapshot.value = null
+  replaceEditorContent(original)
   ElMessage.info('已撤销 AI 润色')
-  nextTick(() => refreshPreview())
 }
 
 function onDocTypeChange() {

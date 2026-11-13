@@ -80,12 +80,15 @@ class Validator:
                 status_hint="active",
             )
 
-        # 纯文本 / 无章节内容：不强制模板（前端可先「一键格式化」），仅提示
+        # 纯文本 / 无章节内容：不强制模板，提示使用 AI 润色或按格式说明填写
         structured = any(s.level == 2 for s in sections)
         if not structured:
             has_content = any((s.content or "").strip() for s in sections)
             return ValidationResult(
-                issues=[Issue("UNSTRUCTURED_CONTENT", WARN, "内容未按模板分节，建议先使用「一键格式化」")],
+                issues=[Issue(
+                    "UNSTRUCTURED_CONTENT", WARN,
+                    "内容未按模板分节，建议使用「AI润色」，或参考「格式说明」中的示例填写",
+                )],
                 quality_score=40.0 if has_content else 0.0,
                 status_hint="active",
             )
