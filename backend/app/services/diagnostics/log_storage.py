@@ -39,7 +39,7 @@ class LogStorage:
             logger.warning("[LogStorage] minio package not installed; using local storage")
             return None
         try:
-            return Minio(
+            client = Minio(
                 str(settings.MINIO_ENDPOINT),
                 access_key=str(settings.MINIO_ACCESS_KEY),
                 secret_key=str(settings.MINIO_SECRET_KEY),
@@ -48,6 +48,44 @@ class LogStorage:
         except Exception as exc:  # noqa: BLE001 - 回退本地存储
             logger.warning("[LogStorage] MinIO init failed: %s; using local storage", exc)
             return None
+
+        # 首次部署时 bucket 可能尚不存在：这里确保其存在，避免首个上传静默回退本地。
+        # 建桶失败（权限/网络）记录 warning 并回退本地存储（保持既有回退语义）。
+        try:
+            self._ensure_bucket(client)
+        except Exception as exc:  # noqa: BLE001 - 回退本地存储
+            logger.warning(
+                "[LogStorage] cannot ensure bucket %r (%s); using local storage",
+                self.bucket, exc,
+            )
+            return None
+        return client
+
+    def _ensure_bucket(self, client: object) -> None:
+        """确保目标 bucket 存在（幂等；多 worker 并发首次启动安全）。
+
+        - 不存在 → ``make_bucket`` 并记录 info 日志；
+        - 并发场景下 ``make_bucket`` 可能抛“已存在”类错误（S3 code
+          ``BucketAlreadyOwnedByYou`` / ``BucketAlreadyExists``），此时重新
+          ``bucket_exists`` 确认后视为成功（幂等兜底）；
+        - 其他错误（权限/网络等）继续抛出，由 `_create_client` 记录 warning 并回退本地。
+        """
+        bucket = self.bucket
+        if client.bucket_exists(bucket):  # type: ignore[attr-defined]
+            return
+
+        try:
+            client.make_bucket(bucket)  # type: ignore[attr-defined]
+            logger.info("[LogStorage] created MinIO bucket %r", bucket)
+        except Exception as exc:  # noqa: BLE001 - 需区分“并发已存在”与真实失败
+            code = getattr(exc, "code", None)
+            if code in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
+                if client.bucket_exists(bucket):  # type: ignore[attr-defined]
+                    logger.info(
+                        "[LogStorage] bucket %r already created concurrently; reusing", bucket
+                    )
+                    return
+            raise
 
     @property
     def remote_available(self) -> bool:

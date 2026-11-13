@@ -518,14 +518,20 @@ docker exec ai-diagnostic-backend python -c "import pymilvus, setuptools; print(
 
 ## 13. 遗留问题 / 备注
 
-1. `worker` 容器 `unhealthy`：镜像 HEALTHCHECK 与 worker 进程不匹配（历史问题，非本次范围），
-   不影响 Milvus 链路；已在 §12 提建议。
-2. `/api/v1/vector/health` 的 `embedding_provider` 显示包装类 `EmbeddingService` 而非
-   `HashingEmbedder`（路由实现取 `type(embedder).__name__`），实际内部实现确为 HashingEmbedder
-   （dim=512、norm=1.0、日志 hash fallback）。非阻塞，可选优化为 `embedder.provider_name`。
+> 2026-11-12 晚更新：以下 1、2、5 已在「§7 遗留问题治理」中修复（详见
+> [Environment-Real-Verification.md §7](../Environment-Real-Verification.md)）。
+
+1. ~~`worker` 容器 `unhealthy`~~ → **已修复**：compose 为 worker 显式 `healthcheck.disable=true`
+   （镜像 HEALTHCHECK 仅适用于 backend 的 HTTP /health，worker 为 keep-alive 占位进程）。
+2. ~~`/api/v1/vector/health` 的 `embedding_provider` 显示包装类 `EmbeddingService`~~ → **已修复**：
+   路由改用 `get_embedder().provider_name`，返回真实 provider（容器内默认 `HashingEmbedder`，
+   启用 BGE 镜像/配置时为 `BGEEmbedder`）。另同步修复 `_ensure_embedding` 硬编码 10s 超时 +
+   永久降级 latch（改读 `settings.EMBEDDING_LOAD_TIMEOUT`、超时后下次调用可继续加载/回填、失败可重试，
+   新增 10 个单测）。
 3. v2.5.4 Milvus 镜像拉取：Docker Hub 直连被墙、镜像站（docker.1ms.run 429 / docker.xuanyuan.me
    403）失败，本次使用本地既有 v2.4.0；待网络条件允许可平滑升级并与 pymilvus 2.5.4 完全对齐。
 4. `knowledge_docs` 当前无活动数据（测试向量已清理），统计值 `num_entities=3` 为 delete 未 compaction
    的历史统计，属 Milvus 正常语义；后续索引真实文档后会自动增长。
-5. 本次未修改 `backend/requirements.txt`（由 Lead 修改 setuptools pin）与
-   `backend/app/api/knowledge/vector.py`；未执行 `git commit`。
+5. ~~本次未修改 `backend/requirements.txt` 与 `vector.py`~~ → 已在治理轮补齐：
+   `requirements.txt` 固定 `setuptools==80.9.0` + `reportlab==5.1.0`；`vector.py` provider 名修复；
+   `vector_service.py` 超时/重试修复。均未执行 `git commit`（由人工审阅提交）。

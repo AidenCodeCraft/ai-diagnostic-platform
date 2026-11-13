@@ -5,9 +5,9 @@
 #
 # 说明：
 #   - 生产环境使用云端 Embedding（EMBEDDING_PROVIDER=deepseek），
-#     因此不安装重型 ML 依赖（torch / sentence-transformers）。
-#   - 如需本地 BGE 模型，请取消 builder 阶段末尾的
-#     requirements-ml.txt 安装注释，并保持编译工具链（已包含）。
+#     因此默认不安装重型 ML 依赖（torch / sentence-transformers），镜像保持精简。
+#   - 如需容器内本地 BGE：使用 build-arg `INSTALL_ML=true` 构建（compose 覆盖文件
+#     `deploy/docker-compose.bge.yml` 已封装：ML 依赖 + HF 缓存挂载 + 离线变量）。
 
 FROM python:3.12-slim AS builder
 
@@ -29,15 +29,20 @@ RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 # 先复制依赖文件，利用 Docker 缓存层
 # 注意：构建上下文是仓库根目录（docker-compose context: ..）
 COPY backend/requirements.txt ./requirements.txt
+COPY backend/requirements-ml.txt ./requirements-ml.txt
 
 # 安装基础依赖（生产环境不需要本地 ML 依赖）
 # --default-timeout 提升大包下载的容错性
 # --no-build-isolation 可避免部分包因构建隔离缺少工具链而失败（视需要开启）
 RUN pip install --no-cache-dir --default-timeout=300 -r requirements.txt
 
-# （可选）本地 ML 依赖 — 仅当需要本地 BGE 嵌入/重排序时取消注释
-# RUN pip install --no-cache-dir --default-timeout=600 -r requirements-ml.txt
-# COPY backend/requirements-ml.txt ./requirements-ml.txt
+# （可选）本地 ML 依赖 — 仅当需要容器内本地 BGE 嵌入/重排序时安装
+# 通过 build-arg 控制，默认 false 保持精简镜像（约 +2GB+）：
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.bge.yml build backend worker
+ARG INSTALL_ML=false
+RUN if [ "$INSTALL_ML" = "true" ]; then \
+        pip install --no-cache-dir --default-timeout=600 -r requirements-ml.txt; \
+    fi
 
 # ── 运行阶段 ──────────────────────────────────────────────
 FROM python:3.12-slim

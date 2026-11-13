@@ -268,11 +268,13 @@ def vector_health():
         vector_svc = get_vector_service()
         collection_info = vector_svc.collection_info
 
+        # 返回真实激活的嵌入 provider（HashingEmbedder / BGEEmbedder / APIEmbedder），
+        # 而不是 EmbeddingService 包装类名（旧实现取 __class__.__name__ 会误导排障）。
         return {
             "milvus_available": vector_svc.available,
             "milvus_enabled": vector_svc._connected,
             "collection": collection_info,
-            "embedding_provider": get_embedder().__class__.__name__,
+            "embedding_provider": get_embedder().provider_name,
         }
     except Exception as exc:
         return {

@@ -15,7 +15,9 @@ pymilvus==2.5.4
 setuptools==80.9.0               # pymilvus 2.5.4 仍依赖 pkg_resources；setuptools>=81 已移除该模块
 prometheus-client==0.21.0
 minio>=7.2.0                    # 知识库图片/日志对象存储（MinIO）
-reportlab>=4.0.0                # 服务端 PDF 报告导出（含中文 CID 字体）
+reportlab==5.1.0                # 服务端 PDF 报告导出（含中文 CID 字体；固定版本保证构建可复现）
+# 注意：pymilvus==2.5.4 仍依赖 pkg_resources，必须与 setuptools==80.9.0 搭配；
+# 升级 pymilvus 前先确认其已移除 pkg_resources 依赖，否则会静默回退关键词检索。
 
 # RAG 引擎核心依赖（轻量，生产必需）
 rank-bm25>=0.2.2                # BM25 稀疏检索

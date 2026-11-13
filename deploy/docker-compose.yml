@@ -17,6 +17,14 @@
 #   - prometheus 监控采集
 #   - grafana    监控可视化
 # ============================================================================
+# 镜像版本策略（真实环境验证遗留项治理）：
+#   - 服务镜像一律固定 tag，禁止使用 :latest（minio 已固定为 RELEASE 版本）。
+#   - 生产/CI 建议进一步固定 digest：
+#       docker inspect --format '{{index .RepoDigests 0}}' <image>
+#     image: <repo>@sha256:...
+#     本机已验证示例：minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+#   - Docker Hub 不可达时：使用内网 registry 镜像，或 docker save / docker load 离线导入。
+# ============================================================================
 
 services:
   # ═══════════════════════════════════════════════════════════
@@ -99,9 +107,10 @@ services:
   # ═══════════════════════════════════════════════════════════
   # MinIO — 对象存储（日志文件 / 附件）
   # Web Console: http://localhost:9001
+  # 注意：固定 RELEASE tag（原先用 :latest 不可复现）；升级时同步更新此 tag。
   # ═══════════════════════════════════════════════════════════
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: ai-diagnostic-minio
     restart: always
     command: server /data --console-address ":9001"
@@ -163,6 +172,10 @@ services:
     build:
       context: ..
       dockerfile: backend/Dockerfile
+      args:
+        # 是否安装本地 ML 依赖（torch + sentence-transformers，镜像 +2GB+）
+        # 默认 false；本地 BGE 部署见 deploy/docker-compose.bge.yml
+        INSTALL_ML: "${INSTALL_ML:-false}"
     container_name: ai-diagnostic-backend
     restart: always
     ports:
@@ -196,6 +209,12 @@ services:
       EMBEDDING_API_KEY: "${EMBEDDING_API_KEY:-}"
       EMBEDDING_API_MODEL: "${EMBEDDING_API_MODEL:-text-embedding-3-small}"
       EMBEDDING_HASH_FALLBACK: "true"
+      # BGE 冷加载超时（秒）；容器内本地 BGE 建议 120（见 docker-compose.bge.yml）
+      EMBEDDING_LOAD_TIMEOUT: "${EMBEDDING_LOAD_TIMEOUT:-30}"
+      # ── HuggingFace / BGE（受限网络/离线部署用；Docker 内本地 BGE 见 docker-compose.bge.yml）──
+      HF_ENDPOINT: "${HF_ENDPOINT:-}"
+      HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"
+      TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-0}"
       # ── MinIO ──────────────────────────────────────
       MINIO_ENABLED: "true"
       MINIO_ENDPOINT: minio:9000
@@ -242,10 +261,16 @@ services:
     build:
       context: ..
       dockerfile: backend/Dockerfile
+      args:
+        INSTALL_ML: "${INSTALL_ML:-false}"
     container_name: ai-diagnostic-worker
     restart: always
     # 运行简单的 keep-alive 进程（Celery 集成将在后续版本添加）
     command: python -c "import time; print('Worker ready (Celery pending)'); [time.sleep(3600) for _ in iter(int, 1)]"
+    # 镜像 Dockerfile 的 HEALTHCHECK 是 HTTP /health，仅适用于 backend；
+    # worker 为 keep-alive 占位进程，禁用容器级 healthcheck 避免长期 unhealthy 误报。
+    healthcheck:
+      disable: true
     environment:
       DATABASE_URL: postgresql://ai:ai@postgres:5432/diagnostic
       REDIS_URL: redis://redis:6379/0

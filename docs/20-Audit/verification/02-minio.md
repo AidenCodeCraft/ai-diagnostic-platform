@@ -3,7 +3,7 @@
 - **日期**：2026-11-12
 - **执行**：Agent Team 成员 `minio-storage`
 - **关联任务**：`task-2` — MinIO 真实对象存储链路验证（SDK 直连 + 后端 API 端到端）
-- **状态**：SDK / 存储类真连 ✅；本地干跑 API ✅；部署 API 端到端 ✅ **PASS=49 FAIL=0**（已解析日志 DELETE 500 P1 已定位、修复（task-6）、重启后复验 204，`log_events`/`logs` 行清空、MinIO 对象删除，历史残留已清理）；新增默认 skip 集成测试 ✅；删除回归测试 7 passed ✅；回退单测/全量 pytest 无回归 ✅
+- **状态**：SDK / 存储类真连 ✅；本地干跑 API ✅；部署 API 端到端 ✅ **PASS=49 FAIL=0**（已解析日志 DELETE 500 P1 已定位、修复（task-6）、重启后复验 204，`log_events`/`logs` 行清空、MinIO 对象删除，历史残留已清理）；`LogStorage` 自动创建 bucket ✅（task-8，单测 6 passed + 真实 MinIO 临时桶实测）；新增默认 skip 集成测试 ✅；删除回归测试 7 passed ✅；回退单测/全量 pytest 无回归 ✅
 
 ## 1. 背景与结论
 
@@ -26,12 +26,18 @@
 | 8 | 本地回退分支不回归（`tests/unit/services/test_log_storage.py`） | ✅ 2 passed |
 | 9 | 全量 pytest 基线（backend） | ✅ 466 passed / 8 skipped（新增 7 个 skip 均为默认 skip 用例，原 466 passed / 1 skipped 基线无回归） |
 | 10 | 可复现脚本 `backend/scripts/verify/minio_storage_e2e.py` | ✅ 可重复运行，打印 bucket/key/size/etag/HTTP 证据 |
+| 11 | `LogStorage` 首次部署自动创建 bucket（task-8 修复） | ✅ 6 个 fake-client 单测（含并发幂等/失败回退）；真实 MinIO 唯一临时桶 `autocreate-b840569e` 自动创建→上传/下载/删除→桶清理 ✔ |
+
+> **task-8（§7 遗留项 2）**：`LogStorage._create_client()` 现在在构造客户端后自动
+> `bucket_exists → make_bucket`（并发已存在幂等兜底；权限/网络失败 warning + 回退本地），
+> 首次部署不再需要手工建桶；证据见 §4.8，问题清单见 §6。
 
 > **关键发现（详见 §6）**：
-> 1. MinIO 初始**只有 `knowledge-images` bucket，`diagnostic-logs` 不存在**；而 `LogStorage.save()`
+> 1. MinIO 初始**只有 `knowledge-images` bucket，`diagnostic-logs` 不存在**；而旧 `LogStorage`
 >    既不自动创建 bucket，上传失败还会**静默回退本地路径**——“MinIO 看似启用，日志实际仍写本地
->    且不报错”。本次验证脚本会自动创建 bucket 后才通过；生产环境需要显式初始化 bucket
->    （或给 `LogStorage` 加 `make_bucket`）。
+>    且不报错”。**已修复（task-8）**：`LogStorage._create_client()` 构造客户端后自动
+>    `bucket_exists → make_bucket`（并发已存在幂等兜底；权限/网络失败 warning + 回退本地），
+>    单测 6 passed + 真实 MinIO 临时桶实测通过（§4.8）。“上传失败回退本地”语义按设计保留。
 > 2. 部署实测发现**已解析日志 `DELETE /api/v1/logs/{id}` 返回 500**（`log_events` 外键无级联），
 >    且 MinIO 对象在 DB commit 前被删除 → **对象已删、记录仍在、file_path 悬空**（P1）。
 >    已修复（task-6：`delete_log` 先删 `log_events`、DB 成功后再删对象，不改 schema）并在
@@ -123,9 +129,12 @@ endpoints : S3 API http://localhost:9000 ；Console http://localhost:9001
 
 ```text
 验证前 list_buckets(): ['knowledge-images']          # diagnostic-logs 不存在
-首次 ensure_bucket()：bucket diagnostic-logs exists=False (created just now)
+旧行为：首次 ensure_bucket()：bucket diagnostic-logs exists=False (created just now)
 第二次运行后：      buckets=['diagnostic-logs', 'knowledge-images']
 ```
+
+> **task-8 起**：`LogStorage()` 初始化时会自动确保 `MINIO_BUCKET` 存在（不存在则
+> `make_bucket`），因此首次部署不再需要验证脚本/运维手工建桶。真实 MinIO 临时桶实测见 §4.8。
 
 ## 3. 验证方法与门槛
 
@@ -493,12 +502,56 @@ G:\ai-diagnostic-platform\.venv\Scripts\python.exe -m pytest -q
 # 0 failed / 0 error → 无回归。
 ```
 
+### 4.8 `LogStorage` 首次部署自动创建 bucket（task-8 修复验证）
+
+**修复**（`backend/app/services/diagnostics/log_storage.py`）：`_create_client()` 构造 Minio
+客户端后调用新增 `_ensure_bucket()`：
+- `bucket_exists(bucket)` 为 False → `make_bucket(bucket)` 并 info 日志；
+- 并发首次启动：`make_bucket` 抛 `BucketAlreadyOwnedByYou`/`BucketAlreadyExists` →
+  重新 `bucket_exists` 确认后视为成功（幂等兜底）；
+- 权限/网络等失败 → warning + `return None`（保持既有“回退本地存储”语义）；
+- `MINIO_ENABLED=false` 时不 import minio、不连接（行为不变）。
+
+单测 [`backend/tests/unit/services/test_log_storage_bucket.py`](../../../backend/tests/unit/services/test_log_storage_bucket.py)
+（fake Minio 客户端，不依赖真实服务，6 passed）：
+
+```text
+tests/unit/services/test_log_storage_bucket.py::test_disabled_minio_does_not_create_client PASSED
+tests/unit/services/test_log_storage_bucket.py::test_existing_bucket_is_not_created PASSED
+tests/unit/services/test_log_storage_bucket.py::test_missing_bucket_is_created PASSED
+tests/unit/services/test_log_storage_bucket.py::test_concurrent_bucket_creation_is_idempotent PASSED
+tests/unit/services/test_log_storage_bucket.py::test_make_bucket_failure_falls_back_to_local PASSED
+tests/unit/services/test_log_storage_bucket.py::test_bucket_check_failure_falls_back_to_local PASSED
+============= 6 passed in 8.15s =============
+```
+
+真实 MinIO 验证（localhost:9000，`MINIO_BUCKET=autocreate-<uuid8>`，用完删除临时桶）：
+
+```text
+test_bucket             = autocreate-b840569e
+bucket_exists_before    = False
+remote_available        = True
+bucket_exists_after     = True          # <- LogStorage() 自动 make_bucket 成功
+second_instance_remote  = True          # <- 幂等（已存在不重复建桶）
+save_reference          = minio://autocreate-b840569e/logs/5c26128385ee4b8b889be8fcba43d50a_autocreate-test.log
+stat_size_etag          = 37  65b2b528438b4a5b103fec680cff05b7
+materialize_bytes_match = True
+after_delete            = NoSuchKey
+bucket_removed          = True          # <- SDK remove_bucket 清理成功
+# 复查 list_buckets = ['diagnostic-logs', 'knowledge-images']（无 autocreate-* 残留）
+```
+
+回归：`pytest tests/unit/services/test_log_storage_bucket.py tests/unit/services/test_log_storage.py
+tests/unit/services/test_log_delete_events.py -q` → **15 passed**；全量 pytest →
+**489 passed / 18 skipped / 0 failed**（task-2 基线 466 passed，新增用例合计 +23；无回归）。
+
 ## 5. 代码链路走读
 
 ### 5.1 日志：上传 → `minio://` → 解析下载 → 删除
 
 | 阶段 | 代码位置 | 行为 |
 |------|----------|------|
+| 客户端初始化/建桶 | `log_storage.py:35-98`（`_create_client` → `_ensure_bucket`） | **（task-8 起）** 构造 Minio 客户端后自动 `bucket_exists → make_bucket`；并发已存在幂等兜底；失败 warning + 回退本地（`_client=None`） |
 | 上传落本地暂存 | `backend/app/services/diagnostics/log_service.py:44-75` | `UploadFile` 分块写入 `UPLOAD_DIR`，大小超限 413，二进制 NUL 拒绝，`.zip/.gz` 自动解包 |
 | 上传对象存储 | `log_service.py:78` → `log_storage.py:60-72` | `fput_object(bucket, "logs/<uuid>_<filename>")`，成功返回 `minio://<bucket>/<key>`；**失败仅 warning 并返回本地绝对路径** |
 | 落库 | `log_service.py:80-93` | `Log.file_path` 存该引用 |
@@ -530,14 +583,15 @@ G:\ai-diagnostic-platform\.venv\Scripts\python.exe -m pytest -q
 （`app.main` 统一挂载 `prefix="/api/v1"`；`app/api/router.py` 注册 `logs/parsing/knowledge` 路由。
 `backend/app/api/knowledge/images.py` 不存在，图片端点位于 `app/api/knowledge/__init__.py`。）
 
-## 6. 发现的问题与风险（本次未改业务代码，仅报告）
+## 6. 发现的问题与风险（含 task-6/task-8 已修复项标注）
 
 > 建议按 P1→P3 处理；P1 建议在本次审计收尾前至少由 Lead 决策是否修。
 
 | 等级 | 问题 | 证据/影响 | 建议 |
 |------|------|-----------|------|
 | **P1**（✅ 已修复并复验） | 已解析日志的 `DELETE /api/v1/logs/{id}` 返回 **500**；且 MinIO 对象先删、DB commit 失败 → **记录引用悬空** | 部署实测（§4.6.2）：`DELETE /logs/2` → 500，容器 traceback `IntegrityError: log_events_log_id_fkey`；`log_event.py:14` 的 FK 无 `ondelete="CASCADE"`，旧 `log_service.py:144-148` 先 `LogStorage().delete()`（对象已删）再 `db.delete(log)+commit`（commit 失败）→ 实测删除后对象 `NoSuchKey` 而记录仍在（status=parsed），该日志无法再解析/分析；未解析日志 DELETE 正常（id=5→204），证明仅“存在 log_events 行”时触发。**修复（task-6）**：`delete_log` 同一事务先删 `log_events` 再删 `logs`，DB 成功后才删对象（失败仅 warning）；新增 7 个回归测试；重启后复验 DELETE→204、events/logs 清空、PASS=49 FAIL=0（§4.6.3） | 已按 ①②③ 实施（本次不改 schema/迁移）；后续可选：给 `log_events.log_id` 加 `ondelete="CASCADE"` + alembic 迁移 |
-| **P1** | `diagnostic-logs` bucket 不会自动创建；上传失败**静默回退本地**且无告警 | ① 本次实测 MinIO 初始只有 `knowledge-images`，`diagnostic-logs` 不存在；② 实证（endpoint 指向不可用端口 `localhost:19999`）：`LogStorage.remote_available=True`（客户端创建不连接）、`save()` **不抛异常**返回本地路径、`caller_sees_error=False`，仅一条 warning 日志（`log_storage.py:66-72`）。结果是“MINIO_ENABLED=true 但日志实际存本地”，Docker 多副本/重启后文件不可见、备份策略失效 | ① `LogStorage._create_client` 或 `save` 中 `bucket_exists`/`make_bucket`（与 `KnowledgeImageStorage._get_minio` 对齐）；② 上传失败按配置决定 fail-fast 或至少暴露 metrics/health；③ compose 加 minio-init 服务或部署文档写明 `mc mb` |
+| **P1**（✅ 自动建桶已修复 task-8；“静默回退”按设计保留） | `diagnostic-logs` bucket 不会自动创建；上传失败**静默回退本地**且仅 warning | ① 本次实测 MinIO 初始只有 `knowledge-images`，`diagnostic-logs` 不存在；② 旧行为实证（endpoint 指向不可用端口 `localhost:19999`）：`save()` 不抛异常返回本地路径、`caller_sees_error=False`，仅一条 warning。**修复（task-8）**：`_create_client()` 构造客户端后 `bucket_exists → make_bucket`（并发已存在幂等兜底，权限/网络失败 warning + 回退），单测 6 passed + 真实 MinIO 临时桶实测（§4.8）。**保留项**：“上传失败回退本地”语义未改（任务要求保持），若需 fail-fast/告警可后续加配置开关 | ① 已实施自动建桶；② 建议部署账号授予 `s3:CreateBucket`（或仍预创建 bucket）；③ 如需强一致可加 `MINIO_FAIL_FAST`/metrics 暴露回退次数（未实施） |
+| **P3** | 每次 `LogStorage()` 实例化都会执行一次 `bucket_exists` 网络调用 | task-8 自动建桶检查在客户端初始化时执行，而 `LogStorage()` 在 upload/parse/delete 等路径按请求实例化 → 每次多一次 S3 请求（本地实测开销小，但高频上传可感知） | 后续可加进程级缓存（首次检查成功后不再重复 `bucket_exists`），或改为类级懒加载客户端 |
 | **P1** | `materialize()` 下载的临时文件从不清理 | `log_storage.py:89-95` 写 `%TEMP%\diag_logs\`，全仓库无 unlink；实证：本地干跑一次 parse 后 `%TEMP%\diag_logs\c83ca6f802..._minio_e2e_sample.log`（499B）残留，多次运行累积（现有 6 个副本）；每次 parse/analysis/chat 都会重新下载并留下副本（容器内 `/tmp`） | 解析完成 `finally` 清理，或用 `tempfile.NamedTemporaryFile(delete=False)` + 上下文管理；大日志（100MB）会成倍占用临时空间 |
 | **P2** | 日志上传成功后本地暂存文件不删；删除日志时也不删本地暂存文件 | `log_service.py:78` 上传 MinIO 后未 `destination.unlink()`；`delete_log` 只处理 `file_path`（minio://）。实证：本地干跑 `DELETE /api/v1/logs/1` 返回 204 且 MinIO 对象已 NoSuchKey，但 `UPLOAD_DIR\minio_e2e_sample.log`（499B）仍残留；`upload_data` 卷持续增长 | 上传成功即删暂存文件；或明确保留 N 天后清理 |
 | **P2** | MinIO 无生命周期/保留策略 | 日志与图片对象无限增长，`minio_data` 卷无上限；`docker-compose.yml` 无 `mc ilm` 初始化 | 用 `mc ilm rule add` 为 `diagnostic-logs` 设保留期（如 30/90 天），图片按业务；文档补充运维命令 |
@@ -569,12 +623,17 @@ G:\ai-diagnostic-platform\.venv\Scripts\python.exe -m pytest -q
    不要直接用 root 凭据。
 2. **TLS**：生产设 `MINIO_SECURE=true` 并通过挂载证书/反代提供 HTTPS；不要将 9000/9001 暴露公网
    （compose 当前 `-p 9000:9000 -p 9001:9001` 仅适合本地开发）。
-3. **bucket 初始化**：compose 不会创建 bucket。部署脚本/init 容器中执行：
-   ```powershell
-   docker exec ai-diagnostic-minio mc alias set local http://localhost:9000 <user> <pass>
-   docker exec ai-diagnostic-minio mc mb --ignore-existing local/diagnostic-logs local/knowledge-images
-   ```
-   否则首次日志上传会静默落本地（§6-P1）。
+3. **bucket 初始化**：**task-8 起 `LogStorage` 会自动创建 `MINIO_BUCKET`**（`bucket_exists → make_bucket`，
+并发幂等；见 §4.8），`KnowledgeImageStorage` 原本也会自动建桶，因此 **compose minio-init 已变为可选**。
+仍建议二选一：
+   - 预创建（最小权限更友好，生产推荐）：
+     ```powershell
+     docker exec ai-diagnostic-minio mc alias set local http://localhost:9000 <user> <pass>
+     docker exec ai-diagnostic-minio mc mb --ignore-existing local/diagnostic-logs local/knowledge-images
+     ```
+   - 或给后端 service account 授予 `s3:CreateBucket`（否则自动建桶失败会 warning + 回退本地）。
+   便于观测：若启动完成后仍看到 `[LogStorage] cannot ensure bucket ... using local storage` warning，
+   说明权限/网络有问题，应修复而不是依赖回退。
 4. **生命周期/清理**：为日志对象设保留策略，例如
    `mc ilm rule add local/diagnostic-logs --expire-days 90`；同时清理 `/tmp/diag_logs`（§6-P1）。
 5. **endpoint 区分**：容器内用 `minio:9000`；host 工具/CI 用 `localhost:9000`；若需前端直连
@@ -629,12 +688,15 @@ cd G:\ai-diagnostic-platform
    - MinIO 复查无 `verify/` 残留；`diagnostic-logs` 仅剩 PDF 验证任务（另一 teammate）的
      `pdf_e2e_*.log` 对象，不属于本任务；
    - 各轮验证的 MinIO 测试对象均由脚本自动清理。
-3. **`diagnostic-logs` bucket 系验证脚本创建**：若部署环境卷被清理，recreate 后需重新初始化；
-   建议按 §8.3 固化为 init 步骤（本次未改 compose）。
-4. **§6 其余 P1/P2 问题未修**（本次只修 DELETE 500 一项；“静默回退本地+不自动建桶”“materialize
-   临时文件不清理”“本地暂存/生命周期”“图片对象无删除路径”等建议优先排期）。
-5. **全量 pytest 基线**：task-2 阶段 466 passed / 8 skipped；task-6 新增 7 个删除回归测试后全量
-   **473 passed / 11 skipped / 0 failed**（skip 增量均为其他任务默认 skip 用例，无回归）。
+3. **✅ `diagnostic-logs` bucket 自动创建已修复（task-8）**：`LogStorage._create_client()` 现在会
+   自动 `bucket_exists → make_bucket`（并发幂等，失败 warning + 回退），首次部署/recreate 后无需
+   手工建桶；单测 6 passed + 真实 MinIO 临时桶实测（§4.8）。若运维希望最小权限，仍可在部署时
+   预创建 bucket（§8.3，已改为可选/推荐），并给后端账号 `s3:CreateBucket` 或预创建二选一。
+4. **§6 其余 P1/P2 问题未修**（本次已修 DELETE 500（task-6）+ 自动建桶（task-8）；“materialize
+   临时文件不清理”“本地暂存/生命周期”“图片对象无删除路径”“上传失败回退语义”等建议优先排期）。
+5. **全量 pytest 基线**：task-2 阶段 466 passed / 8 skipped；task-6 后 473 passed / 11 skipped；
+   task-8 新增 6 个建桶测试 + 其他 teammate 新增用例后全量 **489 passed / 18 skipped / 0 failed**
+   （无 FAIL/ERROR，无回归）。
 
 ## 附录 A：host 侧完整输出（`--skip-api`）
 
@@ -698,6 +760,8 @@ RESULT: PASS
 | [`backend/tests/integration/services/test_minio_real.py`](../../../backend/tests/integration/services/test_minio_real.py) | task-2 | 真实 MinIO 集成测试，默认 skip（`RUN_REAL_MINIO=1`），连接失败自动 skip |
 | [`backend/app/services/diagnostics/log_service.py`](../../../backend/app/services/diagnostics/log_service.py) | task-6 | **修复** `delete_log()`：先删 `log_events` 再删 `logs` 并 commit，DB 成功后才删对象（失败仅 warning）；不改 schema/迁移 |
 | [`backend/tests/unit/services/test_log_delete_events.py`](../../../backend/tests/unit/services/test_log_delete_events.py) | task-6 | 删除链路回归测试（7 tests：service 层顺序/失败保护 + API 层 DELETE 204/事件清空） |
-| `docs/20-Audit/verification/02-minio.md` | task-2/6 | 本报告（含 P1 发现、修复与部署复验记录） |
+| [`backend/app/services/diagnostics/log_storage.py`](../../../backend/app/services/diagnostics/log_storage.py) | task-8 | **修复** `_create_client()` 自动确保 bucket 存在（`_ensure_bucket`：不存在则 `make_bucket`；并发已存在幂等重查；失败 warning + 回退本地；`MINIO_ENABLED=false` 不 import/不连接） |
+| [`backend/tests/unit/services/test_log_storage_bucket.py`](../../../backend/tests/unit/services/test_log_storage_bucket.py) | task-8 | 自动建桶单测（fake Minio，6 tests：关闭/已存在/自动创建/并发幂等/权限失败/连接失败） |
+| `docs/20-Audit/verification/02-minio.md` | task-2/6/8 | 本报告（含 P1 发现、修复与部署复验记录） |
 
 未修改 `deploy/`、compose 或其他 teammate 文件；未 `git commit`；未重启容器（重启由 Lead 统一执行）。

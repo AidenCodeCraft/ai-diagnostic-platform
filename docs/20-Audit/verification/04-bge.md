@@ -2,8 +2,8 @@
 
 - **日期**：2026-11-12
 - **执行**：Agent Team 成员 `bge-embedding`
-- **关联任务**：`task-4` — BGE 本地模型真实下载与语义嵌入验证（hf-mirror，含 Milvus 联合检索）
-- **状态**：✅ 本地 venv 全链路 **PASS**（真实下载 / 真实加载 / 语义质量 / 离线加载 / Milvus 联合检索）；新增集成测试默认 skip（默认 7 skipped）；门槛测试 **7 passed**；全量 pytest **473 passed / 18 skipped / 0 failed**（基线 466 passed / 1 skipped，无回归）；Docker 部署镜像默认不含 ML 依赖，启用方案见 §5.3
+- **关联任务**：`task-4`（BGE 本地模型真实下载与语义嵌入验证）→ `task-9`（Docker 内本地 BGE 部署：compose 覆盖文件 + 文档）
+- **状态**：✅ 本地 venv 全链路 **PASS**（真实下载 / 真实加载 / 语义质量 / 离线加载 / Milvus 联合检索）；新增集成测试默认 skip（默认 7 skipped）；门槛测试 **7 passed**；全量 pytest **473 passed / 18 skipped / 0 failed**（基线 466 passed / 1 skipped，无回归）；**Docker 内本地 BGE 部署方案已落地**：`deploy/docker-compose.bge.yml` 覆盖文件 `docker compose config` 验证通过（INSTALL_ML=true / EMBEDDING_PROVIDER=local / 只读缓存挂载），见 §5.3
 
 ## 1. 背景与结论
 
@@ -26,17 +26,19 @@
 | 7 | Milvus 联合真实检索 | ✅ Milvus v2.4.0：`index_document(9999)` → `search("USB 超时")` **rank#1 doc_id=9999 score=0.7332** → 清理删除确认 |
 | 8 | 新增集成测试默认 skip | ✅ `RUN_REAL_BGE=1` 门槛；默认全量 pytest 收集 491 tests 无错误、不执行真实模型 |
 | 9 | 可复现脚本 | ✅ `backend/scripts/verify/bge_embedding_e2e.py` 五阶段一键跑通（总 362.4s，exit=0） |
+| 10 | Docker 内本地 BGE 部署方案（task-9） | ✅ 新增 `deploy/docker-compose.bge.yml` 覆盖文件；`docker compose config -q` 通过，INSTALL_ML=true / EMBEDDING_PROVIDER=local / HF_HUB_OFFLINE=1 / 只读缓存挂载全部断言通过（见 §5.3、附录 C） |
 
 > **关键发现（详见 §9）**：
 > 1. **缓存命中 ≠ 不联网**：transformers 对 repo id 会做 `find_adapter_config_file()` 等
 >    元数据探测，huggingface.co 不可达时会**长时间挂起**（实测 pytest 卡住 7+ 分钟）。
 >    离线/内网部署必须设 `HF_HUB_OFFLINE=1` + `TRANSFORMERS_OFFLINE=1`
->    （或可达的 `HF_ENDPOINT`）。
-> 2. `VectorService._EMBEDDING_LOAD_TIMEOUT` **硬编码 10s**，且超时后实例
->    `_embedding_load_started=True` 会**永久降级为关键词检索**——冷启动首次向量请求
->    很可能触发。建议调大/修复（§9.2）。
+>    （或可达的 `HF_ENDPOINT`）。Docker 覆盖文件已内置这两个变量。
+> 2. `VectorService` 原先硬编码 10s 加载超时且超时后永久降级关键词（冷加载 15.35s 会触发）——
+>    **已由 Lead 并行修复**：改为读取 `settings.EMBEDDING_LOAD_TIMEOUT`、共享后台加载线程、
+>    超时可重试/回填（§9.2 #1）。
 > 3. **Docker 后端镜像默认不含 torch / sentence-transformers**，容器内
->    `EMBEDDING_PROVIDER=local` 会静默回退 hash 嵌入；真实 BGE 需按 §5.3 安装并挂载缓存。
+>    `EMBEDDING_PROVIDER=local` 会静默回退 hash 嵌入；真实 BGE 用 §5.3 的
+>    `deploy/docker-compose.bge.yml` 一键启用（INSTALL_ML=true 构建 + 只读挂载缓存）。
 > 4. Windows 上 torch import 极慢（首次 7–8 分钟，多为 Defender 扫描 DLL）；属环境因素，
 >    部署到容器不受此影响，但本地开发/测试要预留时间。
 
@@ -263,53 +265,103 @@ $env:TRANSFORMERS_OFFLINE = '1'
 本仓库新增测试 `test_bge_real.py` 在 `RUN_REAL_BGE=1` 时已自动 `setdefault`
 上述离线变量，避免该挂起（见 §7）。`bge_embedding_e2e.py --offline` 同理。
 
-### 5.3 Docker 部署方案（镜像默认不含 torch/ST）
+### 5.3 Docker 部署方案（用 compose 覆盖文件启用镜像内真实 BGE）
 
 **现状**：`backend/Dockerfile` 默认只安装 `requirements.txt`，明确注释
 「生产环境使用云端 Embedding，因此不安装重型 ML 依赖（torch / sentence-transformers）」。
 即 **backend 容器内 `EMBEDDING_PROVIDER=local/auto` 会静默回退到 hash 嵌入**
 （`_sentence_transformers_available=False`），语义检索质量不达标。
 
-启用容器内真实 BGE 的推荐方案：
+为容器内运行真实 BGE，本次新增 **`deploy/docker-compose.bge.yml`**（compose override，
+叠加在基础 compose 之上，**不修改** `deploy/docker-compose.yml` / `backend/Dockerfile`）。
+其依赖的基础接口（已落地）：
 
-1. **构建镜像时安装 ML 依赖**（`backend/Dockerfile` builder 阶段，约 +1.5–2.5GB）：
+- `backend/Dockerfile`：新增 `ARG INSTALL_ML=false`；`INSTALL_ML=true` 时在 builder 阶段
+  `pip install --no-cache-dir --default-timeout=600 -r requirements-ml.txt`
+  （torch + sentence-transformers），随后与基础依赖一起复制到运行阶段；
+- `deploy/docker-compose.yml`：backend / worker 的 `build.args.INSTALL_ML: "${INSTALL_ML:-false}"`；
+  backend 环境变量透传 `EMBEDDING_LOAD_TIMEOUT: "${EMBEDDING_LOAD_TIMEOUT:-30}"`、
+  `HF_ENDPOINT: "${HF_ENDPOINT:-}"`、`HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"`、
+  `TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-0}"`。
 
-   ```dockerfile
-   # 注意：COPY 必须在 RUN 之前（原文件里两行注释顺序相反，取消注释时要调换）
-   COPY backend/requirements-ml.txt ./requirements-ml.txt
-   RUN pip install --no-cache-dir --default-timeout=600 -r requirements-ml.txt
-   ```
+#### 一键启用步骤（在仓库根目录执行）
 
-2. **挂载宿主机 HF 缓存**（不要打进镜像，模型会变）——`deploy/docker-compose.yml` 的
-   `backend` / `worker` 服务加：
+```powershell
+# 0) 前置：宿主机已有 BGE 模型缓存（见 §3；默认路径 %USERPROFILE%\.cache\huggingface）
+#    必须指向「缓存根目录」（其下含 models--BAAI--bge-small-zh-v1.5）
+$env:HF_CACHE_DIR = "$env:USERPROFILE\.cache\huggingface"
 
-   ```yaml
-   volumes:
-     - ${HF_CACHE_DIR:-C:/Users/EDY/.cache/huggingface}:/root/.cache/huggingface:ro
-   environment:
-     HF_HOME: /root/.cache/huggingface
-     HF_HUB_OFFLINE: "1"
-     TRANSFORMERS_OFFLINE: "1"
-     EMBEDDING_PROVIDER: local
-     EMBEDDING_DIM: "512"
-     EMBEDDING_LOAD_TIMEOUT: "120"
-   ```
+# 1) 校验合并后的配置（不构建、不启动；未设置 HF_CACHE_DIR 会直接报错）
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.bge.yml config -q
 
-   （Windows 宿主机缓存路径即 `%USERPROFILE%\.cache\huggingface`；Linux 服务器为
-   `/home/<user>/.cache/huggingface` 或 `HF_CACHE_DIR` 指定的预热目录。）
+# 2) 重建并启动 backend / worker
+#    ⚠ 首次构建需在镜像内安装 torch + sentence-transformers：镜像 +2GB 以上，
+#      构建耗时数分钟～十几分钟（取决于网络/镜像源）；构建产物可复用
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.bge.yml up -d --build backend worker
 
-3. **`EMBEDDING_LOAD_TIMEOUT` 调大**：默认 30s，CPU 冷加载约 15s + 容器冷启动抖动，
-   建议 **120s**，否则 `EmbeddingService._try_bge()` 超时会静默回退 hash。
+# 3) 预热（强烈建议，接流量前执行一次，避免首个请求等待模型加载）
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.bge.yml exec backend `
+  python -c "from app.services.knowledge.embedding import get_embedder; e=get_embedder(); print(e.provider_name, e.dimension)"
+# 期望输出: BGEEmbedder 512
+```
 
-4. **启动预热**（强烈建议）：容器启动后、接流量前先加载一次模型，避免首个请求超时降级：
+Linux / macOS：`export HF_CACHE_DIR="$HOME/.cache/huggingface"`，其余命令相同。
 
-   ```bash
-   python -c "from app.services.knowledge.embedding import get_embedder; e=get_embedder(); print(e.provider_name, e.dimension)"
-   # 期望输出: BGEEmbedder 512
-   ```
+#### 覆盖文件带来的配置差异（实测 `docker compose config` 断言）
 
-5. 若不需要本地 BGE：使用云端 Embedding（`EMBEDDING_PROVIDER=api` + `EMBEDDING_API_URL/KEY`），
-   无需 torch，保持镜像精简——这是 Dockerfile 默认设计的意图。
+| 配置项 | 默认 compose（不叠加） | 叠加 `docker-compose.bge.yml` 后 |
+|---|---|---|
+| backend / worker `build.args.INSTALL_ML` | `false` | **`true`**（镜像内含 torch + sentence-transformers） |
+| `EMBEDDING_PROVIDER` | `${EMBEDDING_PROVIDER:-auto}` | **`local`**（强制真实本地 BGE，杜绝 api/auto 分支） |
+| `EMBEDDING_LOAD_TIMEOUT` | `"${EMBEDDING_LOAD_TIMEOUT:-30}"` | **`"${EMBEDDING_LOAD_TIMEOUT:-120}"`** |
+| `HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE` | `"0"` / `"0"` | **`"1"` / `"1"`**（完全离线，不访问 huggingface.co） |
+| `HF_HOME` | 默认 | `/root/.cache/huggingface` |
+| HF 缓存挂载 | 无 | **`${HF_CACHE_DIR}:/root/.cache/huggingface:ro`**（只读 bind 长语法，兼容 Windows 盘符路径） |
+| `HF_ENDPOINT` | 透传 | `${HF_ENDPOINT:-https://hf-mirror.com}`（仅后备，离线模式下不会使用） |
+
+说明：
+- **`EMBEDDING_LOAD_TIMEOUT=120`**：默认 30s 对 CPU 冷加载（实测 15.35s + 容器冷启动抖动）
+  偏紧，超时会静默回退 hash；`VectorService` 已改为读取该配置（§9.2 #1），因此这里调大即生效。
+- **只读挂载**：模型不进镜像（体积/更新问题），运行时只读宿主缓存；容器内不写缓存，
+  配合 `HF_HUB_OFFLINE=1` 不会触发任何下载。
+- 可选：在 override 中取消注释 `EMBEDDING_HASH_FALLBACK: "false"`，让本地 BGE 加载失败时
+  硬失败而不是静默回退 hash（便于验收，但会放大瞬时故障）。
+
+#### 验证与验收判定
+
+不构建镜像即可先校验合并配置（本次实测结果见附录 C）：
+
+```powershell
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.bge.yml config --format json
+# 断言：build.args.INSTALL_ML == "true"
+#       environment.EMBEDDING_PROVIDER == "local"
+#       environment.EMBEDDING_LOAD_TIMEOUT == "120"
+#       environment.HF_HUB_OFFLINE == "1" / TRANSFORMERS_OFFLINE == "1"
+#       volumes 含 bind: <HF_CACHE_DIR> -> /root/.cache/huggingface, read_only: true
+
+# 对照默认配置（不叠加 override）
+docker compose -f deploy/docker-compose.yml config --format json
+# 断言：build.args.INSTALL_ML == "false"；volumes 无 /root/.cache/huggingface 挂载
+```
+
+容器启动后的运行期验收：
+
+| # | 检查 | 期望 |
+|---|------|------|
+| 1 | `curl -s http://localhost:8000/api/v1/vector/health` | `embedding_provider` 为 `BGEEmbedder`（不是 `HashingEmbedder`） |
+| 2 | `curl -s -X POST http://localhost:8000/api/v1/vector/embed -H "Content-Type: application/json" -d '{"text":"USB 设备超时无响应"}'` | `dimension=512`，embedding 非全零 |
+| 3 | `docker compose ... logs backend \| grep -E "Using local BGE\|BGEEmbedder"` | 出现 `[Embedding] Using local BGE embedder (dim=512)` |
+| 4 | 若日志出现「使用哈希嵌入兜底」 | **未生效**：检查镜像是否装 ST、缓存挂载路径、HF_HUB_OFFLINE 配置 |
+
+> `/api/v1/vector/health` 的 `embedding_provider` 已由 Lead 并行改为返回真实 provider
+> （`get_embedder().provider_name`），因此该字段可直接作为验收判定（§9.2 #2）。
+
+#### 不需要本地 BGE 时（回滚/保持精简镜像）
+
+不要叠加本覆盖文件即可（基础 compose 默认 `INSTALL_ML=false`，镜像不含 torch，
+`EMBEDDING_PROVIDER` 默认 `auto`——容器内会回退 hash；生产建议改配云端
+`EMBEDDING_PROVIDER=api` + `EMBEDDING_API_URL/KEY`，无需 torch、镜像精简，这是
+Dockerfile 默认设计的意图）。
 
 ## 6. Milvus 联合真实检索（可选，已验证）
 
@@ -416,19 +468,24 @@ $env:RUN_REAL_BGE = '1'; $env:RUN_REAL_BGE_OFFLINE = '1'
   完全无需外网。
 - 新增测试默认 skip，不污染全量 pytest；e2e 脚本可重复运行并输出结构化证据。
 
-### 9.2 遗留问题 / 建议（P2，未在本任务写入范围修改）
+### 9.2 遗留问题 / 建议（状态更新）
 
-1. **`VectorService._EMBEDDING_LOAD_TIMEOUT = 10.0` 硬编码偏小，且超时后永久降级**
-   （`services/knowledge/vector_service.py:55`、`_ensure_embedding()`）：冷加载实测
-   15.35s > 10s，一旦超时，该实例 `_embedding_load_started` 置 True 且
-   `_embedding` 永远为 None → **该进程后续所有向量检索永久回退关键词搜索**。
-   建议：
-   - 用 `settings.EMBEDDING_LOAD_TIMEOUT`（默认 30，Docker 建议 120）替代硬编码 10；
-   - 超时后允许后续请求重试（不要一次性 latch），或在后台线程完成时回填 `_embedding`；
-   - 启动预热（见 §5.3）。
-2. **`EMBEDDING_PROVIDER=local` 在 Docker 默认镜像中静默回退 hash**（缺
-   sentence-transformers），且 `logger.warning` 不显眼；建议启动日志/健康检查暴露
-   `provider_name`，并在生产配置校验中禁止「local + hash fallback」组合。
+1. ✅ **已修复（Lead 并行修复，非本任务写入范围）** — `VectorService` 原硬编码 10s
+   加载超时，且超时后 `_embedding_load_started` 一次性 latch 导致该进程**永久**回退关键词。
+   现实现改为：超时读取 `settings.EMBEDDING_LOAD_TIMEOUT`（默认 30s，Docker 建议 120）；
+   共享同一后台加载线程、单次调用超时返回 False 但**后续调用可继续等待/重试**并在成功后
+   回填 `_embedding`；新增单测 `backend/tests/unit/services/test_vector_service_embedding_load.py`。
+   （原实测依据：冷加载 15.35s > 10s，首次向量请求几乎必然超时。）
+2. ✅ **方案已落地（task-9）** — Docker 内真实 BGE 通过新增的
+   `deploy/docker-compose.bge.yml` 覆盖文件启用：`INSTALL_ML=true` 构建镜像（含
+   torch + sentence-transformers）、`EMBEDDING_PROVIDER=local`、
+   `EMBEDDING_LOAD_TIMEOUT=120`、`HF_HUB_OFFLINE=1`/`TRANSFORMERS_OFFLINE=1`、
+   只读挂载 `${HF_CACHE_DIR}:/root/.cache/huggingface:ro`（见 §5.3，`docker compose config`
+   断言见附录 C）。同时 `/api/v1/vector/health` 的 `embedding_provider` 已改为返回真实
+   provider（`get_embedder().provider_name`，`BGEEmbedder`/`HashingEmbedder` 一目了然），
+   并新增 `backend/tests/unit/services/test_vector_health_provider.py`。
+   **保留提示**：ML 镜像体积 +2GB 以上、首次构建数分钟～十几分钟；不启用本地 BGE 时
+   保持 `INSTALL_ML=false` 精简镜像并配置云端 Embedding API。
 3. **「缓存命中仍联网」坑**（§5.2）：建议在部署文档/启动脚本中强制设置
    `HF_HUB_OFFLINE=1`，避免内网环境首次加载挂起。
 4. hf-mirror 速度较慢（~200 KB/s），多机部署建议预置缓存/内部镜像，不要每次构建下载。
@@ -477,8 +534,50 @@ $env:RUN_REAL_BGE = '1'; $env:RUN_REAL_BGE_OFFLINE = '1'
 |------|------|
 | `backend/scripts/verify/bge_embedding_e2e.py` | 五阶段可复现验证脚本（含 README 式注释：HF_ENDPOINT / 离线 / Docker 说明） |
 | `backend/tests/integration/services/test_bge_real.py` | 7 个默认 skip 的真实 BGE 集成测试（`RUN_REAL_BGE=1` 门槛） |
+| `deploy/docker-compose.bge.yml` | **task-9 新增**：Docker 内本地 BGE 部署覆盖文件（INSTALL_ML=true / local BGE / 离线 / 只读缓存挂载），含用法与验收说明 |
 | `docs/20-Audit/verification/04-bge.md` | 本报告 |
 
 > 参考运行产物（临时目录，不随仓库提交）：
 > `C:\Users\EDY\AppData\Local\Temp\bge_e2e_run.log`、
 > `C:\Users\EDY\AppData\Local\Temp\bge_e2e_result.json`。
+
+## 附录 C：Docker 覆盖文件验证真实输出（2026-11-12 18:16）
+
+环境：`docker compose v5.3.0`（Docker Desktop，Windows）；`HF_CACHE_DIR=C:\Users\EDY\.cache\huggingface`。
+**按任务约束未构建 ML 镜像、未重启容器**，以下为「不构建即可完成」的配置级验证
+（运行期验收项见 §5.3 表格，需在 `INSTALL_ML=true` 构建并重启后执行）。
+
+```text
+# 文件编码检查（避免 Windows/PowerShell 管道二次编码）
+A encoding: UTF-8 no BOM=True lines=130 bytes=8434 mojibake=[]
+
+# 叠加覆盖文件后 config -q（不构建、不启动）
+B docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.bge.yml config -q
+  → exit=0；stderr 为空
+
+# 叠加后配置断言（docker compose ... config --format json）
+C backend.build.args.INSTALL_ML        = true
+C worker.build.args.INSTALL_ML         = true
+C backend.environment.EMBEDDING_PROVIDER        = local
+C backend.environment.EMBEDDING_LOAD_TIMEOUT    = 120
+C backend.environment.HF_HUB_OFFLINE            = 1
+C backend.environment.TRANSFORMERS_OFFLINE      = 1
+C backend.environment.HF_HOME                   = /root/.cache/huggingface
+C backend.volume  type=bind source=C:\Users\EDY\.cache\huggingface target=/root/.cache/huggingface read_only=True
+C worker.volume   type=bind source=C:\Users\EDY\.cache\huggingface target=/root/.cache/huggingface read_only=True
+
+# 默认配置对照（仅基础 compose，不叠加 override）
+D default build.args.INSTALL_ML                 = false
+D default cache_mounts                          = []
+D default environment.EMBEDDING_PROVIDER        = auto
+D default environment.EMBEDDING_LOAD_TIMEOUT    = 30
+D default environment.HF_HUB_OFFLINE            = 0
+D default environment.TRANSFORMERS_OFFLINE      = 0
+
+# HF_CACHE_DIR 未设置时（必须显式设置，防止误挂空目录）
+E exit=1；required variable HF_CACHE_DIR is missing a value
+```
+
+结论：覆盖文件在**不修改基础 compose/Dockerfile** 的前提下，正确注入了
+`INSTALL_ML=true`、`EMBEDDING_PROVIDER=local`、`EMBEDDING_LOAD_TIMEOUT=120`、
+离线变量与只读缓存挂载；默认配置保持精简（`INSTALL_ML=false`、无缓存挂载）。

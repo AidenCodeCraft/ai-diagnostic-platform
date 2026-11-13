@@ -5,6 +5,7 @@
 - **验证对象**：上一轮代码评审遗留的四项「环境/实机验证缺口」
 - **单报告**：[01-PDF](verification/01-pdf-reportlab.md) · [02-MinIO](verification/02-minio.md) · [03-Milvus](verification/03-milvus.md) · [04-BGE](verification/04-bge.md)
 - **结论**：**四项全部安装完成并实机验证通过**（PDF、MinIO、Milvus、BGE），过程中额外发现并修复 3 个部署级缺陷、1 个 P1 业务 bug（详见各节）。
+- **2026-11-12 晚补充（§7 治理轮）**：原 §7 的 8 项遗留问题已全部治理——6 项代码/配置级修复并重建复验、1 项为人工提交操作、1 项 Docker 本地 BGE 方案落地（覆盖文件 + 文档）；治理后全量回归 **489 passed / 18 skipped / 0 failed**，`docker compose ps` 中 backend / milvus / minio / postgres / redis 全部 healthy，worker 不再误报 unhealthy。详见 §7。
 
 ---
 
@@ -17,7 +18,7 @@
 | 3 | Milvus 实链路 | **修复 compose**：v2.4.0 + 内嵌 etcd + local storage + curl healthcheck；**修复 pymilvus 依赖**：`setuptools==80.9.0`；**修复 VectorService 2 处代码 bug** | ✅ 服务 healthy、pymilvus 真实 insert/search、API `/vector/{health,embed,index,search}` 全绿（e2e PASS=26/FAIL=0，search 命中 score=0.378） | 报告 03 |
 | 4 | BGE 本地模型 | `sentence-transformers`/`torch`（`requirements-ml.txt`）+ **模型下载（hf-mirror）** + 离线缓存部署 | ✅ 真实下载 13 文件/183 MiB、dim=512、语义相似度明显区分、`HF_HUB_OFFLINE=1` 可加载、**Milvus 联合检索 rank#1 score=0.7332** | 报告 04 |
 
-**回归**：`backend` 全量 pytest **473 passed / 18 skipped / 0 failed**（基线 466 passed / 1 skipped；新增 7 个测试、17 个默认 skip 用例）；`docker compose ps` 中 backend/milvus/minio/postgres/redis 均 healthy。
+**回归**：`backend` 全量 pytest **489 passed / 18 skipped / 0 failed**（基线 466 passed / 1 skipped；首轮验证 473/18，§7 治理轮新增 16 个单测）；`docker compose ps` 中 backend/milvus/minio/postgres/redis 均 healthy。
 
 ---
 
@@ -29,7 +30,7 @@
 | 项目 venv | `G:\ai-diagnostic-platform\.venv`，Python **3.12.13** |
 | 关键依赖版本（实测） | reportlab **5.1.0**；minio **7.2.20**；pymilvus **2.5.4**；setuptools **80.9.0**（pymilvus 硬约束，见 §3.3）；sentence-transformers **5.7.0**；torch **2.13.0**；transformers **5.15.0**；pytest **8.3.3** |
 | Docker | Docker **29.6.1** / Docker Compose **v5.3.0** |
-| 部署容器（`deploy/docker-compose.yml`） | `ai-diagnostic-backend`（:8000 healthy）、`ai-diagnostic-frontend`（:80）、`ai-diagnostic-postgres`（healthy）、`ai-diagnostic-redis`（healthy）、`ai-diagnostic-milvus`（**v2.4.0** healthy）、`ai-diagnostic-minio`（healthy）、prometheus/grafana；`ai-diagnostic-worker` 仍 unhealthy（既有问题，见 §7） |
+| 部署容器（`deploy/docker-compose.yml`） | `ai-diagnostic-backend`（:8000 healthy）、`ai-diagnostic-frontend`（:80）、`ai-diagnostic-postgres`（healthy）、`ai-diagnostic-redis`（healthy）、`ai-diagnostic-milvus`（**v2.4.0** healthy）、`ai-diagnostic-minio`（固定 RELEASE tag，healthy）、prometheus/grafana；`ai-diagnostic-worker`（已禁 healthcheck，§7-1） |
 | 网络约束 | pip 走清华源（可用）；**huggingface.co 不可达 → 用 `hf-mirror.com`**；**Docker Hub 直连不可达** → daemon 镜像站（`docker.1ms.run` / `docker.xuanyuan.me`），本次拉取 milvus v2.5.4 均失败（429/403），故使用本地已有 v2.4.0 |
 | 服务地址 | 后端 API `http://localhost:8000`；MinIO S3 `http://localhost:9000` / Console `http://localhost:9001`；Milvus gRPC `localhost:19530` / healthz `http://localhost:9091/healthz` |
 
@@ -47,8 +48,8 @@
 ### 2.2 安装 / 验证步骤（可复制）
 
 ```powershell
-# ① 本地 venv（requirements.txt 已声明 reportlab>=4.0.0）
-G:\ai-diagnostic-platform\.venv\Scripts\python.exe -m pip install "reportlab>=4.0.0"
+# ① 本地 venv（requirements.txt 已固定 reportlab==5.1.0）
+G:\ai-diagnostic-platform\.venv\Scripts\python.exe -m pip install "reportlab==5.1.0"
 cd backend
 G:\ai-diagnostic-platform\.venv\Scripts\python.exe -m pytest tests/unit/services/test_report_pdf.py -v
 # => 1 passed, 1 skipped（skip 是「reportlab 缺失应回退」用例，已装依赖故按设计跳过；真实导出 PASS）
@@ -77,7 +78,7 @@ G:\ai-diagnostic-platform\.venv\Scripts\python.exe scripts\verify\pdf_export_e2e
 ### 2.4 注意点
 
 - 中文回退风险：`STSong-Light` 注册失败会静默回退 Helvetica（中文不可读），验证须同时断言「HTTP 200 + 字体资源出现 STSong」。
-- `reportlab>=4.0.0` 未锁精确版本（当前 5.1.0），如需完全可复现可后续锁版本。
+- `reportlab` 已固定为 `==5.1.0`（§7-3 治理），构建可复现。
 
 ---
 
@@ -126,7 +127,7 @@ G:\ai-diagnostic-platform\.venv\Scripts\python.exe scripts\verify\minio_storage_
 ### 3.5 生产注意
 
 - 必须修改默认口令 `minioadmin/minioadmin`；生产建议 `MINIO_SECURE=true` + TLS；
-- `diagnostic-logs` bucket **不会由后端自动创建**（`LogStorage` 不建桶，上传失败会静默回退本地），首次部署需初始化（建议 compose 增加 minio-init 一次性服务）；
+- `diagnostic-logs` bucket **已由 `LogStorage` 自动创建**（§7-2 治理：不存在→`make_bucket`，并发幂等兜底）；若后端运行用户无 `s3:CreateBucket` 权限，仍需由管理员预先创建（或授予权限），此时上传失败会回退本地并打 warning；
 - `materialize()` 下载到系统临时目录且未清理、无对象生命周期策略，建议后续加 TTL/清理任务。
 
 ---
@@ -203,7 +204,7 @@ $env:RUN_REAL_MILVUS="1"; G:\ai-diagnostic-platform\.venv\Scripts\python.exe -m 
 
 - Milvus 是独立服务，`COMMON_STORAGETYPE=local` 仅适合单机/开发；生产多副本仍需 etcd + 对象存储（或 Zilliz Cloud）；
 - `MILVUS_DIM` 必须与 embedding 维度一致（默认 512，对应 BGE-small-zh / 哈希兜底）；换 embedding 模型需重建 collection；
-- `/vector/health` 当前 `embedding_provider` 返回包装类名 `EmbeddingService`（真实内部为 HashingEmbedder/BGEEmbedder），可读性可后续优化。
+- `/vector/health` 的 `embedding_provider` 已返回真实 provider 名（`HashingEmbedder` / `BGEEmbedder` / `APIEmbedder`，§7-6 治理）。
 
 ---
 
@@ -247,7 +248,7 @@ G:\ai-diagnostic-platform\.venv\Scripts\python.exe scripts\verify\bge_embedding_
 
 ### 5.3 部署注意（Docker）
 
-- 后端镜像默认**不含** torch/sentence-transformers（`backend/Dockerfile` 注释、`requirements-ml.txt` 可选），容器内 `EMBEDDING_PROVIDER=local` 会静默回退哈希嵌入（dim 512，非语义）——这是当前 Docker 默认行为；
+- 后端镜像默认**不含** torch/sentence-transformers（`backend/Dockerfile` 注释、`requirements-ml.txt` 可选），容器内 `EMBEDDING_PROVIDER=local` 会静默回退哈希嵌入（dim 512，非语义）——这是默认精简镜像的行为；**已提供一键覆盖方案** [deploy/docker-compose.bge.yml](../../deploy/docker-compose.bge.yml)（§7-8）；
 - 若需容器内本地 BGE：`pip install -r requirements-ml.txt` 重建镜像（镜像 +2GB+），并把 HF 缓存目录挂载进容器，或设 `HF_ENDPOINT=https://hf-mirror.com` 在线拉取；
 - 离线部署：把 `~/.cache/huggingface/hub/models--BAAI--bge-small-zh-v1.5` 复制到镜像/挂载卷，设 `HF_HUB_OFFLINE=1`；首次加载慢时把 `EMBEDDING_LOAD_TIMEOUT`（默认 30s）调大（如 120s）；
 - **缓存命中 ≠ 不联网**：transformers 对 repo id 会做 `find_adapter_config_file()` 元数据探测，hf 不可达时会挂起（实测 pytest 卡 7+ 分钟）；受限网络必须同时设 `HF_HUB_OFFLINE=1` + `TRANSFORMERS_OFFLINE=1`（或保持 `HF_ENDPOINT` 可达），验证脚本与集成测试已内置该保护；
@@ -277,20 +278,51 @@ Remove-Item Env:RUN_REAL_PDF_API,Env:RUN_REAL_MINIO,Env:RUN_REAL_MILVUS,Env:RUN_
 cd ..\deploy; docker compose ps
 ```
 
-**本轮全量回归结果**：`473 passed, 18 skipped, 1 warning`（0 failed/error；跳过均为默认 skip 的真实环境用例与 reportlab 回退用例）。
+**本轮全量回归结果**：**489 passed, 18 skipped, 1 warning**（0 failed/error；跳过均为默认 skip 的真实环境用例与 reportlab 回退用例）。§7 治理轮新增 16 个单测（bucket 自动创建 6 + embedding 超时/重试 5 + provider 名 5），全量重复运行稳定。
+
+**§7 治理轮验证命令（可选）**：
+
+```powershell
+docker ps --format "table {{.Names}}\t{{.Status}}"        # worker 不再 unhealthy
+curl.exe -s http://localhost:8000/api/v1/vector/health    # embedding_provider 应为 HashingEmbedder / BGEEmbedder
+cd deploy; docker compose config -q                       # 基础配置合法
+$env:HF_CACHE_DIR="$env:USERPROFILE\.cache\huggingface"
+docker compose -f docker-compose.yml -f docker-compose.bge.yml config -q   # 本地 BGE 覆盖配置合法
+```
 
 ---
 
-## 7. 遗留问题与建议（非本次阻塞）
+## 7. 遗留问题与建议（✅ 2026-11-12 晚已全部治理）
 
-1. `ai-diagnostic-worker` 容器 **unhealthy**：镜像 Dockerfile 的 `HEALTHCHECK`（HTTP `/health`）不适用于 worker 的 keep-alive 进程，属既有配置问题，建议 worker 服务覆盖 healthcheck 或去掉。
-2. `diagnostic-logs` bucket 无自动初始化：建议 compose 增加 minio-init 一次性服务，或 `LogStorage` 启动时 `make_bucket`（当前上传失败会静默回退本地，生产易被忽略）。
-3. `reportlab>=4.0.0` 未锁精确版本（当前 5.1.0）；`pymilvus==2.5.4` 与 `setuptools==80.9.0` 的绑定需在升级 pymilvus 时重新评估（前者何时移除 `pkg_resources` 依赖）。
-4. Docker Hub 直连不可用、镜像站不稳定：生产/CI 建议固定镜像 digest 并使用内网 registry 或离线导入。
-5. `git status` 中 `backend/` 若干未提交改动来自上一轮实现（含本次 4 项修复）；本次验证未做 git commit，需由人工审阅后提交。
-6. `/vector/health` 的 `embedding_provider` 字段可优化为真实 provider 名（Hashing/BGE/API）。
-7. **P2（代码）**：`vector_service.py` 的 `_EMBEDDING_LOAD_TIMEOUT = 10.0` 为硬编码，且超时后 `_embedding_load_started=True` 永久 latch。BGE 冷加载实测 **15.35s > 10s**，首次向量请求一旦超时，该进程后续所有向量检索会永久回退关键词。建议改读 `settings.EMBEDDING_LOAD_TIMEOUT`（BGE 场景建议 120s）并允许后台回填/重试。
-8. **Docker 内本地 BGE 部署**：后端镜像默认不含 torch/sentence-transformers，容器内 `EMBEDDING_PROVIDER=local/auto` 会静默回退哈希嵌入；启用方案见 §5.3（`requirements-ml.txt` + HF 缓存挂载 + `HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE` + `EMBEDDING_LOAD_TIMEOUT=120` + 启动预热）。
+> 本节原有 8 项遗留，治理轮全部处理完毕：6 项完成代码/配置修复并**重建镜像 + 重启容器后实机复验**，
+> 1 项为人工提交操作（见 #5），1 项 Docker 本地 BGE 方案已落地（见 #8）。
+> 治理后全量 pytest **489 passed / 18 skipped / 0 failed**；`docker compose ps`：backend / milvus /
+> minio / postgres / redis 全 healthy，worker 不再误报 unhealthy。
+
+| # | 原遗留问题 | 治理结果 | 复验证据 |
+|---|-----------|----------|----------|
+| 1 | worker 容器 unhealthy（镜像 HEALTHCHECK 是 HTTP `/health`，不适用 keep-alive 进程） | ✅ **修复**：compose worker 服务设置 `healthcheck.disable: true`（backend 保持原 HTTP healthcheck） | `docker inspect ai-diagnostic-worker` → `{"Test":["NONE"]}`；`docker compose ps` → `Up`（无 unhealthy） |
+| 2 | 首次部署 `diagnostic-logs` bucket 不自动创建，上传静默回退本地 | ✅ **修复**：`LogStorage._create_client()` 自动 ensure bucket（不存在→`make_bucket`；并发 `BucketAlreadyOwnedByYou/BucketAlreadyExists` 幂等兜底；失败 warning + 回退本地，保持既有语义）；`MINIO_ENABLED=false` 仍不连接 | 容器内真实 MinIO 验证：临时桶 `autocreate-verify-1fa11bce` 由 `LogStorage()` 自动创建（`remote_available=True`）后清理成功；`diagnostic-logs`/`knowledge-images` 对象数 2/16 保留；+6 单测 |
+| 3 | `reportlab>=4.0.0` 未锁版本；pymilvus 与 setuptools 绑定未记录 | ✅ **修复**：`requirements.txt` 固定 `reportlab==5.1.0`；注释记录 `pymilvus==2.5.4` 必须搭配 `setuptools==80.9.0`（升级前需确认其已移除 pkg_resources 依赖） | 新镜像容器内：reportlab **5.1.0** / pymilvus **2.5.4** / setuptools **80.9.0** 均 import 成功 |
+| 4 | Docker Hub 不可达、镜像站不稳定，镜像版本不可复现 | ✅ **治理**：移除最后一个浮动 tag——minio `:latest` → `:RELEASE.2025-09-07T16-13-09Z`（重建后 healthy、数据保留）；compose 头部新增「镜像版本策略」（digest 固定命令 + 已验证 minio digest + 内网 registry / save-load 离线方案）；`deploy/README.md` 新增「镜像版本与离线部署」章节 | `docker compose ps` minio 显示固定 tag；对象数 2/16 未丢 |
+| 5 | 工作区未提交改动需人工审阅 | ⚠️ **部分人工项**：上一轮验证改动已由用户提交（HEAD `e0b1000`）；**本轮 §7 治理改动仍在工作区未提交**，需人工审阅后提交（本 Agent 未执行 git commit） | `git status` |
+| 6 | `/api/v1/vector/health` 的 `embedding_provider` 返回包装类名 `EmbeddingService` | ✅ **修复**：路由改用 `get_embedder().provider_name` | 重建后真实 API：`{"milvus_available":true,"embedding_provider":"HashingEmbedder",...}`（启用 BGE 镜像/配置时为 `BGEEmbedder`） |
+| 7 | **P2**：`VectorService._EMBEDDING_LOAD_TIMEOUT=10.0` 硬编码 + 超时永久 latch（BGE 冷加载 15.35s>10s 首次超时后进程内永久回退关键词） | ✅ **修复**：删除硬编码常量，改读 `settings.EMBEDDING_LOAD_TIMEOUT`（默认 30s，BGE 场景可 env 调 120）；删除永久 latch，改为线程安全共享加载线程——超时返回 False 但**下次调用可继续等待/读取回填**，线程失败允许重试（attempts 计数），并发调用共享同一加载线程 | +10 单测（超时回填/失败重试/settings 生效/4 并发单线程/常量移除）；全量 489 passed |
+| 8 | Docker 后端镜像默认无 torch/ST，容器内本地 BGE 静默回退 hash | ✅ **方案落地**：新增 `deploy/docker-compose.bge.yml` 覆盖文件——Dockerfile `INSTALL_ML=true` 构建（`requirements-ml.txt`）+ `EMBEDDING_PROVIDER=local` + `EMBEDDING_LOAD_TIMEOUT=120` + `HF_HUB_OFFLINE=1/TRANSFORMERS_OFFLINE=1` + 只读挂载 `${HF_CACHE_DIR}`；默认 compose 不受影响 | 合并配置 `config -q` 通过；断言 `INSTALL_ML=true`、provider=local、timeout=120、offline=1/1、bind 挂载 `C:\Users\EDY\.cache\huggingface → /root/.cache/huggingface:ro`、负向未设置 HF_CACHE_DIR 时报错。**ML 镜像（+2GB）未在本机构建**（按任务约束），运行期验收清单见 [04-bge.md §5.3](verification/04-bge.md) |
+
+### 7.1 §7 治理轮实现说明（供审阅）
+
+- **worker health 语义**：worker 当前是 keep-alive 占位进程（Celery 待接入），不提供 HTTP 服务；与其伪造
+  healthcheck 不如显式 disable，后续接入 Celery 后应改为真实存活探针（如 `celery inspect ping`）。
+- **MinIO 自动建桶的资源开销**：每次 `LogStorage()` 实例化会做一次 `bucket_exists` 网络调用（分钟级 API 请求
+  可接受）；若高频创建实例，可后续加进程级缓存（02-minio.md §6 P3）。
+- **embedding 加载线程**：`_ensure_embedding()` 只保证"本次请求不无限阻塞"，不保证首次请求一定用上语义嵌入；
+  容器内 BGE 冷启动建议用覆盖文件预热（`docker compose ... exec backend python -c "get_embedder()"`），
+  或把 `EMBEDDING_LOAD_TIMEOUT` 调到 120。
+- **BGE 覆盖文件**：采用 long-syntax bind 规避 Windows 盘符冒号解析问题；`HF_CACHE_DIR` 必填（不设直接报错），
+  防止误挂空目录导致容器内重新联网下载。
+- **未纳入本轮治理**：§4.5 的 `knowledge_docs.num_entities` 统计延迟（Milvus 语义）、v2.5.4 镜像拉取
+  （网络受限）、聊天链路 project 过滤（非环境缺口）均维持原状。
 
 ---
 
@@ -307,7 +339,28 @@ cd ..\deploy; docker compose ps
 
 **修改（依赖/部署/缺陷修复）**
 
-- `backend/requirements.txt`：`setuptools==80.9.0`（pymilvus pkg_resources 约束；`reportlab`、`minio` 原已声明）
+- `backend/requirements.txt`：`setuptools==80.9.0`（pymilvus pkg_resources 约束）+ `reportlab==5.1.0`（固定版本）+ `minio>=7.2.0`
 - `deploy/docker-compose.yml`：Milvus v2.4.0 内嵌 etcd + local storage、healthcheck 改 curl；worker `MILVUS_DIM` 对齐 512、补 `EMBEDDING_*`
 - `backend/app/services/knowledge/vector_service.py`：索引/load 顺序修复、`Hit.get` 兼容修复
 - `backend/app/services/diagnostics/log_service.py`：`delete_log()` 事务顺序与对象删除一致性修复
+
+### 8.1 §7 治理轮新增/修改（2026-11-12 晚）
+
+**新增文件**
+
+- `deploy/docker-compose.bge.yml`：Docker 内本地 BGE 覆盖文件（`INSTALL_ML=true`、`local` 嵌入、120s 超时、`HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE=1`、只读挂载 `${HF_CACHE_DIR}`）
+- `backend/tests/unit/services/test_log_storage_bucket.py`（6 tests，默认无外部依赖）
+- `backend/tests/unit/services/test_vector_service_embedding_load.py`（5 tests）
+- `backend/tests/unit/services/test_vector_health_provider.py`（5 tests）
+
+**修改文件**
+
+- `backend/Dockerfile`：新增 `ARG INSTALL_ML=false`（true 时安装 `requirements-ml.txt`），COPY requirements-ml.txt
+- `deploy/docker-compose.yml`：worker `healthcheck.disable: true`；minio 固定 `RELEASE.2025-09-07T16-13-09Z`；backend/worker `build.args.INSTALL_ML`；backend 透传 `EMBEDDING_LOAD_TIMEOUT` / `HF_ENDPOINT` / `HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE`；头部「镜像版本策略」
+- `backend/requirements.txt`：`reportlab==5.1.0`；pymilvus↔setuptools 升级约束注释
+- `backend/app/services/diagnostics/log_storage.py`：`_ensure_bucket()` 首次连接自动建桶（并发幂等、失败回退本地）
+- `backend/app/services/knowledge/vector_service.py`：embedding 加载超时改读 `settings.EMBEDDING_LOAD_TIMEOUT`，去除永久 latch（可续等/回填/失败重试、并发共享加载线程）
+- `backend/app/api/knowledge/vector.py`：`embedding_provider` 改为 `get_embedder().provider_name`
+- `deploy/README.md`：服务列表、验证命令、本地 BGE 部署、镜像版本与离线部署
+- `backend/.env.example`：补充 HF 环境变量与 `EMBEDDING_LOAD_TIMEOUT` 说明（注：仓库 `.gitignore` 忽略 `.env.*`，该模板不入库）
+- `docs/20-Audit/verification/{02-minio,03-milvus,04-bge}.md` 与 `Code-Review-RAG-LogAnalysis.md`：同步更新遗留项状态与证据

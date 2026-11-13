@@ -290,20 +290,27 @@
 | P2 | MinIO 日志存储 | ✅ | `LogStorage` 抽象 + 本地回退 + `materialize()`；MinIO 实机已全链路验证（SDK/存储类/部署 API PASS=49/0），并修复已解析日志删除 500 的 P1 bug |
 | P3 | Milvus 向量服务 | ✅ | compose 改 v2.4.0 内嵌 etcd + local storage（原缺 etcd 配置一直 unhealthy）；`setuptools==80.9.0` 修复 pymilvus `pkg_resources`；`VectorService` 索引/load 顺序与 `Hit.get` 两处 bug 已修；API insert/search 实测命中 |
 | P3 | BGE 本地嵌入 | ✅ | `sentence-transformers`/`torch` 已装；经 hf-mirror 真实下载 BGE-small-zh（dim=512），语义相似度/离线加载/Milvus 联合检索均实测通过 |
+| P3 | 运维/稳定性治理（§7 遗留） | ✅ | worker healthcheck 禁用误报、MinIO 自动建桶、镜像 tag 固定/digest 指引、`/vector/health` 真实 provider 名、embedding 加载超时重试、Docker 本地 BGE 覆盖方案；见 [Environment-Real-Verification §7](Environment-Real-Verification.md) |
 | P3 | 检索评估基线 | ✅ | `tests/eval/test_retrieval_quality.py`（Recall@3 ≥ 0.75） |
 
 ### 验证结果
 
 - 后端全量：**466 passed / 1 skipped**（467 collected，38.5s）；
 - 真实环境验证后全量：**473 passed / 18 skipped / 0 failed**（新增 7 个删除链路测试；skip 为默认跳过的真实外部服务用例）；
+- §7 遗留治理后全量：**489 passed / 18 skipped / 0 failed**（新增 16 个单测：MinIO 自动建桶 6 + embedding 超时重试 5 + provider 名 5）；
+- §7 遗留治理后全量：**489 passed / 18 skipped / 0 failed**（新增 16 个单测：MinIO 自动建桶 6 + embedding 超时重试 5 + provider 名 5）；
 - 前端：`vue-tsc --noEmit` 通过、`npm run build` 成功（17.38s）；
 - 新增测试覆盖：Embedding provider、自动索引、日志接入/编码/zip、事件持久化、规则持久化、异步/批量分析、项目过滤、种子脚本、PDF 回退、检索基线。
-- 真实环境验证（2026-11-12）：PDF / MinIO / Milvus / BGE 四项缺口全部安装并实机验证通过，详见 [Environment-Real-Verification.md](Environment-Real-Verification.md)。
+- 真实环境验证（2026-11-12）：PDF / MinIO / Milvus / BGE 四项缺口全部安装并实机验证通过；同日「§7 遗留问题治理」完成 6 项代码/配置修复并重建复验，详见 [Environment-Real-Verification.md](Environment-Real-Verification.md)。
 
 ### 已知限制
 
-1. 部署依赖已补齐：`reportlab`、`minio`、`setuptools==80.9.0` 均在 `requirements.txt`；本地 venv 已验证。**生产 Docker 部署仍需重建镜像并重启容器**（旧镜像不含新依赖/新路由），PDF 缺依赖时返回 501、MinIO 缺服务时自动回退本地。
+> 2026-11-12 晚「§7 遗留问题治理」后更新（详见 [Environment-Real-Verification.md §7](Environment-Real-Verification.md)）。
+
+1. 部署依赖已补齐并固定：`reportlab==5.1.0`、`minio>=7.2.0`、`setuptools==80.9.0`（pymilvus 约束）均在 `requirements.txt`；本地 venv 与 Docker 镜像均已验证。**生产 Docker 部署仍需重建镜像并重启容器**（旧镜像不含新依赖/新路由），PDF 缺依赖时返回 501、MinIO 缺服务时自动回退本地。
 2. 聊天链路未按项目过滤知识（会话模型暂无 project 字段）。
-3. BGE 本地模型已实测（hf-mirror 下载、`HF_HUB_OFFLINE=1` 离线可加载）；但 Docker 镜像默认不含 torch/sentence-transformers，容器内本地 BGE 需 `requirements-ml.txt` + 缓存挂载，否则 `EMBEDDING_PROVIDER=auto` 会回退哈希嵌入。
-4. `ai-diagnostic-worker` 容器 healthcheck 与 keep-alive 进程不匹配（unhealthy，既有配置问题）。
-5. `diagnostic-logs` bucket 需首次部署初始化（`LogStorage` 不自动建桶，上传失败静默回退本地）。
+3. BGE 本地模型已实测（hf-mirror 下载、`HF_HUB_OFFLINE=1` 离线可加载）；Docker 内本地 BGE 已提供一键覆盖方案 `deploy/docker-compose.bge.yml`（`INSTALL_ML=true` 构建 + HF 缓存只读挂载 + 离线变量 + 120s 超时），默认镜像保持精简。
+4. ✅ 已修复：`ai-diagnostic-worker` healthcheck 与 keep-alive 进程不匹配 → compose `healthcheck.disable: true`，不再误报 unhealthy。
+5. ✅ 已修复：`diagnostic-logs` bucket 首次部署不自动创建 → `LogStorage._create_client()` 自动 `make_bucket`（并发幂等；无权限时回退本地并告警）。
+6. ✅ 已修复：`VectorService` embedding 加载超时硬编码 10s 且超时永久降级 → 改读 `settings.EMBEDDING_LOAD_TIMEOUT`，超时后下次请求可继续等待/回填，失败可重试。
+7. 镜像版本已固定 tag（minio 去除 `:latest`）；生产/CI 建议进一步固定 digest 或使用内网 registry（`deploy/README.md`「镜像版本与离线部署」）。

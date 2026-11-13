@@ -52,13 +52,19 @@ class VectorService:
     """
 
     _COLLECTION_NAME = settings.MILVUS_COLLECTION or "knowledge_docs"
-    _EMBEDDING_LOAD_TIMEOUT = 10.0
 
     def __init__(self):
         self._connected = False
         self._collection: Optional[Any] = None  # pymilvus.Collection
         self._embedding = None
-        self._embedding_load_started = False
+        # Embedding 加载状态（线程安全，详见 _ensure_embedding 注释）：
+        # - _embedding_load_thread: 共享的后台加载线程（首次请求创建，后续请求复用）
+        # - _embedding_load_attempts: 加载尝试次数（失败后可重试，用于观测/测试）
+        # - _embedding_last_error: 最近一次加载失败原因
+        self._embedding_lock = threading.Lock()
+        self._embedding_load_thread: Optional[threading.Thread] = None
+        self._embedding_load_attempts = 0
+        self._embedding_last_error: Optional[BaseException] = None
         self._dim = int(getattr(settings, "MILVUS_DIM", 512) or 512)
         self._connect()
         if self._connected:
@@ -108,49 +114,99 @@ class VectorService:
             self._connected = False
             return False
 
-    def _ensure_embedding(self) -> bool:
-        """Load the embedding service with a hard timeout.
+    @staticmethod
+    def _embedding_load_timeout() -> float:
+        """读取 embedding 模型加载超时（秒）。
 
-        BGE/SentenceTransformer may download model weights on first use.  We
-        must not let a slow or unreachable model download block the streaming
-        chat endpoint indefinitely.  On timeout this VectorService instance
-        keeps keyword fallback for the current request; a background thread may
-        finish loading the shared embedder for later requests.
+        来自 ``settings.EMBEDDING_LOAD_TIMEOUT``（默认 30s；BGE 冷加载较慢时可通过
+        ``EMBEDDING_LOAD_TIMEOUT=120`` 调大），不再使用硬编码常量。
+        """
+        try:
+            timeout = float(getattr(settings, "EMBEDDING_LOAD_TIMEOUT", 30.0) or 30.0)
+        except (TypeError, ValueError):  # pragma: no cover - 配置异常时保守回退
+            timeout = 30.0
+        return max(0.0, timeout)
+
+    def _load_embedding_worker(self) -> None:
+        """后台加载 embedder（daemon 线程入口），结果/异常写回实例状态。"""
+        try:
+            embedder = get_embedder()
+        except BaseException as exc:  # noqa: BLE001 - 记录失败原因，允许后续重试
+            with self._embedding_lock:
+                self._embedding_last_error = exc
+            logger.error("[VectorService] Embedding load failed: %s", exc)
+            return
+
+        with self._embedding_lock:
+            self._embedding = embedder
+        logger.info(
+            "[VectorService] Embedding loaded: %s (dim=%s)",
+            type(embedder).__name__, getattr(embedder, "dimension", "?"),
+        )
+
+    def _ensure_embedding(self) -> bool:
+        """确保 embedding 服务可用 — 有界等待 + 共享后台加载，可复用/可重试。
+
+        设计原因：
+        - BGE/SentenceTransformer 首次加载可能远慢于请求超时（实测冷加载 ~15.35s），
+          但不能让聊天/检索请求无限阻塞，因此每次调用最多等待
+          ``settings.EMBEDDING_LOAD_TIMEOUT`` 秒（默认 30s）。
+        - 旧实现用 ``_embedding_load_started`` 做「已启动」latch：首次等待超时后，
+          该进程内**永久**直接回退关键词，即使后台线程随后加载成功也不会再被采用。
+        - 新实现：后台加载线程只启动一次并保存在实例上，并发调用共享同一线程；
+          单次调用超时返回 False，但**下一次调用会继续等待同一线程/读取已回填结果**；
+          线程异常结束后允许下一次调用重新启动加载线程（``_embedding_load_attempts``
+          递增），不会永久卡死。状态读写用实例锁保护，join 在锁外进行以避免
+          并发调用互相阻塞。
         """
         if self._embedding is not None:
             return True
-        if self._embedding_load_started:
-            return False
 
-        self._embedding_load_started = True
-        result: Dict[str, Any] = {}
+        timeout = self._embedding_load_timeout()
 
-        def _load() -> None:
-            try:
-                result["embedder"] = get_embedder()
-            except Exception as exc:  # noqa: BLE001 - keep fallback alive
-                result["error"] = exc
+        with self._embedding_lock:
+            thread = self._embedding_load_thread
+            if thread is None or (not thread.is_alive() and self._embedding is None):
+                # 首次加载，或上一次加载已失败结束 → 启动（新的）共享后台线程
+                self._embedding_last_error = None
+                self._embedding_load_attempts += 1
+                thread = threading.Thread(
+                    target=self._load_embedding_worker,
+                    daemon=True,
+                    name="vector-embedding-loader",
+                )
+                self._embedding_load_thread = thread
+                thread.start()
+                logger.info(
+                    "[VectorService] Embedding load attempt #%d started in background "
+                    "(wait up to %.1fs)",
+                    self._embedding_load_attempts, timeout,
+                )
+            else:
+                logger.debug(
+                    "[VectorService] Reusing in-flight embedding load (attempt #%d)",
+                    self._embedding_load_attempts,
+                )
 
-        thread = threading.Thread(target=_load, daemon=True)
-        thread.start()
-        thread.join(self._EMBEDDING_LOAD_TIMEOUT)
+        # 在锁外等待，避免并发调用互相阻塞；对同一线程 join 是线程安全的
+        thread.join(timeout)
 
-        if thread.is_alive():
-            logger.error(
-                "[VectorService] Embedding model load exceeded %.1fs; "
-                "using keyword fallback for this request",
-                self._EMBEDDING_LOAD_TIMEOUT,
-            )
-            return False
-
-        if "embedder" in result:
-            self._embedding = result["embedder"]
+        if self._embedding is not None:
             return True
 
-        logger.error(
-            "[VectorService] Embedding model load failed: %s",
-            result.get("error"),
-        )
+        if thread.is_alive():
+            logger.warning(
+                "[VectorService] Embedding load still running after %.1fs; "
+                "using keyword fallback for this request (result will be reused "
+                "by later calls)",
+                timeout,
+            )
+        else:
+            logger.error(
+                "[VectorService] Embedding load attempt #%d failed: %s",
+                self._embedding_load_attempts,
+                self._embedding_last_error,
+            )
         return False
 
     def _ensure_collection(self) -> None:
