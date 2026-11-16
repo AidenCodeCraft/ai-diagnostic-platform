@@ -27,6 +27,16 @@ class TestKnowledgePolishApi:
             assert item["guide"].strip()
             assert item["example"].strip()
 
+    def test_selection_polish_keeps_plain_text(self, client):
+        resp = client.post("/api/v1/knowledge/polish", json={
+            "content": "设备有点问题需要检查一下。", "doc_type": "case", "selection": True,
+        })
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["polished_content"]
+        assert "#" not in data["polished_content"]
+        assert data["source"] in ("llm", "rule")
+
     def test_polish_requires_content(self, client):
         resp = client.post("/api/v1/knowledge/polish", json={"content": "", "doc_type": "case"})
         assert resp.status_code == 422

@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class KnowledgeCreate(BaseModel):
-    title: str = Field(..., max_length=200)
+    title: str = Field(..., min_length=1, max_length=200)
     content: str
     category: Optional[str] = Field(default=None, max_length=100)
     source: Optional[str] = Field(default=None, max_length=200)
@@ -17,7 +17,7 @@ class KnowledgeCreate(BaseModel):
 
 
 class KnowledgeUpdate(BaseModel):
-    title: Optional[str] = Field(default=None, max_length=200)
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
     content: Optional[str] = None
     category: Optional[str] = Field(default=None, max_length=100)
     source: Optional[str] = Field(default=None, max_length=200)

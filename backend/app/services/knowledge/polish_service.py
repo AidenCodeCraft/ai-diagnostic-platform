@@ -21,10 +21,13 @@ from app.services.prompts.knowledge_polish import KnowledgePolishPrompt
 
 logger = logging.getLogger(__name__)
 
-# 关键 token：型号（FC09/L13C）、数字（9206/-5007）等，润色后必须保留
-_KEY_TOKEN_RE = re.compile(r"[A-Za-z]{1,10}\d+[A-Za-z0-9._/-]*|\b\d{2,}\b")
+# 关键 token：型号（FC09/L13C）、数字（9206/-5007）等，润色后必须保留。
+# 数字用前后非数字的 lookaround 提取（\b 在中文与数字交界处不成立，会漏掉“下发9206后”这类数字）
+_KEY_TOKEN_RE = re.compile(r"[A-Za-z]{1,10}\d+[A-Za-z0-9._/-]*|(?<!\d)\d{2,}(?!\d)")
 _NUMBER_PREFIX_RE = re.compile(r"^\s*\d+[.、)]\s*")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+# 行首序号（1. / 2、 / ### 14. ）：属于排版编号而非技术信息，不参与关键 token 校验
+_ORDINAL_PREFIX_RE = re.compile(r"(?m)^\s*(?:#{1,6}\s*)?\d+[.、)]\s+")
 
 
 class KnowledgePolishService:
@@ -92,6 +95,93 @@ class KnowledgePolishService:
         result["source"] = source
         result["notes"] = self._dedupe(notes + list(preview.get("notes") or []))
         return result
+
+    def polish_selection(
+        self,
+        content: str,
+        doc_type: Optional[str] = None,
+        title: str = "",
+        provider=None,
+        section: str = "",
+    ) -> Dict[str, Any]:
+        """润色编辑器中的选中文本片段（按格式说明优化表达，不套用模板分节/章节标题）。"""
+        text = (content or "").strip()
+        if not text:
+            raise ValueError("内容为空，无法润色")
+
+        template = get_template(doc_type)
+        doc_type_name = template.name if template else (doc_type or "通用")
+        guide = (
+            template.guide if template
+            else "自由格式：建议使用小标题分节、条目化表达，便于阅读与检索。"
+        )
+        skeleton = template.skeleton if template else ""
+        notes: List[str] = []
+        source = "rule"
+        polished = ""
+
+        llm = provider or self._explicit_provider or self._default_provider()
+        if llm is not None:
+            try:
+                raw = llm.chat(
+                    KnowledgePolishPrompt.build_selection_messages(
+                        text, doc_type_name, guide, skeleton, section,
+                    )
+                )
+                cleaned = self._clean_llm_output(raw)
+                if self._acceptable_selection(text, cleaned):
+                    polished = cleaned
+                    source = "llm"
+                    notes.append(f"已按「{doc_type_name}」格式说明润色选中文本")
+                else:
+                    notes.append("AI 润色结果未通过校验，已保留原文")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[Polish] selection polish failed: %s", exc)
+                notes.append("AI 润色失败，已保留原文")
+
+        if not polished:
+            polished = text
+            if source != "llm":
+                notes.append("已保留原文（AI 服务不可用）")
+
+        return {
+            "polished_content": polished,
+            "original": text,
+            "source": source,
+            "notes": self._dedupe(notes),
+            "title": title or "",
+        }
+
+    @classmethod
+    def _acceptable_selection(cls, original: str, polished: str) -> bool:
+        """选中文本润色的一致性校验（不引入标题/分节/编号）。"""
+        if not polished or not polished.strip():
+            return False
+        if len(polished.strip()) < max(1, int(len(original.strip()) * 0.4)):
+            return False
+        if "#" in polished and "#" not in original:
+            return False
+        return not cls._missing_tokens(original, polished)
+
+    @staticmethod
+    def _missing_tokens(original: str, polished: str) -> List[str]:
+        """返回原文中在润色结果里丢失的关键 token。
+
+        - 行首序号（1. / ### 14. ）不算技术信息，允许重新排版；
+        - 纯数字按数值比较（08 == 8），避免日期、编号的合法重排被误判；
+        - 含字母的型号/命令/版本码按不区分大小写的子串严格比较。
+        """
+        text = _ORDINAL_PREFIX_RE.sub("", original or "")
+        polished_numbers = {int(n) for n in re.findall(r"\d+", polished or "")}
+        polished_lower = (polished or "").lower()
+        missing: List[str] = []
+        for token in dict.fromkeys(_KEY_TOKEN_RE.findall(text)):
+            if token.isdigit():
+                if int(token) not in polished_numbers:
+                    missing.append(token)
+            elif token.lower() not in polished_lower:
+                missing.append(token)
+        return missing
 
     # ------------------------------------------------------------------
     # Provider
@@ -175,8 +265,8 @@ class KnowledgePolishService:
             text = "\n".join(lines).strip()
         return text
 
-    @staticmethod
-    def _acceptable(original: str, polished: str) -> bool:
+    @classmethod
+    def _acceptable(cls, original: str, polished: str) -> bool:
         """一致性校验：长度合理 + 关键型号/数字全部保留。"""
         if not polished or len(polished.strip()) < 20:
             return False
@@ -187,8 +277,7 @@ class KnowledgePolishService:
         if len(polished_compact) < min_length:
             return False
 
-        key_tokens = set(_KEY_TOKEN_RE.findall(original or ""))
-        missing = [token for token in key_tokens if token not in polished]
+        missing = cls._missing_tokens(original, polished)
         if missing:
             logger.info("[Polish] LLM output missing key tokens: %s", missing[:10])
             return False

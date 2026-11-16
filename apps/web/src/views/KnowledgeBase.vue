@@ -6,15 +6,19 @@
     <div class="kb-breadcrumb">
       <el-breadcrumb separator="/">
         <el-breadcrumb-item>
-          <a @click="backToList" style="cursor:pointer;font-size:20px;font-weight:600;color:#1f2937;text-decoration:none">知识库</a>
+          <a @click="backToList"
+            style="cursor:pointer;font-size:20px;font-weight:600;color:#1f2937;text-decoration:none">知识库</a>
         </el-breadcrumb-item>
         <!-- 文件夹路径链（所有视图下都可点击跳转） -->
-        <el-breadcrumb-item v-for="(f, i) in folderPath" :key="f.id" style="font-size:20px;font-weight:600;color:#1f2937">
+        <el-breadcrumb-item v-for="(f, i) in folderPath" :key="f.id"
+          style="font-size:20px;font-weight:600;color:#1f2937">
           <a @click="navigateToFolder(i)" style="cursor:pointer;color:#2563eb;text-decoration:none">{{ f.title }}</a>
         </el-breadcrumb-item>
         <!-- 当前文件 -->
-        <el-breadcrumb-item v-if="viewState === 'preview'" style="font-size:20px;font-weight:600;color:#1f2937">{{ form.title }}</el-breadcrumb-item>
-        <el-breadcrumb-item v-if="viewState === 'edit'" style="font-size:20px;font-weight:600;color:#1f2937">{{ editingId ? form.title : createLabel }}</el-breadcrumb-item>
+        <el-breadcrumb-item v-if="viewState === 'preview'" style="font-size:20px;font-weight:600;color:#1f2937">{{
+          form.title }}</el-breadcrumb-item>
+        <el-breadcrumb-item v-if="viewState === 'edit'" style="font-size:20px;font-weight:600;color:#1f2937">{{
+          editingId ? form.title : createLabel }}</el-breadcrumb-item>
       </el-breadcrumb>
     </div>
 
@@ -25,7 +29,8 @@
       <div class="kb-header">
         <div></div>
         <div class="kb-header-right">
-          <el-input v-model="searchQuery" placeholder="搜索文件..." class="kb-search" clearable @clear="doSearch" @keyup.enter="doSearch" :prefix-icon="Search" />
+          <el-input v-model="searchQuery" placeholder="搜索文件..." class="kb-search" clearable
+            @keyup.enter="doSearch" :prefix-icon="Search" />
           <el-dropdown @command="handleCreateCommand" trigger="click">
             <el-button type="primary">新建</el-button>
             <template #dropdown>
@@ -66,30 +71,42 @@
           <el-table-column prop="title" label="名称" min-width="220">
             <template #default="{ row }">
               <div class="cell-name">
-                <span class="file-icon">{{ row.doc_type === 'note' ? '📝' : row.doc_type === 'folder' ? '📂' : '📄' }}</span>
-                <span class="file-title" @click="openItem(row)" style="cursor:pointer;color:#2563eb">{{ row.title }}</span>
+                <span class="file-icon">{{ row.doc_type === 'note' ? '📝' : row.doc_type === 'folder' ? '📂' : '📄'
+                  }}</span>
+                <span class="file-title" @click="openItem(row)" style="cursor:pointer;color:#2563eb">{{ row.title
+                  }}</span>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="文档类型" width="120"><template #default="{ row }">{{ typeLabel(row.doc_type) }}</template></el-table-column>
+          <el-table-column label="文档类型" width="120"><template #default="{ row }">{{ typeLabel(row.doc_type)
+              }}</template></el-table-column>
           <el-table-column label="质量" width="120">
             <template #default="{ row }">
               <template v-if="row.doc_type === 'folder'">—</template>
               <template v-else>
-                <el-tag v-if="row.quality_score != null" :type="row.quality_score >= 60 ? 'success' : (row.quality_score >= 40 ? 'warning' : 'info')" size="small">{{ Math.round(row.quality_score) }}</el-tag>
-                <el-tag v-if="row.status && row.status !== 'active'" type="info" size="small" style="margin-left:4px">草稿</el-tag>
+                <el-tag v-if="row.quality_score != null"
+                  :type="row.quality_score >= 60 ? 'success' : (row.quality_score >= 40 ? 'warning' : 'info')"
+                  size="small">{{ Math.round(row.quality_score) }}</el-tag>
+                <el-tag v-if="row.status && row.status !== 'active'" type="info" size="small"
+                  style="margin-left:4px">草稿</el-tag>
                 <span v-if="row.quality_score == null && (!row.status || row.status === 'active')">—</span>
               </template>
             </template>
           </el-table-column>
-          <el-table-column prop="updated_at" label="修改时间" width="180"><template #default="{ row }">{{ formatTime(row.updated_at || row.created_at) }}</template></el-table-column>
-          <el-table-column label="大小" width="100"><template #default="{ row }">{{ formatSize(row) }}</template></el-table-column>
+          <el-table-column prop="updated_at" label="修改时间" width="180"><template #default="{ row }">{{
+            formatTime(row.updated_at || row.created_at) }}</template></el-table-column>
+          <el-table-column label="大小" width="100"><template #default="{ row }">{{ formatSize(row)
+              }}</template></el-table-column>
           <!-- 更多菜单 -->
           <el-table-column label="" width="60" fixed="right">
             <template #default="{ row }">
               <el-dropdown trigger="click" @command="(cmd: string) => handleRowAction(cmd, row)">
                 <button class="row-more-btn">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="5" r="1" />
+                    <circle cx="12" cy="12" r="1" />
+                    <circle cx="12" cy="19" r="1" />
+                  </svg>
                 </button>
                 <template #dropdown>
                   <el-dropdown-menu>
@@ -103,7 +120,8 @@
             </template>
           </el-table-column>
         </el-table>
-        <el-pagination v-if="total > pageSize" style="margin-top:16px;justify-content:center" background layout="prev,pager,next" :total="total" :page-size="pageSize" v-model:current-page="page" @change="fetch" />
+        <el-pagination v-if="total > pageSize" style="margin-top:16px;justify-content:center" background
+          layout="prev,pager,next" :total="total" :page-size="pageSize" v-model:current-page="page" @change="reload" />
       </div>
 
       <!-- 网格 -->
@@ -113,10 +131,12 @@
           <div class="card-title">{{ item.title }}</div>
           <div class="card-meta">{{ formatTime(item.updated_at || item.created_at) }}</div>
           <div v-if="item.doc_type !== 'folder' && item.quality_score != null" class="card-quality">
-            {{ Math.round(item.quality_score) }} 分<template v-if="item.status && item.status !== 'active'"> · 草稿</template>
+            {{ Math.round(item.quality_score) }} 分<template v-if="item.status && item.status !== 'active'"> ·
+              草稿</template>
           </div>
         </div>
-        <el-pagination v-if="total > pageSize" style="margin-top:16px;justify-content:center;width:100%" background layout="prev,pager,next" :total="total" :page-size="pageSize" v-model:current-page="page" @change="fetch" />
+        <el-pagination v-if="total > pageSize" style="margin-top:16px;justify-content:center;width:100%" background
+          layout="prev,pager,next" :total="total" :page-size="pageSize" v-model:current-page="page" @change="reload" />
       </div>
     </template>
 
@@ -125,11 +145,23 @@
     <!-- ============================================================ -->
     <div v-else-if="viewState === 'preview'" class="kb-preview-page">
       <div class="preview-header">
-        <div class="preview-header-left">
-          <span class="preview-header-title">{{ form.title }}</span>
-        </div>
         <div class="preview-header-right">
-          <el-button @click="viewState = 'list'">返回列表</el-button>
+          <el-tooltip v-if="previewMeta" placement="bottom" effect="light">
+            <template #content>
+              <div style="max-width:340px;line-height:1.7">
+                发布标准：无「错误」级问题即可发布（必填章节齐全、正则可编译）。<br />
+                质量分表示完整度：≥60 良好；40–59 可用但建议完善；低于 40 信息不足。
+              </div>
+            </template>
+            <span class="preview-quality">
+              质量分
+              <b>{{ Math.round(previewMeta.quality_score) }}</b>
+              <el-tag :type="previewMeta.status_hint === 'active' ? 'success' : 'warning'" size="small">
+                {{ previewMeta.status_hint === 'active' ? '可发布' : '待完善' }}
+              </el-tag>
+            </span>
+          </el-tooltip>
+          <el-button @click="closePreview">关闭预览</el-button>
           <el-button type="primary" @click="enterEdit">编辑</el-button>
         </div>
       </div>
@@ -139,28 +171,17 @@
           <component :is="VMdEditor.Preview" :text="form.content" />
         </div>
         <!-- 右侧悬浮目录（docsify 风格） -->
-        <nav
-          v-if="tocItems.length"
-          class="toc-float"
-          :class="{ 'toc-float-expanded': tocHovered }"
-          @mouseenter="tocHovered = true"
-          @mouseleave="tocHovered = false"
-        >
+        <nav v-if="tocItems.length" class="toc-float" :class="{ 'toc-float-expanded': tocHovered }"
+          @mouseenter="tocHovered = true" @mouseleave="tocHovered = false">
           <button class="toc-float-toggle" @click="tocHovered = !tocHovered" title="目录">
             <span class="toc-float-dot" :style="{ top: tocProgress + '%' }" />
           </button>
           <div class="toc-float-panel">
             <div class="toc-float-title">目录</div>
-            <div
-              v-for="(item, i) in tocItems"
-              :key="i"
-              class="toc-item"
-              :class="[
-                { 'toc-active': activeTocId === item.anchorId },
-                `toc-level-${item.level}`,
-              ]"
-              @click="scrollToTocAnchor(item.anchorId)"
-            >{{ item.text }}</div>
+            <div v-for="(item, i) in tocItems" :key="i" class="toc-item" :class="[
+              { 'toc-active': activeTocId === item.anchorId },
+              `toc-level-${item.level}`,
+            ]" @click="scrollToTocAnchor(item.anchorId)">{{ item.text }}</div>
           </div>
         </nav>
       </div>
@@ -171,7 +192,11 @@
     <!-- ============================================================ -->
     <div v-else-if="viewState === 'edit'" class="kb-editor-page">
       <div class="kb-header">
-        <el-input v-model="form.title" placeholder="标题" style="width:240px;font-size:18px;font-weight:600" />
+        <div class="title-field">
+          <el-input ref="titleInputRef" v-model="form.title" placeholder="标题（必填）"
+            style="width:240px;font-size:18px;font-weight:600" @input="titleError = ''" />
+          <div v-if="titleError" class="field-error">{{ titleError }}</div>
+        </div>
         <el-select v-model="form.doc_type" style="width:170px;margin-left:8px" @change="onDocTypeChange">
           <el-option label="现场问题示例" value="case" />
           <el-option label="FAQ" value="faq" />
@@ -181,68 +206,27 @@
           <el-option label="手册" value="manual" />
         </el-select>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-          <el-button-group class="mode-toggle">
-            <el-button :type="editMode === 'edit' ? 'primary' : ''" @click="editMode = 'edit'">编辑</el-button>
-            <el-button :type="editMode === 'split' ? 'primary' : ''" @click="editMode = 'split'; refreshPreview()">分屏</el-button>
-            <el-button :type="editMode === 'preview' ? 'primary' : ''" @click="editMode = 'preview'; refreshPreview()">预览</el-button>
-          </el-button-group>
-          <el-button v-if="polishSnapshot === null" @click="aiPolish" :loading="polishing" :disabled="polishing">AI润色</el-button>
+          <el-button v-if="polishSnapshot === null" @click="aiPolish" :loading="polishing"
+            :disabled="polishing">AI润色</el-button>
           <el-button v-else type="warning" plain @click="undoPolish">撤销AI润色</el-button>
           <el-button @click="showGuide = true">格式说明</el-button>
           <el-button @click="cancelEdit">取消</el-button>
           <el-button type="primary" @click="save" :loading="saving">{{ editingId ? '保存' : '创建' }}</el-button>
         </div>
       </div>
-      <div class="editor-body" :class="'mode-' + editMode">
+      <div class="editor-body">
         <div v-if="polishing" class="polish-overlay">
           <div class="polish-spin" />
           <div class="polish-title">AI 润色中…</div>
           <div class="polish-elapsed">已用时 {{ polishElapsed }} 秒</div>
-          <div class="polish-tip">内容较多时可能需要 1~2 分钟，请耐心等待</div>
+          <!-- <div class="polish-tip">内容较多时可能需要 1~2 分钟，请耐心等待</div> -->
           <el-button size="small" @click="cancelPolish">取消润色</el-button>
         </div>
-        <div v-show="editMode !== 'preview'" class="editor-pane">
-          <v-md-editor :key="editorKey" ref="editorRef" v-model="form.content" height="100%" left-toolbar="undo redo | bold italic strikethrough | h2 h3 h4 | ul ol | link image | code quote | table hr | fullscreen" :disabled-menus="[]" @upload-image="handleUploadImage" />
-        </div>
-        <div v-show="editMode !== 'edit'" class="preview-pane">
-          <div class="preview-pane-header">
-            <span>提交后预览</span>
-            <el-tooltip placement="left" effect="light">
-              <template #content>
-                <div style="max-width:340px;line-height:1.7">
-                  发布标准：无「错误」级问题即可发布（必填章节齐全、正则可编译）。<br />
-                  质量分表示完整度：≥60 良好；40–59 可用但建议完善；低于 40 信息不足。
-                </div>
-              </template>
-              <span class="preview-quality">
-                质量分
-                <b>{{ previewResult ? Math.round(previewResult.quality_score) : '—' }}</b>
-                <el-tag v-if="previewResult" :type="previewResult.status_hint === 'active' ? 'success' : 'warning'" size="small">
-                  {{ previewResult.status_hint === 'active' ? '可发布' : '待完善' }}
-                </el-tag>
-              </span>
-            </el-tooltip>
-          </div>
-          <div class="preview-pane-body">
-            <div v-if="previewLoading" class="preview-loading">规范化中…</div>
-            <template v-else-if="previewResult">
-              <div v-if="previewResult.issues.length" class="preview-issues">
-                <div v-for="(issue, i) in previewResult.issues" :key="i" :class="['preview-issue', issue.level]">
-                  {{ issue.level === 'error' ? '✕' : '⚠' }} {{ issue.message }}
-                </div>
-              </div>
-              <div v-if="previewResult.suggested_keywords.length" class="preview-suggest">
-                候选关键词：{{ previewResult.suggested_keywords.join('、') }}（可加入「日志特征」）
-              </div>
-              <div v-if="previewResult.notes && previewResult.notes.length" class="preview-notes">
-                <div v-for="(note, i) in previewResult.notes" :key="i">✨ {{ note }}</div>
-              </div>
-              <div class="preview-rendered">
-                <component :is="VMdEditor.Preview" :text="previewResult.normalized_content" />
-              </div>
-            </template>
-            <div v-else class="preview-loading">暂无内容</div>
-          </div>
+        <div class="editor-pane" @contextmenu="onEditorContextMenu">
+          <v-md-editor :key="editorKey" ref="editorRef" v-model="form.content" height="100%"
+            left-toolbar="undo redo | bold italic strikethrough | h2 h3 h4 | ul ol | link image | code quote | table hr | fullscreen"
+            right-toolbar="kb-quality preview toc | sync-scroll fullscreen" :toolbar="editorToolbar"
+            :disabled-menus="[]" @upload-image="handleUploadImage" />
         </div>
       </div>
     </div>
@@ -252,26 +236,34 @@
     <!-- ============================================================ -->
     <el-dialog v-model="showUpload" title="上传文件" width="480px">
       <el-upload drag :auto-upload="false" :on-change="handleFileSelect" accept=".md,.txt,.pdf">
-        <el-icon :size="40"><UploadFilled /></el-icon>
+        <el-icon :size="40">
+          <UploadFilled />
+        </el-icon>
         <div style="margin-top:8px">拖拽文件或点击上传</div>
-        <template #tip><div style="margin-top:8px;color:#909399">支持 .md, .txt, .pdf</div></template>
+        <template #tip>
+          <div style="margin-top:8px;color:#909399">支持 .md, .txt, .pdf</div>
+        </template>
       </el-upload>
       <div style="margin-top:12px">
         <el-select v-model="uploadForm.doc_type" style="width:100%">
-          <el-option label="手册" value="manual" /><el-option label="FAQ" value="faq" /><el-option label="数据手册" value="datasheet" />
+          <el-option label="手册" value="manual" /><el-option label="FAQ" value="faq" /><el-option label="数据手册"
+            value="datasheet" />
         </el-select>
       </div>
-      <template #footer><el-button @click="showUpload = false">取消</el-button><el-button type="primary" @click="doUpload" :loading="uploading">上传</el-button></template>
+      <template #footer><el-button @click="showUpload = false">取消</el-button><el-button type="primary" @click="doUpload"
+          :loading="uploading">上传</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="showFolder" title="新建文件夹" width="400px">
       <el-input v-model="folderName" placeholder="文件夹名称" />
-      <template #footer><el-button @click="showFolder = false">取消</el-button><el-button type="primary" @click="createFolder">创建</el-button></template>
+      <template #footer><el-button @click="showFolder = false">取消</el-button><el-button type="primary"
+          @click="createFolder">创建</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="showRename" title="重命名" width="400px">
       <el-input v-model="renameName" placeholder="新名称" />
-      <template #footer><el-button @click="showRename = false">取消</el-button><el-button type="primary" @click="doRename">确认</el-button></template>
+      <template #footer><el-button @click="showRename = false">取消</el-button><el-button type="primary"
+          @click="doRename">确认</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="showGuide" :title="guideTitle" width="820px" top="6vh">
@@ -293,7 +285,8 @@
                   <el-option label="建议" value="recommended" />
                   <el-option label="可选" value="optional" />
                 </el-select>
-                <el-button size="small" type="danger" text :disabled="templateDraft.sections.length <= 1" @click="removeTemplateSection(index)">删除</el-button>
+                <el-button size="small" type="danger" text :disabled="templateDraft.sections.length <= 1"
+                  @click="removeTemplateSection(index)">删除</el-button>
               </div>
               <el-button size="small" @click="addTemplateSection">+ 新增结构项</el-button>
             </div>
@@ -344,6 +337,50 @@
         </template>
       </template>
     </el-dialog>
+
+    <!-- 创建前实时校验 -->
+    <el-dialog v-model="showValidation" title="创建前检查" width="620px">
+      <div class="validation-body">
+        <div class="validation-row">
+          <span class="validation-label">标题</span>
+          <span class="validation-ok">已填写</span>
+        </div>
+        <div class="validation-row">
+          <span class="validation-label">格式要求</span>
+          <span class="validation-value">{{ validationGuide?.guide || '自由格式：建议使用小标题分节、条目化表达' }}</span>
+        </div>
+        <div v-if="requiredSections.length" class="validation-row">
+          <span class="validation-label">必填结构项</span>
+          <span class="validation-value">{{ requiredSections.join('、') }}</span>
+        </div>
+        <div class="validation-row">
+          <span class="validation-label">检查结果</span>
+          <span v-if="!validationIssues.length" class="validation-ok">通过</span>
+          <span v-else class="validation-value">{{ validationIssues.length }} 条提示</span>
+        </div>
+        <ul v-if="validationIssues.length" class="validation-issues">
+          <li v-for="(issue, i) in validationIssues" :key="i" :class="issue.level">
+            {{ issue.level === 'error' ? '✕' : '⚠' }} {{ issue.message }}
+          </li>
+        </ul>
+      </div>
+      <template #footer>
+        <el-button @click="showValidation = false">返回修改</el-button>
+        <el-button type="primary" :loading="saving" @click="confirmCreate">继续创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑器选中文本右键菜单 -->
+    <div v-if="selectionMenu.visible" class="selection-menu"
+      :style="{ left: selectionMenu.x + 'px', top: selectionMenu.y + 'px' }" @mousedown.stop>
+      <div class="selection-menu-title">已选中 {{ selectionMenu.text.length }} 字</div>
+      <button class="selection-menu-item" :disabled="selectionPolishing" @click="runSelectionPolish('replace')">
+        {{ selectionPolishing ? 'AI 润色中…' : 'AI润色（替换）' }}
+      </button>
+      <button class="selection-menu-item" :disabled="selectionPolishing" @click="runSelectionPolish('append')">
+        AI润色（追加）
+      </button>
+    </div>
   </div>
 </template>
 
@@ -432,10 +469,39 @@ const createLabel = computed(() => {
   return labels[form.value.doc_type] || '新建文件'
 })
 
-// ── 编辑模式 / 提交后预览 / AI 润色 / 模板说明 ──
-const editMode = ref<'edit' | 'split' | 'preview'>('edit')
+// ── 提交后检查（质量分/可发布状态显示在编辑器工具栏“预览”开关左侧） / AI 润色 / 模板说明 ──
 const previewResult = ref<any>(null)
-const previewLoading = ref(false)
+const previewMeta = ref<any>(null)
+
+/** 质量分/可发布状态文本（随编辑内容实时刷新） */
+const previewQualityText = computed(() => {
+  const r = previewResult.value
+  if (!r || r.quality_score == null) return '质量分 —'
+  return `质量分 ${Math.round(r.quality_score)} · ${r.status_hint === 'active' ? '可发布' : '待完善'}`
+})
+
+/** 状态配色 class：可发布=绿色，待完善=橙色 */
+const previewQualityClass = computed(() => {
+  const r = previewResult.value
+  if (!r || r.quality_score == null) return 'kb-quality-chip'
+  return r.status_hint === 'active' ? 'kb-quality-chip kb-quality-ok' : 'kb-quality-chip kb-quality-draft'
+})
+
+/** v-md-editor 自定义工具栏项：质量分/可发布状态，显示在“预览”开关左侧（预览与目录导航按钮相邻） */
+const editorToolbar = {
+  'kb-quality': {
+    name: 'kb-quality',
+    icon: () => previewQualityClass.value,
+    text: () => previewQualityText.value,
+  },
+}
+const titleInputRef = ref<any>(null)
+const titleError = ref('')
+const showValidation = ref(false)
+const validationIssues = ref<any[]>([])
+const validationGuide = ref<any>(null)
+const selectionMenu = ref({ visible: false, x: 0, y: 0, text: '', start: 0, end: 0 })
+const selectionPolishing = ref(false)
 const polishing = ref(false)
 const polishSnapshot = ref<string | null>(null)
 const polishElapsed = ref(0)
@@ -457,6 +523,11 @@ let previewTimer: ReturnType<typeof setTimeout> | null = null
 
 const currentTemplate = computed(
   () => templates.value.find(t => t.doc_type === form.value.doc_type) || null,
+)
+const requiredSections = computed(() =>
+  (currentTemplate.value?.sections || [])
+    .filter(section => section.level === 'required')
+    .map(section => section.title),
 )
 const guideTitle = computed(
   () => `格式说明${currentTemplate.value ? ' · ' + currentTemplate.value.name : ''}`,
@@ -498,7 +569,139 @@ function skeletonFor(docType: string): string {
 function replaceEditorContent(text: string) {
   form.value.content = text
   editorKey.value += 1
+  selectionMenu.value.visible = false
   nextTick(() => refreshPreview())
+}
+
+/** 局部替换编辑器文本：直接写入 textarea（不重建编辑器），保持滚动位置与光标 */
+function spliceEditorText(start: number, end: number, insert: string) {
+  const textarea = document.querySelector('.v-md-textarea-editor textarea') as HTMLTextAreaElement | null
+  const content = form.value.content
+  const merged = content.slice(0, start) + insert + content.slice(end)
+  if (!textarea) {
+    replaceEditorContent(merged) // 兜底：找不到编辑区时整体替换
+    return
+  }
+  const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+  if (nativeSetter) {
+    nativeSetter.call(textarea, merged)
+  } else {
+    textarea.value = merged
+  }
+  // 触发 input 事件让 v-model 同步
+  textarea.dispatchEvent(new Event('input', { bubbles: true }))
+  textarea.setSelectionRange(start + insert.length, start + insert.length)
+}
+
+/** 预览页质量分/可发布状态（进入预览时实时计算） */
+async function loadPreviewMeta() {
+  if (!form.value.content) {
+    previewMeta.value = null
+    return
+  }
+  try {
+    const { data } = await knowledgeApi.formatPreview({
+      content: form.value.content,
+      doc_type: form.value.doc_type,
+      title: form.value.title,
+    })
+    previewMeta.value = data
+  } catch {
+    previewMeta.value = null
+  }
+}
+
+function closePreview() {
+  viewState.value = 'list'
+  editingId.value = null
+  fetch()
+}
+
+// ── 编辑器选中文本右键菜单 ──
+function onEditorContextMenu(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  const textarea = target.closest('textarea') as HTMLTextAreaElement | null
+  if (!textarea) return
+  const start = textarea.selectionStart ?? 0
+  const end = textarea.selectionEnd ?? 0
+  if (start === end) return  // 无选区时保留浏览器原生菜单
+  const text = textarea.value.slice(start, end)
+  if (!text.trim()) return
+  event.preventDefault()
+  selectionMenu.value = {
+    visible: true,
+    x: Math.min(event.clientX, window.innerWidth - 230),
+    y: Math.min(event.clientY, window.innerHeight - 140),
+    text,
+    start,
+    end,
+  }
+}
+
+function closeSelectionMenu() {
+  selectionMenu.value.visible = false
+}
+
+function onGlobalMouseDown(event: MouseEvent) {
+  if (!selectionMenu.value.visible) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.selection-menu')) return
+  closeSelectionMenu()
+}
+
+function onGlobalKeyDown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && selectionMenu.value.visible) {
+    closeSelectionMenu()
+  }
+}
+
+/** 选中文本所属章节（选区之前的最近一个 Markdown 标题），用于对齐格式说明 */
+function sectionHeadingFor(content: string, index: number): string {
+  const lines = content.slice(0, Math.max(0, index)).split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const matched = lines[i].match(/^(#{1,6})\s+(.+?)\s*$/)
+    if (matched) return `${matched[1]} ${matched[2]}`.trim()
+  }
+  return ''
+}
+
+/** 仅润色选中文本：替换选区或追加到选区之后 */
+async function runSelectionPolish(mode: 'replace' | 'append') {
+  if (selectionPolishing.value) return
+  const selected = selectionMenu.value
+  if (!selected.visible || !selected.text.trim()) return
+  selectionPolishing.value = true
+  try {
+    const { data } = await knowledgeApi.polishSelection({
+      content: selected.text,
+      doc_type: form.value.doc_type,
+      title: form.value.title,
+      section: sectionHeadingFor(form.value.content, selected.start),
+    })
+    const polished = (data.polished_content || '').trim()
+    const original = selected.text
+    closeSelectionMenu()
+    if (!polished || polished === original.trim()) {
+      const notes: string[] = Array.isArray(data.notes) ? data.notes : []
+      ElMessage.info(notes[0] || '选中文本无需调整')
+      return
+    }
+    const content = form.value.content
+    const start = Math.min(selected.start, content.length)
+    const end = Math.min(selected.end, content.length)
+    if (mode === 'replace') {
+      spliceEditorText(start, end, polished)
+    } else {
+      const needsNewline = end > 0 && content[end - 1] !== '\n'
+      spliceEditorText(end, end, (needsNewline ? '\n\n' : '') + polished)
+    }
+    polishSnapshot.value = null
+    ElMessage.success(mode === 'replace' ? '已替换为 AI 润色结果' : '已在选中内容后追加 AI 润色结果')
+  } catch (e: any) {
+    ElMessage.error('选区润色失败: ' + (e?.response?.data?.detail || e?.message))
+  } finally {
+    selectionPolishing.value = false
+  }
 }
 
 function startEditTemplate() {
@@ -601,11 +804,6 @@ async function insertSkeleton() {
   }
 }
 
-function defaultEditMode(_docType: string): 'edit' | 'split' {
-  // 新建/编辑文件默认分屏（左侧编辑、右侧提交后预览）
-  return 'split'
-}
-
 function schedulePreview() {
   if (previewTimer) clearTimeout(previewTimer)
   previewTimer = setTimeout(() => refreshPreview(), 500)
@@ -613,7 +811,6 @@ function schedulePreview() {
 
 async function refreshPreview() {
   if (viewState.value !== 'edit') return
-  previewLoading.value = true
   try {
     const { data } = await knowledgeApi.formatPreview({
       content: form.value.content,
@@ -623,8 +820,6 @@ async function refreshPreview() {
     previewResult.value = data
   } catch (e: any) {
     console.warn('[KnowledgeBase] format preview failed:', e?.response?.data?.detail || e?.message || e)
-  } finally {
-    previewLoading.value = false
   }
 }
 
@@ -656,7 +851,6 @@ async function aiPolish() {
       return
     }
     polishSnapshot.value = before
-    previewResult.value = data
     replaceEditorContent(polished)
     if (data.source === 'llm') {
       ElMessage.success('AI 润色完成，已按模板规范化')
@@ -858,6 +1052,7 @@ async function loadDocumentContent(id: number) {
     const { data } = await knowledgeApi.get(id)
     form.value.content = data.content || ''
     nextTick(afterPreviewRender)
+    loadPreviewMeta()
   } catch { /* ignore */ }
 }
 
@@ -879,6 +1074,53 @@ function rebuildPathToNode(targetId: number) {
   }
   search(folderTree.value, [])
 }
+
+// ============================================================
+// 导航位置持久化 — 切换到对话等其他页面再回来时，恢复到上次浏览的目录
+// ============================================================
+const KB_NAV_STORAGE_KEY = 'kb:lastNavPath'
+
+function saveNavState() {
+  try {
+    const path = folderPath.value.map((f: any) => ({ id: f.id, title: f.title, doc_type: f.doc_type }))
+    sessionStorage.setItem(KB_NAV_STORAGE_KEY, JSON.stringify(path))
+  } catch { /* ignore */ }
+}
+
+function restoreNavState() {
+  try {
+    const raw = sessionStorage.getItem(KB_NAV_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed) || !parsed.length) return
+    folderPath.value = parsed.map((f: any) => ({ id: f.id, title: f.title, doc_type: f.doc_type || 'folder' }))
+    currentFolder.value = folderPath.value[folderPath.value.length - 1] || null
+  } catch { /* ignore */ }
+}
+
+/** 与文件夹树比对：若恢复的路径中有目录已不存在，则截断到最后一个有效目录 */
+function validateRestoredPath() {
+  if (!folderPath.value.length) return
+  const validIds = new Set<number>()
+  const walk = (nodes: any[]) => {
+    for (const n of nodes) {
+      validIds.add(n.id)
+      if (n.children && n.children.length) walk(n.children)
+    }
+  }
+  walk(folderTree.value)
+  const kept: any[] = []
+  for (const f of folderPath.value) {
+    if (validIds.has(f.id)) kept.push(f)
+    else break
+  }
+  if (kept.length === folderPath.value.length) return
+  folderPath.value = kept
+  currentFolder.value = kept.length ? kept[kept.length - 1] : null
+  fetch()
+}
+
+watch([folderPath, currentFolder], () => saveNavState(), { deep: true })
 
 // 路径深度检查
 function checkPathDepth() {
@@ -903,12 +1145,33 @@ async function fetch() {
     if (currentFolder.value) params.parent_id = currentFolder.value.id
     const { data } = await knowledgeApi.list(params)
     items.value = data.items; total.value = data.total
-  } catch {} finally { loading.value = false }
+  } catch { } finally { loading.value = false }
 }
 async function doSearch() {
   if (!searchQuery.value.trim()) { await fetch(); return }
   loading.value = true
-  try { const { data } = await knowledgeApi.search(searchQuery.value, { page: page.value, page_size: pageSize }); items.value = data.items; total.value = data.total } catch {} finally { loading.value = false }
+  try {
+    // 仅按文件名（标题）匹配搜索
+    const { data } = await knowledgeApi.search(searchQuery.value, {
+      page: page.value,
+      page_size: pageSize,
+      title_only: true,
+    })
+    items.value = data.items
+    total.value = data.total
+  } catch { } finally { loading.value = false }
+}
+
+// 输入即自动搜索（防抖 300ms）
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+watch(searchQuery, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { page.value = 1; doSearch() }, 300)
+})
+
+/** 列表刷新：有搜索词时按文件名搜索，否则列出当前目录 */
+async function reload() {
+  if (searchQuery.value.trim()) { await doSearch() } else { await fetch() }
 }
 
 // ============================================================
@@ -944,6 +1207,7 @@ function openItem(row: any) {
     if (row.content) {
       form.value = { title: row.title, doc_type: row.doc_type || 'note', content: row.content }
       nextTick(afterPreviewRender)
+      loadPreviewMeta()
     } else {
       form.value = { title: row.title, doc_type: row.doc_type || 'note', content: '' }
       loadDocumentContent(row.id)
@@ -952,7 +1216,6 @@ function openItem(row: any) {
 }
 function enterEdit() {
   polishSnapshot.value = null
-  editMode.value = defaultEditMode(form.value.doc_type)
   viewState.value = 'edit'
   nextTick(() => refreshPreview())
 }
@@ -961,7 +1224,7 @@ function enterEdit() {
 // 更多菜单操作
 // ============================================================
 async function handleRowAction(cmd: string, row: any) {
-  if (cmd === 'edit') { form.value = { title: row.title, doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; polishSnapshot.value = null; editMode.value = defaultEditMode(form.value.doc_type); viewState.value = 'edit'; nextTick(() => refreshPreview()) }
+  if (cmd === 'edit') { form.value = { title: row.title, doc_type: row.doc_type || 'note', content: row.content || '' }; editingId.value = row.id; polishSnapshot.value = null; viewState.value = 'edit'; nextTick(() => refreshPreview()) }
   else if (cmd === 'rename') { renameId.value = row.id; renameName.value = row.title; showRename.value = true }
   else if (cmd === 'pin') {
     try {
@@ -987,7 +1250,6 @@ async function handleCreateCommand(cmd: string) {
   editingId.value = null
   form.value = { title: '', doc_type: docType, content: skeletonFor(docType) }
   polishSnapshot.value = null
-  editMode.value = 'split'
   viewState.value = 'edit'
   nextTick(() => refreshPreview())
 }
@@ -996,6 +1258,39 @@ async function doUpload() { if (!uploadFile.value) return; uploading.value = tru
 function createFolder() { if (!folderName.value.trim()) return; if (!checkPathDepth()) { showFolder.value = false; return } const data: any = { title: folderName.value, content: '', doc_type: 'folder' }; if (currentFolder.value) data.parent_id = currentFolder.value.id; knowledgeApi.create(data).then(() => { ElMessage.success('文件夹已创建'); showFolder.value = false; folderName.value = ''; fetch() }).catch(() => ElMessage.error('创建失败')) }
 
 async function save() {
+  if (!editingId.value) {
+    // 新建：先做实时校验（标题必填 + 格式提示），通过后再弹确认
+    await validateBeforeCreate()
+    return
+  }
+  await doSave()
+}
+
+/** 创建前实时校验：标题必填 + 当前格式校验结果 */
+async function validateBeforeCreate() {
+  titleError.value = ''
+  if (!form.value.title.trim()) {
+    titleError.value = '标题为必填项，请填写标题后再创建'
+    ElMessage.warning(titleError.value)
+    titleInputRef.value?.focus?.()
+    return
+  }
+  if (!form.value.content.trim()) {
+    ElMessage.warning('内容不能为空')
+    return
+  }
+  await refreshPreview()
+  validationIssues.value = previewResult.value?.issues || []
+  validationGuide.value = currentTemplate.value
+  showValidation.value = true
+}
+
+async function confirmCreate() {
+  showValidation.value = false
+  await doSave()
+}
+
+async function doSave() {
   saving.value = true
   try {
     const data: any = { ...form.value }
@@ -1009,6 +1304,7 @@ async function save() {
     viewState.value = 'list'
     editingId.value = null
     polishSnapshot.value = null
+    selectionMenu.value.visible = false
     await fetch()
     showSaveResult(resp)
   } catch (e: any) {
@@ -1023,9 +1319,12 @@ async function save() {
 let pasteHandler: ((e: ClipboardEvent) => void) | null = null
 
 onMounted(() => {
+  restoreNavState()
   fetch()
-  loadTree()
+  loadTree().then(validateRestoredPath)
   loadTemplates()
+  document.addEventListener('mousedown', onGlobalMouseDown)
+  document.addEventListener('keydown', onGlobalKeyDown)
 
   // 延迟绑定：等待 v-md-editor 渲染出 textarea
   nextTick(() => {
@@ -1086,6 +1385,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onGlobalMouseDown)
+  document.removeEventListener('keydown', onGlobalKeyDown)
   if (pasteHandler) {
     const textarea = document.querySelector('.v-md-textarea-editor textarea')
     if (textarea) {
@@ -1129,52 +1430,325 @@ function toggleSort() {
 </script>
 
 <style scoped>
-.kb-container { padding: 24px; margin: 0 auto; width: 100%; max-width: 1100px; }
-.kb-container.kb-full { max-width: none; padding: 24px 24px 0; }
-.kb-breadcrumb { margin-bottom: 16px; }
-.kb-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.kb-header h2 { font-size: 20px; font-weight: 600; color: #1f2937; margin: 0; }
-.kb-header-right { display: flex; align-items: center; gap: 12px; }
-.kb-search { width: 280px; }
-.kb-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; height: 36px; }
-.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 8px; }
-.view-toggle .el-button { padding: 6px 12px; }
-.cell-name { display: flex; align-items: center; gap: 8px; }
-.file-icon { font-size: 18px; flex-shrink: 0; }
-.file-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-title:hover { text-decoration: underline; }
-.kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
-.kb-card { padding: 20px 16px; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; cursor: pointer; transition: all 0.12s; text-align: center; }
-.kb-card:hover { border-color: #2563eb; box-shadow: 0 2px 12px rgba(37,99,235,0.08); }
-.card-icon { font-size: 36px; margin-bottom: 8px; }
-.card-title { font-size: 13px; color: #1f2937; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 4px; }
-.card-meta { font-size: 11px; color: #9ca3af; }
-.kb-empty { text-align: center; padding: 80px 20px; }
-.empty-icon { font-size: 56px; margin-bottom: 16px; opacity: 0.5; }
-.empty-title { font-size: 18px; font-weight: 500; color: #4b5563; margin-bottom: 8px; }
-.empty-desc { font-size: 14px; color: #9ca3af; }
-/* 预览页 — 正文全宽 + 右侧悬浮目录 */
-.preview-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-shrink: 0; }
-.preview-header-left { display: flex; align-items: center; gap: 8px; }
-.preview-header-right { display: flex; gap: 8px; }
-.template-sections { width: 100%; display: flex; flex-direction: column; gap: 8px; }
-.template-section-row { display: flex; align-items: center; gap: 8px; }
-.guide-body h4 { margin: 14px 0 8px; font-size: 14px; color: #1f2937; }
-.guide-body h4:first-child { margin-top: 0; }
-.guide-text { margin: 0; color: #4b5563; font-size: 13px; line-height: 1.8; }
-.guide-example {
-  max-height: 320px; overflow-y: auto; padding: 12px 16px;
-  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
-  font-size: 13px; line-height: 1.7;
+.kb-container {
+  padding: 24px;
+  margin: 0 auto;
+  width: 100%;
+  max-width: 1100px;
 }
-.preview-header-title { font-size: 18px; font-weight: 600; color: #1f2937; }
-.preview-layout { position: relative; display: flex; gap: 0; height: calc(100vh - 180px); }
+
+.kb-container.kb-full {
+  max-width: none;
+  padding: 24px 24px 0;
+}
+
+.kb-breadcrumb {
+  margin-bottom: 16px;
+}
+
+.kb-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.kb-header h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+.kb-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.kb-search {
+  width: 280px;
+}
+
+.kb-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  height: 36px;
+}
+
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.view-toggle .el-button {
+  padding: 6px 12px;
+}
+
+.cell-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.file-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-title:hover {
+  text-decoration: underline;
+}
+
+.kb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.kb-card {
+  padding: 20px 16px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.12s;
+  text-align: center;
+}
+
+.kb-card:hover {
+  border-color: #2563eb;
+  box-shadow: 0 2px 12px rgba(37, 99, 235, 0.08);
+}
+
+.card-icon {
+  font-size: 36px;
+  margin-bottom: 8px;
+}
+
+.card-title {
+  font-size: 13px;
+  color: #1f2937;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 4px;
+}
+
+.card-meta {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.kb-empty {
+  text-align: center;
+  padding: 80px 20px;
+}
+
+.empty-icon {
+  font-size: 56px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.empty-title {
+  font-size: 18px;
+  font-weight: 500;
+  color: #4b5563;
+  margin-bottom: 8px;
+}
+
+.empty-desc {
+  font-size: 14px;
+  color: #9ca3af;
+}
+
+/* 预览页 — 正文全宽 + 右侧悬浮目录 */
+.preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}
+
+.preview-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title-field {
+  position: relative;
+}
+
+.field-error {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #dc2626;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.validation-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  color: #374151;
+}
+
+.validation-row {
+  display: flex;
+  gap: 10px;
+  line-height: 1.7;
+}
+
+.validation-label {
+  width: 84px;
+  flex-shrink: 0;
+  color: #6b7280;
+}
+
+.validation-value {
+  flex: 1;
+  word-break: break-word;
+}
+
+.validation-ok {
+  color: #059669;
+  font-weight: 600;
+}
+
+.validation-issues {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.validation-issues .error {
+  color: #dc2626;
+}
+
+.validation-issues .warn {
+  color: #d97706;
+}
+
+.selection-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 210px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.selection-menu-title {
+  padding: 4px 8px 6px;
+  font-size: 12px;
+  color: #9ca3af;
+  border-bottom: 1px solid #f3f4f6;
+  margin-bottom: 4px;
+}
+
+.selection-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.selection-menu-item:hover:not(:disabled) {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.selection-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.template-sections {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.template-section-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guide-body h4 {
+  margin: 14px 0 8px;
+  font-size: 14px;
+  color: #1f2937;
+}
+
+.guide-body h4:first-child {
+  margin-top: 0;
+}
+
+.guide-text {
+  margin: 0;
+  color: #4b5563;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.guide-example {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 12px 16px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.preview-layout {
+  position: relative;
+  display: flex;
+  gap: 0;
+  height: calc(100vh - 180px);
+}
 
 .preview-body {
-  flex: 1; overflow-y: auto; padding: 24px 48px 24px 24px;
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 48px 24px 24px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
   scroll-behavior: smooth;
 }
+
 .preview-body :deep(.v-md-editor-preview img),
 .preview-body :deep(img) {
   max-width: 100%;
@@ -1190,7 +1764,9 @@ function toggleSort() {
    ============================================================ */
 .toc-float {
   position: absolute;
-  right: 12px; top: 50%;
+  /* 与 preview-body 右侧滚动条保持间距，避免遮挡滚动条影响操作 */
+  right: 30px;
+  top: 50%;
   transform: translateY(-50%);
   z-index: 10;
   display: flex;
@@ -1200,19 +1776,28 @@ function toggleSort() {
 /* 收起态的竖向进度条 */
 .toc-float-toggle {
   position: relative;
-  width: 3px; height: 120px;
+  width: 3px;
+  height: 120px;
   background: #e5e7eb;
-  border: none; border-radius: 2px;
-  cursor: pointer; padding: 0;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  padding: 0;
   transition: width 0.15s;
 }
-.toc-float-toggle:hover { width: 5px; background: #d1d5db; }
+
+.toc-float-toggle:hover {
+  width: 5px;
+  background: #d1d5db;
+}
 
 /* 当前阅读位置圆点 */
 .toc-float-dot {
   position: absolute;
-  left: 50%; top: 0;
-  width: 9px; height: 9px;
+  left: 50%;
+  top: 0;
+  width: 9px;
+  height: 9px;
   background: #2563eb;
   border-radius: 50%;
   transform: translate(-50%, -50%);
@@ -1224,39 +1809,70 @@ function toggleSort() {
 /* 悬停展开的目录面板 */
 .toc-float-panel {
   position: absolute;
-  right: 16px; top: 50%;
+  right: 16px;
+  top: 50%;
   transform: translateY(-50%);
-  width: 220px; max-height: 70vh;
+  width: 220px;
+  max-height: 70vh;
   overflow-y: auto;
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
   padding: 8px 0;
-  opacity: 0; visibility: hidden;
+  opacity: 0;
+  visibility: hidden;
   transition: opacity 0.15s ease, visibility 0.15s;
 }
-.toc-float-expanded .toc-float-panel { opacity: 1; visibility: visible; }
+
+.toc-float-expanded .toc-float-panel {
+  opacity: 1;
+  visibility: visible;
+}
 
 .toc-float-title {
   padding: 4px 14px 8px;
-  font-size: 12px; font-weight: 600; color: #9ca3af;
-  border-bottom: 1px solid #f3f4f6; margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9ca3af;
+  border-bottom: 1px solid #f3f4f6;
+  margin-bottom: 4px;
   letter-spacing: 0.5px;
 }
 
 .toc-item {
-  padding: 5px 14px; font-size: 12px; color: #6b7280;
-  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 5px 14px;
+  font-size: 12px;
+  color: #6b7280;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: background 0.1s, color 0.1s;
   line-height: 1.5;
 }
-.toc-item:hover { background: #f3f4f6; color: #374151; }
+
+.toc-item:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
 
 /* 层级视觉：h1/h2/h3 不同缩进与字重 */
-.toc-level-1 { font-weight: 600; color: #374151; padding-left: 14px; }
-.toc-level-2 { padding-left: 26px; }
-.toc-level-3 { padding-left: 38px; color: #9ca3af; font-size: 11px; }
+.toc-level-1 {
+  font-weight: 600;
+  color: #374151;
+  padding-left: 14px;
+}
+
+.toc-level-2 {
+  padding-left: 26px;
+}
+
+.toc-level-3 {
+  padding-left: 38px;
+  color: #9ca3af;
+  font-size: 11px;
+}
 
 /* 当前阅读章节高亮 */
 .toc-active {
@@ -1265,56 +1881,226 @@ function toggleSort() {
   border-left: 2px solid #2563eb;
   font-weight: 600;
 }
-.toc-level-1.toc-active { padding-left: 12px; }
-.toc-level-2.toc-active { padding-left: 24px; }
-.toc-level-3.toc-active { padding-left: 36px; }
+
+.toc-level-1.toc-active {
+  padding-left: 12px;
+}
+
+.toc-level-2.toc-active {
+  padding-left: 24px;
+}
+
+.toc-level-3.toc-active {
+  padding-left: 36px;
+}
 
 /* 移动端：隐藏悬浮目录，改为全宽阅读 */
 @media (max-width: 768px) {
-  .toc-float { display: none; }
-  .preview-body { padding: 16px; }
+  .toc-float {
+    display: none;
+  }
+
+  .preview-body {
+    padding: 16px;
+  }
 }
-.kb-editor-page { display: flex; flex-direction: column; height: calc(100vh - 140px); }
-.editor-body { flex: 1; min-height: 0; display: flex; gap: 12px; position: relative; }
-.polish-overlay { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(255, 255, 255, 0.85); border-radius: 8px; }
-.polish-spin { width: 36px; height: 36px; border: 3px solid #e5e7eb; border-top-color: #409eff; border-radius: 50%; animation: polish-rotate 0.9s linear infinite; }
-@keyframes polish-rotate { to { transform: rotate(360deg); } }
-.polish-title { font-size: 15px; font-weight: 600; color: #303133; }
-.polish-elapsed { font-size: 13px; color: #606266; }
-.polish-tip { font-size: 12px; color: #909399; }
-.editor-pane { flex: 1; min-width: 0; height: 100%; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
-.preview-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background: #fff; }
-.preview-pane-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #f0f0f0; font-size: 13px; color: #374151; }
-.preview-quality { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b7280; }
-.preview-pane-body { flex: 1; overflow: auto; padding: 12px 16px; }
-.preview-loading { color: #9ca3af; font-size: 13px; padding: 12px; }
-.preview-issues { margin-bottom: 8px; }
-.preview-issue { font-size: 12px; line-height: 1.7; }
-.preview-issue.error { color: #dc2626; }
-.preview-issue.warn { color: #d97706; }
-.preview-suggest { font-size: 12px; color: #6b7280; margin-bottom: 8px; }
-.preview-notes {
-  margin-bottom: 8px; padding: 8px 10px; border-radius: 6px;
-  background: #f0f9ff; border: 1px solid #dbeafe;
-  color: #2563eb; font-size: 12px; line-height: 1.8;
+
+.kb-editor-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 140px);
 }
-.preview-rendered { font-size: 14px; line-height: 1.7; color: #374151; }
-.mode-toggle .el-button { padding: 6px 10px; }
-.card-quality { font-size: 11px; color: #2563eb; margin-top: 4px; }
-.md-preview { padding: 16px 20px; font-size: 14px; line-height: 1.8; }
-.md-preview :deep(h2) { font-size: 18px; margin: 16px 0 8px; }
-.md-preview :deep(h3) { font-size: 15px; margin: 12px 0 6px; }
-.md-preview :deep(p) { margin: 6px 0; }
-.md-preview :deep(code) { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
-.md-preview :deep(pre) { background: #1f2937; color: #f9fafb; padding: 12px 16px; border-radius: 8px; overflow-x: auto; }
-.md-preview :deep(pre code) { background: none; padding: 0; color: inherit; }
-.md-preview :deep(blockquote) { border-left: 3px solid #d1d5db; padding-left: 12px; color: #6b7280; margin: 8px 0; }
-.md-preview :deep(table) { border-collapse: collapse; width: 100%; margin: 12px 0; }
-.md-preview :deep(th), .md-preview :deep(td) { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; font-size: 13px; }
-.md-preview :deep(th) { background: #f3f4f6; font-weight: 600; }
-.md-preview :deep(tr:nth-child(even)) { background: #fafafa; }
+
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  position: relative;
+}
+
+.polish-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+}
+
+.polish-spin {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #e5e7eb;
+  border-top-color: #409eff;
+  border-radius: 50%;
+  animation: polish-rotate 0.9s linear infinite;
+}
+
+@keyframes polish-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.polish-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.polish-elapsed {
+  font-size: 13px;
+  color: #606266;
+}
+
+.polish-tip {
+  font-size: 12px;
+  color: #909399;
+}
+
+.editor-pane {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.preview-quality {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+/* 编辑器工具栏中的质量分/可发布状态（“预览”开关左侧） */
+.editor-pane :deep(.v-md-editor__toolbar-item-kb-quality) {
+  cursor: default;
+  font-size: 12px;
+  color: #6b7280;
+  max-width: none;
+}
+
+.editor-pane :deep(.v-md-editor__toolbar-item-kb-quality:hover) {
+  background: transparent;
+}
+
+/* 质量分项不显示悬浮提示 */
+.editor-pane :deep(.v-md-editor__toolbar-item-kb-quality .v-md-editor__tooltip) {
+  display: none !important;
+}
+
+.editor-pane :deep(.kb-quality-ok) {
+  color: #059669;
+  font-weight: 600;
+}
+
+.editor-pane :deep(.kb-quality-draft) {
+  color: #d97706;
+  font-weight: 600;
+}
+
+.card-quality {
+  font-size: 11px;
+  color: #2563eb;
+  margin-top: 4px;
+}
+
+.md-preview {
+  padding: 16px 20px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.md-preview :deep(h2) {
+  font-size: 18px;
+  margin: 16px 0 8px;
+}
+
+.md-preview :deep(h3) {
+  font-size: 15px;
+  margin: 12px 0 6px;
+}
+
+.md-preview :deep(p) {
+  margin: 6px 0;
+}
+
+.md-preview :deep(code) {
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.md-preview :deep(pre) {
+  background: #1f2937;
+  color: #f9fafb;
+  padding: 12px 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.md-preview :deep(pre code) {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+.md-preview :deep(blockquote) {
+  border-left: 3px solid #d1d5db;
+  padding-left: 12px;
+  color: #6b7280;
+  margin: 8px 0;
+}
+
+.md-preview :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+}
+
+.md-preview :deep(th),
+.md-preview :deep(td) {
+  border: 1px solid #d1d5db;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 13px;
+}
+
+.md-preview :deep(th) {
+  background: #f3f4f6;
+  font-weight: 600;
+}
+
+.md-preview :deep(tr:nth-child(even)) {
+  background: #fafafa;
+}
 
 /* 更多按钮 */
-.row-more-btn { width: 28px; height: 28px; border-radius: 6px; border: none; background: transparent; color: #9ca3af; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.12s; }
-.row-more-btn:hover { background: #e5e7eb; color: #374151; }
+.row-more-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s;
+}
+
+.row-more-btn:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
 </style>

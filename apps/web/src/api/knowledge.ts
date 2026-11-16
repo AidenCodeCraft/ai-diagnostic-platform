@@ -98,7 +98,8 @@ export const knowledgeApi = {
   delete(id: number) {
     return client.delete(`/knowledge/${id}`)
   },
-  search(q: string, params?: { page?: number; page_size?: number }) {
+  /** 搜索：title_only=true 时仅按文件名匹配（知识库搜索） */
+  search(q: string, params?: { page?: number; page_size?: number; title_only?: boolean }) {
     return client.get('/knowledge/search', { params: { q, ...params } })
   },
   categories() {
@@ -142,6 +143,12 @@ export const knowledgeApi = {
   polish(data: { content: string; doc_type?: string; title?: string }, signal?: AbortSignal) {
     return client.post<FormatPreview & { polished_content: string; source: 'llm' | 'rule' }>(
       '/knowledge/polish', data, { timeout: 120000, signal },
+    )
+  },
+  /** 仅润色选中文本片段（按格式说明优化表达，不套用模板分节） */
+  polishSelection(data: { content: string; doc_type?: string; title?: string; section?: string }) {
+    return client.post<{ polished_content: string; original: string; source: 'llm' | 'rule'; notes: string[] }>(
+      '/knowledge/polish', { ...data, selection: true }, { timeout: 120000 },
     )
   },
 }

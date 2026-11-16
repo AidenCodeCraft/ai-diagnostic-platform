@@ -150,6 +150,17 @@ class TestKnowledgePolish:
         assert numbered.startswith("1. ")
         assert "\n\n2. " in numbered
 
+    def test_renumbered_ordinals_and_dates_are_tolerated(self):
+        original = "### 14. 定点进出信息\n\n**作者：卢益方 2026.08.31**"
+        polished = "### 1. 定点进出信息\n\n- **作者**：卢益方 2026年8月31日"
+        assert KnowledgePolishService._missing_tokens(original, polished) == []
+
+    def test_missing_technical_numbers_are_detected(self):
+        original = "平台下发9206后返回-5007。"
+        polished = "平台下发命令后返回错误。"
+        missing = KnowledgePolishService._missing_tokens(original, polished)
+        assert "9206" in missing
+
     def test_numbers_multiple_free_form_sections(self):
         content = "## 安装要求\n\n内容A\n\n## 使用限制\n\n内容B"
         numbered = KnowledgePolishService._number_parallel_items(content, "knowledge")
@@ -167,6 +178,54 @@ class TestKnowledgePolish:
         polished = result["polished_content"]
         assert "1. " in polished
         assert "2. " in polished
+
+class TestSelectionPolish:
+    def test_fallback_keeps_original(self, monkeypatch):
+        monkeypatch.setattr(KnowledgePolishService, "_default_provider", lambda self: None)
+        result = KnowledgePolishService().polish_selection("设备有点问题需要检查一下。", "case")
+        assert result["source"] == "rule"
+        assert result["polished_content"] == "设备有点问题需要检查一下。"
+        assert result["notes"]
+
+    def test_llm_selection_polish(self):
+        provider = _FakeProvider("设备存在异常，需要检查。")
+        result = KnowledgePolishService(provider=provider).polish_selection(
+            "设备有点问题需要检查一下。", "case",
+        )
+        assert result["source"] == "llm"
+        assert result["polished_content"] == "设备存在异常，需要检查。"
+
+    def test_selection_prompt_carries_format_guide(self):
+        provider = _FakeProvider("设备存在异常，需要检查。")
+        KnowledgePolishService(provider=provider).polish_selection(
+            "设备有点问题需要检查一下。", "case", section="## 自定义章节标题",
+        )
+        assert provider.messages is not None
+        system_msg = provider.messages[0]["content"]
+        user_msg = provider.messages[-1]["content"]
+        assert "格式说明" in system_msg
+        assert "格式说明" in user_msg
+        assert "模板结构示例" in user_msg
+        assert "选中文本所属章节" in user_msg
+        assert "## 自定义章节标题" in user_msg
+        assert "待润色文本" in user_msg
+
+    def test_llm_selection_rejects_added_heading(self):
+        provider = _FakeProvider("## 现象\n\n设备存在异常，需要检查。")
+        result = KnowledgePolishService(provider=provider).polish_selection(
+            "设备有点问题需要检查一下。", "case",
+        )
+        assert result["source"] == "rule"
+        assert result["polished_content"].startswith("设备有点问题")
+        assert any("校验" in note for note in result["notes"])
+
+    def test_empty_selection_raises(self):
+        try:
+            KnowledgePolishService().polish_selection("   ", "case")
+        except ValueError as exc:
+            assert "内容为空" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
 
     def test_empty_content_raises(self):
         try:

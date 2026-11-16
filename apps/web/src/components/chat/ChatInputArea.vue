@@ -334,25 +334,39 @@ function statusText(fa: FileAttachment): string {
 }
 
 .model-select {
-  width: 150px;
+  width: 175px;
 }
 
-:deep(.model-select .el-input__wrapper) {
+/* Element Plus 2.7+ 的 el-select 使用 .el-select__wrapper（旧版为 .el-input__wrapper），
+   颜色全部走 chat-theme 的 --chat-select-* 变量，深浅色主题下均正确显示 */
+:deep(.model-select .el-select__wrapper) {
   border-radius: 20px;
   box-shadow: none !important;
-  border: 1px solid var(--chat-select-border);
+  border: none;
   background: var(--chat-select-bg);
+  color: var(--chat-select-text);
   padding: 0 12px;
+  min-height: 30px;
   height: 30px;
   font-size: 13px;
 }
 
-:deep(.model-select .el-input__inner) {
+:deep(.model-select .el-select__wrapper:hover),
+:deep(.model-select .el-select__wrapper.is-focused) {
+  box-shadow: none !important;
+  background: var(--chat-select-bg);
+}
+
+:deep(.model-select .el-select__selected-item) {
   color: var(--chat-select-text);
 }
 
-:deep(.model-select .el-input__wrapper:hover) {
-  border-color: var(--chat-select-hover-border);
+:deep(.model-select .el-select__placeholder) {
+  color: var(--chat-input-placeholder);
+}
+
+:deep(.model-select .el-select__caret) {
+  color: var(--chat-select-text);
 }
 
 .action-btn {

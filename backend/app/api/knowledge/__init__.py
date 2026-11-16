@@ -36,6 +36,8 @@ class PolishRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=50000)
     doc_type: Optional[str] = None
     title: Optional[str] = None
+    selection: bool = False  # true = 仅润色选中片段（不套用模板分节）
+    section: Optional[str] = None  # 选中文本所属章节（selection 时用于对齐格式说明）
 
 
 def get_db_session():
@@ -198,10 +200,14 @@ def polish_document(
     body: PolishRequest,
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
-    """AI 润色 + 模板规范化（LLM 不可用时自动回退规则整理）。"""
-    return KnowledgePolishService(db).polish(
-        body.content, body.doc_type, body.title or "",
-    )
+    """AI 润色：整篇按模板规范化，或仅润色选中片段（selection=true）。"""
+    service = KnowledgePolishService(db)
+    if body.selection:
+        return service.polish_selection(
+            body.content, body.doc_type, body.title or "",
+            section=(body.section or "").strip(),
+        )
+    return service.polish(body.content, body.doc_type, body.title or "")
 
 
 @router.get("/search")
@@ -210,10 +216,20 @@ def search_documents(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     project_id: Optional[int] = Query(default=None),
+    title_only: bool = Query(default=False),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
-    """Search knowledge documents by keyword."""
-    return KnowledgeService(db).search(
+    """Search knowledge documents. title_only=true 时仅按文件名匹配（知识库搜索）。"""
+    service = KnowledgeService(db)
+    if title_only:
+        result = service.search_by_title(
+            query_text=q, page=page, page_size=page_size, project_id=project_id,
+        )
+        result["items"] = [
+            KnowledgeResponse.model_validate(doc).model_dump() for doc in result["items"]
+        ]
+        return result
+    return service.search(
         query_text=q, page=page, page_size=page_size, project_id=project_id,
     )
 

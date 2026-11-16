@@ -261,6 +261,37 @@ class KnowledgeService:
 
         return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
+    def search_by_title(
+        self,
+        query_text: str,
+        page: int = 1,
+        page_size: int = 20,
+        project_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """按文件名搜索 — 仅匹配标题（含文件夹），不做全文/向量检索。"""
+        pattern = f"%{(query_text or '').strip()}%"
+        query = self.db.query(KnowledgeDocument).filter(
+            KnowledgeDocument.status == "active",
+            KnowledgeDocument.title.ilike(pattern),
+        )
+        query = self._apply_project_filter(query, project_id)
+        total = query.count()
+        items = (
+            query.order_by(
+                KnowledgeDocument.updated_at.desc(), KnowledgeDocument.id.desc()
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        self._attach_quality(items)
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
     def keyword_search(
         self,
         query_text: str,

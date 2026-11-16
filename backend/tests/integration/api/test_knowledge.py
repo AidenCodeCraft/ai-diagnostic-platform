@@ -303,3 +303,30 @@ def test_list_categories(client):
     assert resp.status_code == 200
     cats = resp.json()
     assert sorted(cats) == ["bluetooth", "usb"]
+
+
+# ------------------------------------------------------------------
+# Search
+# ------------------------------------------------------------------
+
+
+def test_search_by_title_only_matches_file_names(client):
+    client.post(
+        "/api/v1/knowledge",
+        json={"title": "设备端日志说明", "content": "内容包含特殊词组潜水艇。", "doc_type": "note"},
+    )
+    client.post(
+        "/api/v1/knowledge",
+        json={"title": "平台配置手册", "content": "另一篇文档。", "doc_type": "note"},
+    )
+
+    # 按文件名命中
+    resp = client.get("/api/v1/knowledge/search", params={"q": "日志", "title_only": True})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert [item["title"] for item in items] == ["设备端日志说明"]
+
+    # 只在内容中出现的词不命中（搜索只针对文件名）
+    resp = client.get("/api/v1/knowledge/search", params={"q": "潜水艇", "title_only": True})
+    assert resp.status_code == 200
+    assert resp.json()["items"] == []
