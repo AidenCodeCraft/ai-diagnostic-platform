@@ -1,5 +1,14 @@
 import client from './client'
 
+export interface ChatMessageVersion {
+  content: string
+  sources?: ChatSource[]
+  thinking?: {
+    text: string
+    elapsed: number
+  }
+}
+
 export interface ChatMessage {
   id: number
   session_id: number
@@ -10,6 +19,10 @@ export interface ChatMessage {
     text: string
     elapsed: number
   }
+  /** 编辑重发的版本历史（缺省=单版本） */
+  versions?: ChatMessageVersion[]
+  /** versions 中当前展示的下标 */
+  active_version?: number
   created_at: string
 }
 
@@ -56,8 +69,18 @@ export const chatApi = {
     return client.post<ChatReply>(`/chat-sessions/${sessionId}/chat`, { content, model })
   },
   /** Store a message directly (without LLM call) — for persisting analysis results */
-  saveMessage(sessionId: number, role: string, content: string, sources?: ChatSource[], thinking?: { text: string, elapsed: number }) {
-    return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, { role, content, sources, thinking })
+  saveMessage(sessionId: number, role: string, content: string, sources?: ChatSource[], thinking?: { text: string, elapsed: number }, versions?: ChatMessageVersion[], activeVersion?: number) {
+    return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, { role, content, sources, thinking, versions, active_version: activeVersion })
+  },
+  /** 更新消息（编辑重发：content / versions / active_version 等） */
+  updateMessage(sessionId: number, messageId: number, payload: {
+    content?: string
+    sources?: ChatSource[]
+    thinking?: { text: string, elapsed: number }
+    versions?: ChatMessageVersion[]
+    active_version?: number
+  }) {
+    return client.put<ChatMessage>(`/chat-sessions/${sessionId}/messages/${messageId}`, payload)
   },
   /** 更新消息反馈（like / dislike / null） */
   updateFeedback(sessionId: number, messageId: number, feedback: string | null) {

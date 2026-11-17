@@ -400,21 +400,33 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.page-title { font-size: 20px; font-weight: 600; color: #1f2937; margin: 0 0 20px; }
-.settings-tabs { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 0 16px 16px; }
+/* 主题令牌：浅色为默认，深色在 [data-theme='dark'] 下覆盖 */
+.settings-page {
+  --adm-ok-border: #10b981;
+  --adm-ok-bg: #f0fdf4;
+  --adm-card-hover-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+[data-theme='dark'] .settings-page {
+  --adm-ok-border: #34d399;
+  --adm-ok-bg: #15271c;
+  --adm-card-hover-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.page-title { font-size: 20px; font-weight: 600; color: var(--chat-layout-text); margin: 0 0 20px; }
+.settings-tabs { background: var(--chat-popup-bg); border: 1px solid var(--chat-popup-border); border-radius: 10px; padding: 0 16px 16px; }
 .config-section { padding-top: 8px; }
 .config-item { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
-.config-hint { font-size: 12px; color: #9ca3af; }
-.config-label { width: 130px; font-size: 14px; color: #374151; text-align: right; flex-shrink: 0; }
+.config-hint { font-size: 12px; color: var(--chat-copy-text); }
+.config-label { width: 130px; font-size: 14px; color: var(--chat-popup-text); text-align: right; flex-shrink: 0; }
 
 .llm-config-section { padding-top: 16px; }
 .llm-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.llm-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: #1f2937; }
+.llm-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--chat-layout-text); }
 
 .models-list { display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px; }
-.model-card { padding: 20px; border: 2px solid #e5e7eb; border-radius: 12px; background: #f9fafb; transition: all 0.2s; }
-.model-card.default { border-color: #10b981; background: #f0fdf4; }
-.model-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.model-card { padding: 20px; border: 2px solid var(--chat-popup-border); border-radius: 12px; background: var(--chat-source-bg); transition: all 0.2s; }
+.model-card.default { border-color: var(--adm-ok-border); background: var(--adm-ok-bg); }
+.model-card:hover { box-shadow: var(--adm-card-hover-shadow); }
 
 .model-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .model-title-row { display: flex; align-items: center; gap: 12px; }
@@ -422,19 +434,19 @@ onMounted(() => {
 .model-config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .config-field { display: flex; flex-direction: column; gap: 6px; }
 .config-field.full-width { grid-column: 1 / -1; }
-.config-field label { font-size: 13px; font-weight: 500; color: #6b7280; }
+.config-field label { font-size: 13px; font-weight: 500; color: var(--chat-source-muted); }
 
-.config-actions { display: flex; gap: 12px; padding-top: 8px; border-top: 1px solid #e5e7eb; }
+.config-actions { display: flex; gap: 12px; padding-top: 8px; border-top: 1px solid var(--chat-popup-border); }
 
-.cleanup-card { display: flex; align-items: center; justify-content: space-between; padding: 16px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; }
-.cleanup-info h4 { margin: 0 0 4px; font-size: 14px; color: #1f2937; }
-.cleanup-info p { margin: 0; font-size: 12px; color: #6b7280; }
+.cleanup-card { display: flex; align-items: center; justify-content: space-between; padding: 16px; background: var(--chat-source-bg); border: 1px solid var(--chat-popup-border); border-radius: 8px; }
+.cleanup-info h4 { margin: 0 0 4px; font-size: 14px; color: var(--chat-layout-text); }
+.cleanup-info p { margin: 0; font-size: 12px; color: var(--chat-source-muted); }
 .cleanup-action { display: flex; align-items: center; flex-shrink: 0; }
 
 .about-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.about-item { display: flex; justify-content: space-between; padding: 10px 14px; background: #f9fafb; border-radius: 8px; }
-.about-key { font-size: 13px; color: #6b7280; }
-.about-val { font-size: 13px; color: #1f2937; font-weight: 500; }
+.about-item { display: flex; justify-content: space-between; padding: 10px 14px; background: var(--chat-source-bg); border-radius: 8px; }
+.about-key { font-size: 13px; color: var(--chat-source-muted); }
+.about-val { font-size: 13px; color: var(--chat-layout-text); font-weight: 500; }
 
 @media (max-width: 768px) {
   .about-grid { grid-template-columns: 1fr; }

@@ -333,8 +333,14 @@ export function processRefLinks(
       const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(info.title)}" data-source="${escapeAttr(info.source)}" data-excerpt="${escapeAttr(info.excerpt)}"${lineAttr} href="javascript:void(0)">${escapeHtml(info.title)}</a>`
       return `<span class="ref-source-line"><span class="ref-source-num">${circledNum(n)}</span><span style="color: gray;">参考来源：知识库“${docLink}”文档</span></span>`
     })
-    sourcesHtml = (sourcesHtml ? sourcesHtml + '<br>' : '') + sourceLines.join('<br>')
+    sourcesHtml = (sourcesHtml || '') + sourceLines.join('')
   }
+
+  // ref-source-line 为块级元素：marked 的行间软换行（<br>）夹在两个来源行之间
+  // 会额外渲染出一行空白（①② 之间的空行），统一清除
+  sourcesHtml = sourcesHtml
+    .replace(/<br\s*\/?>\s*(?=<span class="ref-source-line")/gi, '')
+    .replace(/(<\/span>)\s*<br\s*\/?>\s*(?=<span class="ref-source-line"|<\/p>|$)/gi, '$1')
 
   return { bodyHtml, sourcesHtml }
 }

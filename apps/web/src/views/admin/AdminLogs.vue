@@ -253,10 +253,16 @@ onUnmounted(stopPolling)
 <style scoped>
 .admin-logs { max-width: 1200px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.page-title { font-size: 20px; font-weight: 600; color: #1f2937; margin: 0; }
+.page-title { font-size: 20px; font-weight: 600; color: var(--chat-layout-text); margin: 0; }
 .header-actions { display: flex; gap: 8px; }
-.empty-hint { padding: 24px; text-align: center; color: #9ca3af; font-size: 13px; }
+.empty-hint { padding: 24px; text-align: center; color: var(--chat-copy-text); font-size: 13px; }
 .event-filter { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.event-total { color: #6b7280; font-size: 13px; }
+.event-total { color: var(--chat-source-muted); font-size: 13px; }
 .result-pre { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.7; margin: 0; }
+</style>
+
+<style>
+/* 深色主题：事件/结果弹窗 teleport 到 body，scoped 规则不保证命中，此处兜底覆盖 */
+[data-theme='dark'] .event-total { color: var(--chat-source-muted); }
+[data-theme='dark'] .empty-hint { color: var(--chat-copy-text); }
 </style>

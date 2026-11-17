@@ -281,16 +281,35 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.page-title { font-size: 20px; font-weight: 600; color: #1f2937; margin: 0 0 20px; }
-.audit-tabs { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 0 16px 16px; }
+.page-title { font-size: 20px; font-weight: 600; color: var(--chat-layout-text); margin: 0 0 20px; }
+.audit-tabs { background: var(--chat-popup-bg); border: 1px solid var(--chat-popup-border); border-radius: 10px; padding: 0 16px 16px; }
 .tab-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding-top: 8px; }
-.tab-hint { font-size: 12px; color: #9ca3af; margin-right: auto; }
-.draft-meta { font-size: 13px; color: #374151; margin-bottom: 8px; }
+.tab-hint { font-size: 12px; color: var(--chat-copy-text); margin-right: auto; }
+.draft-meta { font-size: 13px; color: var(--chat-popup-text); margin-bottom: 8px; }
 .draft-issues { margin-bottom: 8px; }
 .draft-issue { font-size: 12px; line-height: 1.7; }
-.draft-issue.error { color: #dc2626; }
-.draft-issue.warn { color: #d97706; }
-.draft-content { max-height: 55vh; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.draft-issue.error { color: var(--adm-draft-danger); }
+.draft-issue.warn { color: var(--adm-draft-warn); }
+.draft-content { max-height: 55vh; overflow: auto; background: var(--chat-source-bg); border: 1px solid var(--chat-source-border); border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .audit-table-wrap { min-height: 200px; }
-.empty-hint { text-align: center; padding: 40px 0; color: #9ca3af; font-size: 14px; }
+.empty-hint { text-align: center; padding: 40px 0; color: var(--chat-copy-text); font-size: 14px; }
+</style>
+
+<style>
+/* 候选详情弹窗 teleport 到 body：语义色令牌定义在 :root 上，scoped 规则与弹窗内节点均可解析 */
+:root {
+  --adm-draft-danger: #dc2626;
+  --adm-draft-warn: #d97706;
+}
+[data-theme='dark'] {
+  --adm-draft-danger: #f87171;
+  --adm-draft-warn: #fbbf24;
+}
+
+/* 深色主题：弹窗内节点兜底覆盖（teleported 节点不保证命中 scoped 规则） */
+[data-theme='dark'] .draft-meta { color: var(--chat-popup-text); }
+[data-theme='dark'] .draft-issue.error { color: var(--adm-draft-danger); }
+[data-theme='dark'] .draft-issue.warn { color: var(--adm-draft-warn); }
+[data-theme='dark'] .draft-content { background: var(--chat-source-bg); border-color: var(--chat-source-border); }
+[data-theme='dark'] .empty-hint { color: var(--chat-copy-text); }
 </style>

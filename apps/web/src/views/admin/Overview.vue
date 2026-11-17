@@ -4,7 +4,7 @@
 
     <!-- 加载/错误状态 -->
     <div v-if="loading" class="panel-empty">加载中...</div>
-    <div v-else-if="loadError" class="panel-empty" style="color:#dc2626">数据加载失败，请刷新重试</div>
+    <div v-else-if="loadError" class="panel-empty" style="color:var(--adm-danger)">数据加载失败，请刷新重试</div>
     <template v-else>
 
     <!-- 指标卡片 -->
@@ -137,47 +137,73 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.page-title { font-size: 20px; font-weight: 600; color: #1f2937; margin: 0 0 20px; }
+/* 主题令牌：浅色为默认，深色在 [data-theme='dark'] 下覆盖 */
+.overview-page {
+  --adm-ok: #16a34a;
+  --adm-danger: #dc2626;
+  --adm-accent: #2563eb;
+  --adm-bar: #93c5fd;
+  --adm-track: #e5e7eb;
+  --adm-icon-users: #edf3fe;
+  --adm-icon-projects: #fef3c7;
+  --adm-icon-logs: #f3e8ff;
+  --adm-icon-analyses: #dcfce7;
+  --adm-icon-knowledge: #fce7f3;
+}
+[data-theme='dark'] .overview-page {
+  --adm-ok: #4ade80;
+  --adm-danger: #f87171;
+  --adm-accent: #6688fa;
+  --adm-bar: #5b7bd5;
+  --adm-track: #3a3b40;
+  --adm-icon-users: #2c3752;
+  --adm-icon-projects: #403722;
+  --adm-icon-logs: #392e51;
+  --adm-icon-analyses: #23402e;
+  --adm-icon-knowledge: #43283c;
+}
+
+.page-title { font-size: 20px; font-weight: 600; color: var(--chat-layout-text); margin: 0 0 20px; }
 
 .stat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .stat-card {
   display: flex; align-items: center; gap: 14px; padding: 18px 16px;
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  background: var(--chat-popup-bg); border: 1px solid var(--chat-popup-border); border-radius: 10px;
 }
 .stat-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
-.stat-icon.users { background: #edf3fe; } .stat-icon.projects { background: #fef3c7; }
-.stat-icon.logs { background: #f3e8ff; } .stat-icon.analyses { background: #dcfce7; }
-.stat-icon.knowledge { background: #fce7f3; }
+.stat-icon.users { background: var(--adm-icon-users); } .stat-icon.projects { background: var(--adm-icon-projects); }
+.stat-icon.logs { background: var(--adm-icon-logs); } .stat-icon.analyses { background: var(--adm-icon-analyses); }
+.stat-icon.knowledge { background: var(--adm-icon-knowledge); }
 .stat-info { display: flex; flex-direction: column; }
-.stat-value { font-size: 24px; font-weight: 700; color: #1f2937; line-height: 1.2; }
-.stat-label { font-size: 13px; color: #6b7280; margin-top: 2px; }
+.stat-value { font-size: 24px; font-weight: 700; color: var(--chat-layout-text); line-height: 1.2; }
+.stat-label { font-size: 13px; color: var(--chat-source-muted); margin-top: 2px; }
 
 .overview-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.overview-panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px 20px; }
-.panel-title { font-size: 14px; font-weight: 600; color: #374151; margin: 0 0 14px; }
-.panel-empty { font-size: 13px; color: #9ca3af; text-align: center; padding: 20px 0; }
+.overview-panel { background: var(--chat-popup-bg); border: 1px solid var(--chat-popup-border); border-radius: 10px; padding: 18px 20px; }
+.panel-title { font-size: 14px; font-weight: 600; color: var(--chat-popup-text); margin: 0 0 14px; }
+.panel-empty { font-size: 13px; color: var(--chat-copy-text); text-align: center; padding: 20px 0; }
 
 .analysis-stats { display: flex; align-items: center; gap: 0; }
 .analysis-stat { flex: 1; text-align: center; }
 .as-value { display: block; font-size: 28px; font-weight: 700; }
-.as-label { display: block; font-size: 12px; color: #6b7280; margin-top: 4px; }
-.analysis-stat.success .as-value { color: #16a34a; }
-.analysis-stat.failed .as-value { color: #dc2626; }
-.analysis-stat.rate .as-value { color: #2563eb; }
-.analysis-divider { width: 1px; height: 48px; background: #e5e7eb; }
+.as-label { display: block; font-size: 12px; color: var(--chat-source-muted); margin-top: 4px; }
+.analysis-stat.success .as-value { color: var(--adm-ok); }
+.analysis-stat.failed .as-value { color: var(--adm-danger); }
+.analysis-stat.rate .as-value { color: var(--adm-accent); }
+.analysis-divider { width: 1px; height: 48px; background: var(--chat-popup-border); }
 
 .storage-info { text-align: center; }
-.storage-value { font-size: 28px; font-weight: 700; color: #1f2937; }
-.storage-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
-.storage-bar { height: 8px; background: #e5e7eb; border-radius: 4px; margin-top: 12px; overflow: hidden; }
-.storage-bar-fill { height: 100%; background: #2563eb; border-radius: 4px; transition: width 0.6s; }
+.storage-value { font-size: 28px; font-weight: 700; color: var(--chat-layout-text); }
+.storage-label { font-size: 12px; color: var(--chat-source-muted); margin-top: 4px; }
+.storage-bar { height: 8px; background: var(--adm-track); border-radius: 4px; margin-top: 12px; overflow: hidden; }
+.storage-bar-fill { height: 100%; background: var(--adm-accent); border-radius: 4px; transition: width 0.6s; }
 
 .trend-chart { padding-top: 8px; }
 .trend-bars { display: flex; align-items: flex-end; gap: 12px; height: 140px; }
 .trend-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
-.trend-bar { width: 100%; max-width: 48px; background: #93c5fd; border-radius: 4px 4px 0 0; transition: height 0.4s; min-height: 4px; }
-.trend-bar:hover { background: #2563eb; }
-.trend-label { font-size: 11px; color: #6b7280; margin-top: 6px; }
+.trend-bar { width: 100%; max-width: 48px; background: var(--adm-bar); border-radius: 4px 4px 0 0; transition: height 0.4s; min-height: 4px; }
+.trend-bar:hover { background: var(--adm-accent); }
+.trend-label { font-size: 11px; color: var(--chat-source-muted); margin-top: 6px; }
 
 @media (max-width: 768px) {
   .overview-row { grid-template-columns: 1fr; }

@@ -301,3 +301,57 @@
 [data-theme='dark'] .theme-switch button:hover:not(.active) {
   background: #393a40;
 }
+
+/* ── Element Plus 暗色调色板对齐（html.dark 激活其内置暗色变量后，
+      用本应用的暗色配色覆盖默认值，保持全局观感一致） ──────────── */
+html.dark,
+html[data-theme='dark'] {
+  --el-bg-color-page: #171719;
+  --el-bg-color: #292a2e;
+  --el-bg-color-overlay: #292a2e;
+  --el-fill-color-blank: #292a2e;
+  --el-fill-color: #303136;
+  --el-fill-color-light: #2c2d31;
+  --el-fill-color-lighter: #292a2e;
+  --el-fill-color-extra-light: #222326;
+  --el-fill-color-dark: #3a3b40;
+  --el-text-color-primary: #e7e9ee;
+  --el-text-color-regular: #dfe2e8;
+  --el-text-color-secondary: #aeb4c0;
+  --el-text-color-placeholder: #858b97;
+  --el-text-color-disabled: #6b7280;
+  --el-border-color: #46474d;
+  --el-border-color-light: #3f4147;
+  --el-border-color-lighter: #3a3b40;
+  --el-border-color-extra-light: #35363b;
+  --el-border-color-dark: #5a5b62;
+  --el-box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  --el-box-shadow-light: 0 4px 16px rgba(0, 0, 0, 0.24);
+  --el-mask-color: rgba(0, 0, 0, 0.6);
+  --el-disabled-bg-color: #222326;
+  --el-disabled-text-color: #6b7280;
+  --el-color-primary: #6688fa;
+  --el-color-primary-light-3: #7e9afb;
+  --el-color-primary-light-5: #9aabff;
+  --el-color-primary-light-7: #b9c4ff;
+  --el-color-primary-light-8: #cdd4ff;
+  --el-color-primary-light-9: #e4e8ff;
+  --el-color-primary-dark-2: #4a6fe0;
+  /* 表格斑马纹/悬停 */
+  --el-table-row-hover-bg-color: #303136;
+  --el-table-header-bg-color: #222326;
+  --el-table-header-text-color: #dfe2e8;
+  --el-table-border-color: #35363b;
+  --el-table-tr-bg-color: #292a2e;
+  --el-table-expanded-cell-bg-color: #222326;
+}
+
+/* 深色下弹窗/消息框遮罩与阴影 */
+[data-theme='dark'] .el-overlay {
+  background-color: rgba(0, 0, 0, 0.6);
+}
+[data-theme='dark'] .el-dialog,
+[data-theme='dark'] .el-message-box,
+[data-theme='dark'] .el-popper {
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
 import { getLogger } from '@/logger'
+import { syncUserTheme, getSavedTheme, applyTheme } from '@/composables/useTheme'
 
 // 使用 sessionStorage → 浏览器关闭后自动清除
 const store = sessionStorage
@@ -26,6 +27,8 @@ function loadUserFromStorage(): UserInfo | null {
 export const useUserStore = defineStore('user', () => {
   const token = ref(store.getItem('token') || '')
   const user = ref<UserInfo | null>(loadUserFromStorage())
+  // 已有登录态（刷新/恢复会话）时优先按该用户的主题配置渲染
+  if (user.value?.username) syncUserTheme(user.value.username).catch(() => {})
 
   const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => {
@@ -39,6 +42,8 @@ export const useUserStore = defineStore('user', () => {
     user.value = u
     store.setItem('token', t)
     store.setItem('user', JSON.stringify(u))
+    // 优先按当前登录用户自身的主题配置渲染（服务端配置 > 本地缓存）
+    syncUserTheme(u.username).catch(() => {})
   }
 
   async function login(username: string, password: string) {
@@ -64,6 +69,8 @@ export const useUserStore = defineStore('user', () => {
     user.value = null
     store.removeItem('token')
     store.removeItem('user')
+    // 退出登录后回退到本地默认主题
+    applyTheme(getSavedTheme(null))
   }
 
   return { token, user, isLoggedIn, isAdmin, userName, setAuth, login, logout }

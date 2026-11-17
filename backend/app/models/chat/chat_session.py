@@ -33,4 +33,7 @@ class ChatMessage(Base):
     sources = Column(JSON, nullable=True)
     thinking = Column(JSON, nullable=True)  # { text: str, elapsed: int }
     feedback = Column(String(10), nullable=True)  # null / 'like' / 'dislike'
+    # 编辑重发的版本历史：[{ content, sources?, thinking? }, ...]（content 始终等于当前版本）
+    versions = Column(JSON, nullable=True)
+    active_version = Column(Integer, nullable=True)  # versions 中当前展示的下标
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

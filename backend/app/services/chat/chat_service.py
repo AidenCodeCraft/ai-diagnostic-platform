@@ -82,12 +82,34 @@ class ChatService:
         self, session_id: int, role: str, content: str,
         sources: Optional[List[Dict[str, Any]]] = None,
         thinking: Optional[Dict[str, Any]] = None,
+        versions: Optional[List[Dict[str, Any]]] = None,
+        active_version: Optional[int] = None,
     ) -> ChatMessage:
         msg = ChatMessage(
             session_id=session_id, role=role, content=content,
             sources=sources, thinking=thinking,
+            versions=versions, active_version=active_version,
         )
         self.db.add(msg)
+        self.db.commit()
+        self.db.refresh(msg)
+        return msg
+
+    def update_message(
+        self, session_id: int, message_id: int, fields: Optional[Dict[str, Any]] = None
+    ) -> ChatMessage:
+        """更新消息的可编辑字段（编辑重发：content / sources / thinking / versions / active_version）。"""
+        msg = (
+            self.db.query(ChatMessage)
+            .filter(ChatMessage.id == message_id, ChatMessage.session_id == session_id)
+            .first()
+        )
+        if not msg:
+            raise ValueError("message not found")
+        allowed = {"content", "sources", "thinking", "versions", "active_version"}
+        for key, value in (fields or {}).items():
+            if key in allowed and value is not None:
+                setattr(msg, key, value)
         self.db.commit()
         self.db.refresh(msg)
         return msg
