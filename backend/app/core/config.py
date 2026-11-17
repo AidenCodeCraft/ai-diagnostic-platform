@@ -19,6 +19,10 @@ class Settings(BaseSettings):
 
     # ── Database ─────────────────────────────────────────────
     DATABASE_URL: str = "postgresql://ai:ai@localhost:5432/diagnostic"
+    # 连接池容量：高并发提问时每个请求占一个连接，容量需配合「最大同时在线人数」
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 60
+    DB_POOL_RECYCLE: int = 1800
     REDIS_URL: str = "redis://localhost:6379/0"
     UPLOAD_DIR: str = "data/raw"
     MAX_UPLOAD_MB: int = 100          # 单文件上传大小上限（MB）

@@ -23,6 +23,7 @@ if getattr(settings, 'LOG_DESENSITIZE_ENABLED', False):
 async def lifespan(app: FastAPI):
     logger.info("Application starting — seeding users...")
     seed_users()
+    _tune_threadpool()
 
     # 恢复中断的异步分析任务（进程内线程池无法跨重启持久化）
     try:
@@ -41,6 +42,27 @@ async def lifespan(app: FastAPI):
 
     yield
     logger.info("Application shutting down")
+
+
+def _tune_threadpool() -> None:
+    """按系统参数（最大同时在线人数）扩容 anyio 默认线程池。
+
+    同步流式接口在等待 LLM 返回 token 期间会占用线程池线程，
+    anyio 默认仅 40 条，必须与允许的并发提问数匹配，否则并发提问会被排队卡死。
+    """
+    try:
+        import anyio.to_thread
+
+        from app.services.system.system_config import get_system_config
+
+        max_online = int(get_system_config().get("max_online_users", 200) or 200)
+        desired = max(64, max_online + 20)
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        if desired > limiter.total_tokens:
+            logger.info("[Main] Thread pool size: %d -> %d", limiter.total_tokens, desired)
+            limiter.total_tokens = desired
+    except Exception:  # noqa: BLE001 - 调整失败不阻断启动
+        logger.exception("Failed to tune thread pool size")
 
 
 app = FastAPI(

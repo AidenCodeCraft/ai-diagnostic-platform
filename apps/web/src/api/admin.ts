@@ -9,6 +9,19 @@ export interface ModelOption {
   isDefault: boolean
 }
 
+/** 系统参数（管理后台 → 系统配置 → 系统参数） */
+export interface SystemConfig {
+  max_upload_mb: number
+  timeout_seconds: number
+  log_retention_days: number
+  /** 允许多对话并行提问 */
+  parallel_chat_enabled: boolean
+  /** 单用户最大并行提问对话数 */
+  max_parallel_chats: number
+  /** 最大同时在线人数（全系统并发提问上限，0 = 不限制） */
+  max_online_users: number
+}
+
 /** 用户列表响应（匹配后端 UserListResponse） */
 export interface UserListResponse {
   items: UserInfo[]
@@ -82,11 +95,11 @@ export const adminApi = {
   // ── 系统参数 ──────────────────────────────────────────────
   /** 获取系统参数配置 */
   getSystemConfig() {
-    return client.get<{ max_upload_mb: number; timeout_seconds: number; log_retention_days: number }>('/admin/config/system')
+    return client.get<SystemConfig>('/admin/config/system')
   },
 
   /** 保存系统参数配置 */
-  saveSystemConfig(config: { max_upload_mb: number; timeout_seconds: number; log_retention_days: number }) {
+  saveSystemConfig(config: SystemConfig) {
     return client.put('/admin/config/system', config)
   },
 

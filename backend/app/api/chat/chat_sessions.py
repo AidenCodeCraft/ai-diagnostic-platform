@@ -92,6 +92,15 @@ def chat(
     Optional body fields:
         log_analysis: dict with summary/root_cause/confidence/next_steps from log analysis
     """
+    from app.services.system.concurrency import chat_gate
+    from app.services.system.system_config import get_system_config
+
+    limit = int(get_system_config().get("max_online_users", 0) or 0)
+    if not chat_gate.acquire(limit):
+        raise HTTPException(
+            status_code=429,
+            detail=f"当前同时在线人数已达上限（{limit}），请稍后再试",
+        )
     try:
         return ChatService(db).send_message(
             session_id=session_id,
@@ -101,6 +110,8 @@ def chat(
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    finally:
+        chat_gate.release()
 
 
 @router.post("/{session_id}/stream")
@@ -116,6 +127,15 @@ def chat_stream(
         # close the chunked response before the potentially slow
         # enrichment/knowledge-retrieval phase has produced its first token.
         yield 'data: {"status":"start"}\n\n'
+
+        from app.services.system.concurrency import chat_gate
+        from app.services.system.system_config import get_system_config
+
+        limit = int(get_system_config().get("max_online_users", 0) or 0)
+        if not chat_gate.acquire(limit):
+            import json
+            yield f"data: {json.dumps({'error': f'当前同时在线人数已达上限（{limit}），请稍后再试'}, ensure_ascii=False)}\n\n"
+            return
         try:
             yield from ChatService(db).send_message_stream(
                 session_id=session_id,
@@ -138,6 +158,8 @@ def chat_stream(
             )
             import json
             yield f"data: {json.dumps({'error': 'Internal server error'})}\n\n"
+        finally:
+            chat_gate.release()
 
     return StreamingResponse(
         generate(),

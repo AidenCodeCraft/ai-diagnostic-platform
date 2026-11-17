@@ -13,7 +13,10 @@ class MockProvider(BaseProvider):
         super().__init__()
         # Accept but ignore config kwargs (api_key, base_url, model) from provider registry
 
-    def generate_summary(self, log_content: str, events: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def generate_summary(
+        self, log_content: str, events: list[Dict[str, Any]],
+        *, prompt_built: bool = False,
+    ) -> Dict[str, Any]:
         error_events = [event for event in events if event.get("is_error")]
         module_names = [str(event.get("module", "system")).lower() for event in error_events if event.get("module")]
         module_hint = module_names[0] if module_names else "设备"

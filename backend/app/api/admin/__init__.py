@@ -166,27 +166,23 @@ def get_available_models():
 
 @router.get("/config/system")
 def get_system_config():
-    """Get system parameters."""
-    config = _load_config()
-    system = config.get("system", {})
-    return {
-        "maxUploadMb": system.get("max_upload_mb", 100),
-        "timeoutSeconds": system.get("timeout_seconds", 300),
-        "logRetentionDays": system.get("log_retention_days", 90),
-    }
+    """Get system parameters (snake_case keys)."""
+    from app.services.system.system_config import get_system_config as load_system_config
+    return load_system_config()
 
 
 @router.put("/config/system")
 def save_system_config(body: Dict[str, Any]):
-    """Save system parameters."""
+    """Save system parameters. Accepts snake_case keys (camelCase tolerated)."""
+    from app.services.system.system_config import KEY_ALIASES, normalize
+
     config = _load_config()
-    config["system"] = {
-        "max_upload_mb": body.get("maxUploadMb", 100),
-        "timeout_seconds": body.get("timeoutSeconds", 300),
-        "log_retention_days": body.get("logRetentionDays", 90),
-    }
+    raw = dict(config.get("system") or {})
+    for key, value in body.items():
+        raw[KEY_ALIASES.get(key, key)] = value
+    config["system"] = normalize(raw)
     _save_config(config)
-    return {"ok": True, "message": "系统参数已保存"}
+    return {"ok": True, "message": "系统参数已保存", "config": config["system"]}
 
 
 @router.post("/knowledge/seed")

@@ -73,6 +73,8 @@ class DeepSeekProvider(BaseProvider):
         self,
         log_content: str,
         events: List[Dict[str, Any]],
+        *,
+        prompt_built: bool = False,
     ) -> Dict[str, Any]:
         """Generate a diagnostic summary via DeepSeek API.
 
@@ -87,7 +89,11 @@ class DeepSeekProvider(BaseProvider):
                 0.4,
             )
 
-        prompt = DiagnosticPrompt.build(log_content, events)
+        # prompt_built=True：调用方（诊断流水线）已构建完整 Prompt
+        # （含用户问题、知识库证据、输出字段要求），直接使用，
+        # 禁止再次包装/截断——否则用户问题与证据会被截掉，
+        # 导致回答不针对用户提问。
+        prompt = log_content if prompt_built else DiagnosticPrompt.build(log_content, events)
 
         for attempt in range(1, self.max_retries + 1):
             try:

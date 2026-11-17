@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,11 @@ logger = get_logger(__name__)
 
 # 轻量线程池：避免长分析阻塞 HTTP 请求；生产可替换为 Celery/RQ
 _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="analysis")
+
+# 单个分析任务的硬性执行上限（看门狗超时）：
+# 覆盖「重新解析大日志 + 规则/检索 + LLM 重试」的最坏情况，
+# 超时任务标记 failed，避免永远停留在 running / pending。
+ANALYSIS_TIMEOUT_SECONDS = 480
 
 
 class AnalysisTaskService:
@@ -166,7 +172,12 @@ class AnalysisTaskService:
 
     @staticmethod
     def _execute_async(analysis_id: int, user_query: str) -> None:
-        """后台执行入口：使用独立 DB 会话，更新 running → completed|failed。"""
+        """后台执行入口：使用独立 DB 会话，更新 running → completed|failed。
+
+        - 全程带看门狗超时（ANALYSIS_TIMEOUT_SECONDS），防止解析/LLM 异常
+          导致任务永远停留在 running；
+        - 流水线阶段进度写入 summary（"[进度] …"），供前端思维链实时展示。
+        """
         from app.database import session as session_module
 
         db = session_module.create_session()
@@ -175,8 +186,33 @@ class AnalysisTaskService:
             analysis = service.get_analysis(analysis_id)
             setattr(analysis, "status", "running")
             db.commit()
+
+            def _progress(text: str) -> None:
+                """阶段进度回调（可能来自看门狗线程）→ 独立短会话写入，线程安全。"""
+                try:
+                    pdb = session_module.create_session()
+                    try:
+                        row = pdb.query(Analysis).filter(Analysis.id == analysis_id).first()
+                        if row is not None:
+                            setattr(row, "summary", f"[进度] {text}")
+                            pdb.commit()
+                    finally:
+                        pdb.close()
+                except Exception:  # noqa: BLE001 - 进度上报失败不影响分析
+                    logger.debug("[AnalysisAsync] progress update failed", exc_info=True)
+
             try:
-                service._execute_analysis(analysis, user_query=user_query)
+                with ThreadPoolExecutor(max_workers=1, thread_name_prefix="analysis-watchdog") as pool:
+                    future = pool.submit(
+                        service._execute_analysis, analysis, user_query, _progress,
+                    )
+                    try:
+                        future.result(timeout=ANALYSIS_TIMEOUT_SECONDS)
+                    except FuturesTimeoutError as exc:
+                        raise TimeoutError(
+                            f"分析超时（超过 {ANALYSIS_TIMEOUT_SECONDS} 秒未完成），"
+                            "可能是日志过大或模型响应过慢，请精简日志后重试"
+                        ) from exc
                 setattr(analysis, "status", "completed")
                 db.commit()
             except Exception as exc:  # noqa: BLE001 - 后台任务需记录失败
@@ -189,8 +225,12 @@ class AnalysisTaskService:
 
     def _execute_analysis(
         self, analysis: Analysis, user_query: str = "",
+        on_progress: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
-        """Core analysis: verify → pipeline(parse → rules → RAG → LLM) → persist."""
+        """Core analysis: verify → pipeline(parse → rules → RAG → LLM) → persist.
+
+        on_progress: 阶段进度回调 fn(text)，由 run() 透传给流水线。
+        """
         log = self._get_log(int(analysis.log_id))  # type: ignore[arg-type]
 
         from app.services.diagnostics.log_storage import LogStorage
@@ -205,7 +245,7 @@ class AnalysisTaskService:
         # Run full diagnostic pipeline (Rule Engine + RAG + LLM)
         from app.services.diagnostics.diagnosis_pipeline import DiagnosisPipeline
         pipeline = DiagnosisPipeline(self.db, model=str(analysis.model or "mock"))
-        result = pipeline.run(str(file_path), user_query=user_query or "")
+        result = pipeline.run(str(file_path), user_query=user_query or "", on_stage=on_progress)
 
         # 无证据时，若缺少关键槽位则改为「反问引导」而非直接无结论
         if result.get("support_missing"):
@@ -213,9 +253,10 @@ class AnalysisTaskService:
                 from app.services.chat.clarification import ClarificationService
                 questions = ClarificationService(self.db).analyze(user_query or "")
                 if questions:
+                    query_prefix = f"针对您的问题「{user_query.strip()[:80]}」：" if user_query and user_query.strip() else ""
                     result["needs_clarification"] = True
                     result["questions"] = [q.to_dict() for q in questions]
-                    result["summary"] = "信息不足，无法唯一匹配知识库案例；请补充关键信息后重新分析。"
+                    result["summary"] = f"{query_prefix}信息不足，无法唯一匹配知识库案例；请补充关键信息后重新分析。"
                     result["root_cause"] = "需要补充设备/现场/版本等关键信息后才能给出结论。"
                     result["confidence"] = 0.0
             except Exception:

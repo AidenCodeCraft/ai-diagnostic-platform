@@ -121,6 +121,7 @@ import { chatApi, type ChatSource } from '@/api/chat'
 import { adminApi } from '@/api/admin'
 import { useUserStore } from '@/stores/user'
 import { exportChat as exportChatUtil } from '@/utils/export'
+import { pollAnalysis } from '@/utils/analysisPoll'
 import type { ExportMessage } from '@/utils/export'
 
 import ChatSidebar from '@/components/chat/ChatSidebar.vue'
@@ -159,14 +160,48 @@ watch(
 const sidebarCollapsed = ref(false)
 const selectedModel = ref(localStorage.getItem('selectedModel') || 'deepseek-v4-flash')
 const inputText = ref('')
-const loadingPhase = ref<'idle' | 'sending' | 'uploading' | 'streaming' | 'analyzing'>('idle')
-const isSending = ref(false)
-const messages = ref<any[]>([])
+type LoadingPhase = 'idle' | 'sending' | 'uploading' | 'streaming' | 'analyzing'
+
+// ── 按对话隔离的状态：支持多对话并行提问（配置见管理后台系统参数）──
 const currentChatId = ref(0)
+const messagesByChat = reactive(new Map<number, any[]>())
+const loadingPhases = reactive(new Map<number, LoadingPhase>())
+const sendingChatIds = reactive(new Set<number>())
+/** 各对话最近一次日志分析结果（流式提问时注入诊断上下文） */
+const lastAnalysisByChat = reactive(new Map<number, any>())
+/** 附件分析需要补充信息时，按对话记录日志 ID 与问题，用户补充后自动重跑 */
+const pendingClarificationByChat = reactive(new Map<number, { logId: number; questions: any[] }>())
+
+function ensureChatMessages(chatId: number): any[] {
+  if (!messagesByChat.has(chatId)) messagesByChat.set(chatId, [])
+  return messagesByChat.get(chatId)!
+}
+function setChatMessages(chatId: number, arr: any[]) { messagesByChat.set(chatId, arr) }
+function setLoadingPhase(chatId: number, phase: LoadingPhase) { loadingPhases.set(chatId, phase) }
+function setSending(chatId: number, on: boolean) {
+  if (on) sendingChatIds.add(chatId)
+  else sendingChatIds.delete(chatId)
+}
+
+const loadingPhase = computed<LoadingPhase>(() => loadingPhases.get(currentChatId.value) ?? 'idle')
+const isSending = computed(() => sendingChatIds.has(currentChatId.value))
+const messages = computed<any[]>(() => messagesByChat.get(currentChatId.value) ?? [])
 const canGenerateReport = ref(false)
-const lastAnalysis = ref<any>(null)
-// 附件分析需要补充信息时，记录日志 ID 与问题，用户补充后自动重跑
-const pendingClarification = ref<{ logId: number; questions: any[] } | null>(null)
+
+// 多对话并行提问配置（管理后台 → 系统配置 → 系统参数）
+const chatConcurrency = reactive({ parallelEnabled: true, maxParallel: 3 })
+function effectiveParallelLimit(): number {
+  return chatConcurrency.parallelEnabled ? Math.max(1, chatConcurrency.maxParallel) : 1
+}
+async function loadChatConcurrencyConfig() {
+  try {
+    const { data } = await adminApi.getSystemConfig()
+    if (data) {
+      chatConcurrency.parallelEnabled = data.parallel_chat_enabled ?? true
+      chatConcurrency.maxParallel = Math.max(1, data.max_parallel_chats ?? 3)
+    }
+  } catch { /* 加载失败保持默认值 */ }
+}
 
 // 按 createdAt 升序排列，使用 ID 去重（而非内容去重）
 const displayMessages = computed(() => {
@@ -199,9 +234,8 @@ const currentBranchId = computed(() => branchState.currentBranchId)
 function onBranchSwitch(branchId: string) {
   const saved = switchBranch(branchId)
   if (saved) {
-    messages.value = saved
-    messageIds.clear()
-    messages.value.forEach((m: any) => messageIds.add(m.id))
+    setChatMessages(currentChatId.value, saved)
+    saved.forEach((m: any) => messageIds.add(m.id))
   }
 }
 
@@ -290,7 +324,11 @@ async function clearData() {
     await ElMessageBox.confirm('确定清除所有对话数据？不可恢复。', '确认', { type: 'warning' })
     await Promise.all(recentChats.value.map(c => chatApi.deleteSession(c.id).catch(e => console.warn('[clearData] delete session failed:', c.id, e))))
     recentChats.value = []
-    messages.value = []
+    messagesByChat.clear()
+    loadingPhases.clear()
+    sendingChatIds.clear()
+    lastAnalysisByChat.clear()
+    pendingClarificationByChat.clear()
     currentChatId.value = 0
     ElMessage.success('已清除')
     showSettings.value = false
@@ -314,13 +352,9 @@ async function loadSessions() {
 }
 
 async function newChat() {
-  messages.value = []
-  messageIds.clear()
   currentChatId.value = 0
   sessionStorage.removeItem('activeChatId')
   canGenerateReport.value = false
-  lastAnalysis.value = null
-  pendingClarification.value = null
   inputText.value = ''
   attachedFiles.value = []
   resetBranches()
@@ -336,18 +370,25 @@ async function selectChat(id: number, options: { navigate?: boolean } = {}) {
     if (navigate) router.push('/chat')
     return
   }
-  pendingClarification.value = null
+  // 该对话已有本地消息（含正在后台流式输出的）：直接切换，保留进行中的输出
+  if (messagesByChat.has(id)) {
+    currentChatId.value = id
+    sessionStorage.setItem('activeChatId', String(id))
+    if (navigate) router.push('/chat')
+    await nextTick()
+    setTimeout(() => msgListRef.value?.scrollToBottom(), 150)
+    return
+  }
 
   try {
-    loadingPhase.value = 'sending'
+    setLoadingPhase(id, 'sending')
     const { data } = await chatApi.getMessages(id)
     const msgs = Array.isArray(data) ? data : []
     
     if (import.meta.env.DEV) console.log(`[selectChat] id=${id} loaded ${msgs.length} messages`, msgs)
     
-    messageIds.clear()
     currentChatId.value = id
-    messages.value = msgs.map((m: any) => {
+    setChatMessages(id, msgs.map((m: any) => {
       const msg: any = {
         id: m.id.toString(),
         role: m.role,
@@ -370,8 +411,8 @@ async function selectChat(id: number, options: { navigate?: boolean } = {}) {
       }
       
       return msg
-    })
-    messages.value.forEach((m: any) => messageIds.add(m.id))
+    }))
+    msgs.forEach((m: any) => messageIds.add(m.id.toString()))
     sessionStorage.setItem('activeChatId', String(id))
     
     // 检查是否有日志分析结果，如果有则可以生成报告
@@ -381,7 +422,7 @@ async function selectChat(id: number, options: { navigate?: boolean } = {}) {
     canGenerateReport.value = hasAnalysis
     
     if (navigate) router.push('/chat')
-    loadingPhase.value = 'idle'
+    setLoadingPhase(id, 'idle')
     
     // 等待DOM更新后滚动到底部
     await nextTick()
@@ -389,7 +430,7 @@ async function selectChat(id: number, options: { navigate?: boolean } = {}) {
   } catch (err: any) {
     console.error('[selectChat] error:', err)
     ElMessage.error('加载对话失败: ' + (err.response?.data?.detail || err.message))
-    loadingPhase.value = 'idle'
+    setLoadingPhase(id, 'idle')
   }
 }
 
@@ -486,8 +527,12 @@ async function deleteChat() {
     })
     await chatApi.deleteSession(chatMenu.chatId)
     recentChats.value = recentChats.value.filter(c => c.id !== chatMenu.chatId)
+    messagesByChat.delete(chatMenu.chatId)
+    loadingPhases.delete(chatMenu.chatId)
+    sendingChatIds.delete(chatMenu.chatId)
+    lastAnalysisByChat.delete(chatMenu.chatId)
+    pendingClarificationByChat.delete(chatMenu.chatId)
     if (currentChatId.value === chatMenu.chatId) {
-      messages.value = []
       currentChatId.value = 0
       sessionStorage.removeItem('activeChatId')
     }
@@ -552,75 +597,91 @@ async function sendMessage() {
   const files = [...attachedFiles.value]
   if (!text) return
 
-  // 并发保护：防止快速连击重复触发
-  if (isSending.value) return
-  isSending.value = true
+  let chatId = currentChatId.value
+  // 并发保护：同一对话内防止快速连击重复触发
+  if (sendingChatIds.has(chatId)) return
+  // 多对话并行限制（管理后台 → 系统配置 → 系统参数）
+  const limit = effectiveParallelLimit()
+  if (sendingChatIds.size >= limit) {
+    ElMessage.warning(
+      chatConcurrency.parallelEnabled
+        ? `最多支持 ${limit} 个对话同时提问，请等待进行中的对话完成`
+        : '已有对话正在提问（系统未开启多对话并行提问）',
+    )
+    return
+  }
+  setSending(chatId, true)
 
-  const isNewChat = !currentChatId.value
+  const isNewChat = !chatId
   inputText.value = ''
   attachedFiles.value = []
 
-  if (isNewChat) {
-    try {
-      const { data: s } = await chatApi.createSession(text.slice(0, 30) || '新对话', selectedModel.value)
-      currentChatId.value = s.id
-      sessionStorage.setItem('activeChatId', String(s.id))
-      recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model || undefined })
-    } catch (e: any) {
-      console.error('[sendMessage] create session failed:', e?.response?.data?.detail || e?.message || e)
-      ElMessage.warning('创建会话失败，请重试')
-      return
-    }
-  }
-
-  const attachments: MsgAttachment[] = files.map(f => ({
-    name: f.name,
-    size: f.file.size,
-    type: f.file.type || f.name.split('.').pop() || '',
-  }))
-
-  const fileTag = files.length
-    ? `[上传文件: ${files.map(f => `${f.name} (${formatSizeStr(f.file.size)})`).join(', ')}]`
-    : ''
-  const userMsg = fileTag ? `${text}\n${fileTag}` : text
-  addMessage('user', userMsg, attachments)
-
-  // 用户消息先持久化，确保刷新后 selectChat 能恢复完整历史
-  if (currentChatId.value) {
-    try {
-      await chatApi.saveMessage(currentChatId.value, 'user', userMsg)
-    } catch {
-      ElMessage.warning('用户消息保存失败，刷新后可能无法恢复')
-    }
-  }
-
   try {
+    if (isNewChat) {
+      try {
+        const { data: s } = await chatApi.createSession(text.slice(0, 30) || '新对话', selectedModel.value)
+        setSending(chatId, false)
+        chatId = s.id
+        setSending(chatId, true)
+        ensureChatMessages(s.id)
+        currentChatId.value = s.id
+        sessionStorage.setItem('activeChatId', String(s.id))
+        recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model || undefined })
+      } catch (e: any) {
+        console.error('[sendMessage] create session failed:', e?.response?.data?.detail || e?.message || e)
+        ElMessage.warning('创建会话失败，请重试')
+        return
+      }
+    }
+
+    const attachments: MsgAttachment[] = files.map(f => ({
+      name: f.name,
+      size: f.file.size,
+      type: f.file.type || f.name.split('.').pop() || '',
+    }))
+
+    const fileTag = files.length
+      ? `[上传文件: ${files.map(f => `${f.name} (${formatSizeStr(f.file.size)})`).join(', ')}]`
+      : ''
+    const userMsg = fileTag ? `${text}\n${fileTag}` : text
+    addMessage('user', userMsg, attachments, chatId)
+
+    // 用户消息先持久化，确保刷新后 selectChat 能恢复完整历史
+    if (chatId) {
+      try {
+        await chatApi.saveMessage(chatId, 'user', userMsg)
+      } catch {
+        ElMessage.warning('用户消息保存失败，刷新后可能无法恢复')
+      }
+    }
+
     if (files.length > 0) {
-      loadingPhase.value = 'uploading'
-      await processFiles(files, userMsg)
-    } else if (pendingClarification.value) {
-      loadingPhase.value = 'analyzing'
-      await reanalyzeWithClarification(userMsg)
+      setLoadingPhase(chatId, 'uploading')
+      await processFiles(files, userMsg, chatId)
+    } else if (pendingClarificationByChat.get(chatId)) {
+      setLoadingPhase(chatId, 'analyzing')
+      await reanalyzeWithClarification(userMsg, chatId)
     } else if (userMsg) {
-      loadingPhase.value = 'streaming'
-      await streamChat(userMsg)
+      setLoadingPhase(chatId, 'streaming')
+      await streamChat(userMsg, chatId)
     }
   } catch (e: any) {
-    addMessage('assistant', `❌ 失败：${formatApiError(e)}`)
+    addMessage('assistant', `❌ 失败：${formatApiError(e)}`, undefined, chatId)
   } finally {
-    loadingPhase.value = 'idle'
-    isSending.value = false
+    setLoadingPhase(chatId, 'idle')
+    setSending(chatId, false)
   }
 }
 
 /** 附件澄清后：用户补充信息，自动用上次日志重新分析 */
-async function reanalyzeWithClarification(text: string) {
-  const pending = pendingClarification.value
+async function reanalyzeWithClarification(text: string, chatId: number) {
+  const pending = pendingClarificationByChat.get(chatId)
   if (!pending) return
   const started = Date.now()
   const id = started.toString()
   messageIds.add(id)
-  messages.value.push({
+  const msgs = ensureChatMessages(chatId)
+  msgs.push({
     id,
     role: 'assistant',
     content: '',
@@ -628,11 +689,11 @@ async function reanalyzeWithClarification(text: string) {
     thinking: { elapsed: 0, active: true, text: '正在结合补充信息重新分析…' },
     sources: [] as ChatSource[],
   })
-  const msg = messages.value[messages.value.length - 1]
+  const msg = msgs[msgs.length - 1]
   try {
     const res = await chatApi.runAnalysis(pending.logId, selectedModel.value, text)
     const detail = (await chatApi.getAnalysisResult(res.data.id)).data
-    lastAnalysis.value = detail
+    lastAnalysisByChat.set(chatId, detail)
     const response = detail.diagnosis_markdown || detail.summary || '分析完成'
     msg.content = response
     msg.sources = detail.sources || detail.knowledge_sources || detail.references || []
@@ -640,11 +701,11 @@ async function reanalyzeWithClarification(text: string) {
     msg.thinking.elapsed = Math.max(1, Math.round((Date.now() - started) / 1000))
     if (detail.needs_clarification && (detail.questions || []).length) {
       msg.clarification = detail.questions
-      pendingClarification.value = { logId: pending.logId, questions: detail.questions }
+      pendingClarificationByChat.set(chatId, { logId: pending.logId, questions: detail.questions })
     } else {
-      pendingClarification.value = null
+      pendingClarificationByChat.delete(chatId)
     }
-    await chatApi.saveMessage(currentChatId.value, 'assistant', response, msg.sources, {
+    await chatApi.saveMessage(chatId, 'assistant', response, msg.sources, {
       text: msg.thinking.text,
       elapsed: msg.thinking.elapsed,
     }).catch(() => {})
@@ -652,45 +713,22 @@ async function reanalyzeWithClarification(text: string) {
     msg.content = `❌ 分析失败：${formatApiError(e)}`
     msg.thinking.active = false
   } finally {
-    msgListRef.value?.scrollToBottom()
+    if (currentChatId.value === chatId) msgListRef.value?.scrollToBottom()
   }
 }
 
-/** 轮询异步分析任务状态，直到 completed / failed / 超时 */
-async function waitForAnalysis(
+/** 轮询异步分析任务状态，直到 completed / failed / 超时。
+ *  阶段进度由后端 "[进度] …" summary 实时上报，驱动思维链展示 Agent 真实进度。 */
+function waitForAnalysis(
   analysisId: number,
   onProgress?: (text: string) => void,
-  timeoutMs = 300_000,
+  timeoutMs = 540_000,
 ): Promise<any> {
-  const startedAt = Date.now()
-  const deadline = startedAt + timeoutMs
-  let lastPhase = ''
-  while (Date.now() < deadline) {
-    const res = await chatApi.getAnalysis(analysisId)
-    const data = res.data || {}
-    if (data.status === 'completed') {
-      return (await chatApi.getAnalysisResult(analysisId)).data
-    }
-    if (data.status === 'failed') {
-      throw new Error(data.error_message || '分析失败')
-    }
-    const elapsed = Date.now() - startedAt
-    const phase = elapsed < 15000
-      ? '正在解析日志并提取关键错误片段…'
-      : elapsed < 60000
-        ? '规则引擎匹配 + 知识库检索中…'
-        : 'AI 正在生成诊断结论…'
-    if (phase !== lastPhase) {
-      lastPhase = phase
-      onProgress?.(phase)
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-  }
-  throw new Error('分析超时，请稍后重试')
+  return pollAnalysis(chatApi, analysisId, { onProgress, timeoutMs })
 }
 
-async function processFiles(files: FileAttachment[], text: string) {
-  loadingPhase.value = 'uploading'
+async function processFiles(files: FileAttachment[], text: string, chatId: number) {
+  setLoadingPhase(chatId, 'uploading')
 
   // 并发上传所有文件
   const uploadResults = await Promise.allSettled(
@@ -736,15 +774,15 @@ async function processFiles(files: FileAttachment[], text: string) {
 
   // 为失败的显示错误消息
   for (const r of failed) {
-    addMessage('assistant', `❌ 上传 \`${r.value.fa.name}\` 失败：${formatApiError(r.value.error)}`)
+    addMessage('assistant', `❌ 上传 \`${r.value.fa.name}\` 失败：${formatApiError(r.value.error)}`, undefined, chatId)
   }
 
   if (succeeded.length === 0) {
-    loadingPhase.value = 'idle'
+    setLoadingPhase(chatId, 'idle')
     return
   }
 
-  loadingPhase.value = 'analyzing'
+  setLoadingPhase(chatId, 'analyzing')
 
   // 并发执行所有分析
   await Promise.allSettled(
@@ -753,7 +791,8 @@ async function processFiles(files: FileAttachment[], text: string) {
       const analysisStartedAt = Date.now()
       const pId = analysisStartedAt.toString()
       messageIds.add(pId)
-      messages.value.push({
+      const chatMsgs = ensureChatMessages(chatId)
+      chatMsgs.push({
         id: pId,
         role: 'assistant',
         content: '',
@@ -765,12 +804,18 @@ async function processFiles(files: FileAttachment[], text: string) {
         },
         sources: [] as ChatSource[],
       })
-      const processingMsg = messages.value[messages.value.length - 1]
+      const processingMsg = chatMsgs[chatMsgs.length - 1]
 
+      const seenPhases = new Set<string>()
       const updateThinking = (text: string) => {
-        processingMsg.thinking.text = text
+        // 思维链呈现 Agent 真实进度：按阶段追加，形成执行轨迹
+        if (!seenPhases.has(text)) {
+          seenPhases.add(text)
+          const prev = processingMsg.thinking.text
+          processingMsg.thinking.text = prev ? `${prev}\n${text}` : text
+        }
         processingMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - analysisStartedAt) / 1000))
-        msgListRef.value?.scrollToBottom()
+        if (currentChatId.value === chatId) msgListRef.value?.scrollToBottom()
       }
 
       // 安全校验：确保 logId 有效
@@ -787,14 +832,16 @@ async function processFiles(files: FileAttachment[], text: string) {
         updateThinking('正在解析日志并提取关键错误片段…')
 
         if (import.meta.env.DEV) console.log(`[processFiles] runAnalysisAsync: logId=${logId} model=${selectedModel.value} query=${text?.slice(0, 50)}`)
-        const queued = await chatApi.runAnalysisAsync(logId, selectedModel.value, text)
+        // 提问文本去掉文件标签，避免干扰后端按用户问题检索/分析
+        const queryText = text.replace(/\n?\[上传文件:.*?\]/g, '').trim()
+        const queued = await chatApi.runAnalysisAsync(logId, selectedModel.value, queryText)
         const analysisId = queued.data?.id
         if (!analysisId) throw new Error('分析任务创建失败')
         updateThinking('规则引擎匹配 + 知识库检索中…')
 
         const detail = await waitForAnalysis(analysisId, updateThinking)
         if (detail) {
-          lastAnalysis.value = detail
+          lastAnalysisByChat.set(chatId, detail)
           const sources = detail.sources || detail.knowledge_sources || detail.references || []
 
           // 优先使用后端预生成的 Markdown，回退到前端组装
@@ -817,9 +864,9 @@ async function processFiles(files: FileAttachment[], text: string) {
           processingMsg.sources = sources
           if (detail.needs_clarification && (detail.questions || []).length) {
             processingMsg.clarification = detail.questions
-            pendingClarification.value = { logId, questions: detail.questions }
+            pendingClarificationByChat.set(chatId, { logId, questions: detail.questions })
           } else {
-            pendingClarification.value = null
+            pendingClarificationByChat.delete(chatId)
           }
           processingMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - analysisStartedAt) / 1000))
           processingMsg.thinking.active = false
@@ -831,7 +878,7 @@ async function processFiles(files: FileAttachment[], text: string) {
             text: processingMsg.thinking.text,
             elapsed: processingMsg.thinking.elapsed,
           }
-          await chatApi.saveMessage(currentChatId.value, 'assistant', response, sources, thinkingData).catch(() => {})
+          await chatApi.saveMessage(chatId, 'assistant', response, sources, thinkingData).catch(() => {})
         }
       } catch (e: any) {
         processingMsg.content = `❌ 分析 \`${fa.name}\` 失败：${formatApiError(e)}`
@@ -840,26 +887,30 @@ async function processFiles(files: FileAttachment[], text: string) {
         fa.status = 'error'
         fa.error = e.response?.data?.detail || e.message
       }
-      msgListRef.value?.scrollToBottom()
+      if (currentChatId.value === chatId) msgListRef.value?.scrollToBottom()
     }),
   )
 }
 
-async function streamChat(text: string) {
+async function streamChat(text: string, chatId: number) {
   const thinkStart = Date.now()
   const aId = thinkStart.toString()
   messageIds.add(aId)
-  const assistantMsg: any = {
+  const msgs = ensureChatMessages(chatId)
+  msgs.push({
     id: aId, role: 'assistant', content: '', createdAt: thinkStart,
     thinking: { elapsed: 0, text: '', active: false }, sources: [] as ChatSource[],
+  })
+  // 必须经响应式代理取消息对象：直接持有原始对象，后续 token 追加不会触发渲染
+  const replyMsg = msgs[msgs.length - 1]
+  const scrollToBottomIfActive = () => {
+    if (currentChatId.value === chatId) msgListRef.value?.scrollToBottom()
   }
-  messages.value.push(assistantMsg)
-  const replyMsg = messages.value[messages.value.length - 1]
 
   let firstToken = true
 
   await chatApi.sendMessageStream(
-    currentChatId.value,
+    chatId,
     text,
     selectedModel.value,
     (token: string) => {
@@ -870,29 +921,29 @@ async function streamChat(text: string) {
         replyMsg.thinking.active = false
       }
       replyMsg.content += token
-      msgListRef.value?.scrollToBottom()
+      scrollToBottomIfActive()
     },
     async (_model: string) => {
-      const chat = recentChats.value.find(c => c.id === currentChatId.value)
+      const chat = recentChats.value.find(c => c.id === chatId)
       if (chat && chat.title === '新对话') chat.title = text.slice(0, 30)
       replyMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - thinkStart) / 1000))
       replyMsg.thinking.active = false
-      msgListRef.value?.scrollToBottom()
+      scrollToBottomIfActive()
       
-      // 流式对话完成后保存消息，包含思维链数据（如果有）
-      if (currentChatId.value && replyMsg.content) {
+      // 流式对话完成后保存消息（归属发起提问的对话），包含思维链数据（如果有）
+      if (chatId && replyMsg.content) {
         const thinkingData = (replyMsg.thinking.text || replyMsg.thinking.elapsed > 0) ? {
           text: replyMsg.thinking.text || '',
           elapsed: replyMsg.thinking.elapsed
         } : undefined
-        await chatApi.saveMessage(currentChatId.value, 'assistant', replyMsg.content, replyMsg.sources, thinkingData).catch(e => console.warn('[streamChat] save message failed:', e))
+        await chatApi.saveMessage(chatId, 'assistant', replyMsg.content, replyMsg.sources, thinkingData).catch(e => console.warn('[streamChat] save message failed:', e))
       }
     },
     (err: string) => {
       replyMsg.content = '❌ 流式回复失败：' + err
       replyMsg.thinking.active = false
     },
-    lastAnalysis.value,
+    lastAnalysisByChat.get(chatId),
     (reasoning: string) => {
       replyMsg.thinking.text += reasoning
       replyMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - thinkStart) / 1000))
@@ -913,7 +964,7 @@ function onSelectClarification(value: string) {
   inputText.value = current ? `${current} ${value}` : value
 }
 
-function addMessage(role: string, content: string, files?: MsgAttachment[]) {
+function addMessage(role: string, content: string, files?: MsgAttachment[], chatId: number = currentChatId.value) {
   // 生成唯一ID，避免时间戳冲突
   let id = Date.now().toString()
   let attempts = 0
@@ -937,16 +988,24 @@ function addMessage(role: string, content: string, files?: MsgAttachment[]) {
     files,
   } as any
   
-  messages.value.push(newMsg)
-  if (import.meta.env.DEV) console.log(`[addMessage] Added ${role} message, total: ${messages.value.length}`, newMsg)
+  ensureChatMessages(chatId).push(newMsg)
+  if (import.meta.env.DEV) console.log(`[addMessage] Added ${role} message to chat ${chatId}`, newMsg)
   
-  setTimeout(() => msgListRef.value?.scrollToBottom(), 50)
+  setTimeout(() => {
+    if (currentChatId.value === chatId) msgListRef.value?.scrollToBottom()
+  }, 50)
 }
 
 // ── Regenerate / Edit ────────────────────────────────────────
 
 async function handleRegenerate(assistantMsg: any) {
-  if (isSending.value || !currentChatId.value) return
+  const chatId = currentChatId.value
+  if (sendingChatIds.has(chatId) || !chatId) return
+  const limit = effectiveParallelLimit()
+  if (sendingChatIds.size >= limit) {
+    ElMessage.warning(`最多支持 ${limit} 个对话同时提问，请等待进行中的对话完成`)
+    return
+  }
   // 找到该 assistant 消息之前最近的 user 消息
   const idx = messages.value.findIndex(m => m.id === assistantMsg.id)
   const userMsg = [...messages.value].slice(0, idx).reverse().find(m => m.role === 'user')
@@ -956,22 +1015,23 @@ async function handleRegenerate(assistantMsg: any) {
   createBranch(messages.value, idx, `regen-${new Date().toLocaleTimeString()}`)
 
   // 截断：移除该 assistant 消息及其之后的所有消息（对话分支）
-  messages.value = messages.value.slice(0, idx)
-  messageIds.clear()
-  messages.value.forEach((m: any) => messageIds.add(m.id))
+  const truncated = messages.value.slice(0, idx)
+  setChatMessages(chatId, truncated)
+  truncated.forEach((m: any) => messageIds.add(m.id))
 
-  isSending.value = true
-  loadingPhase.value = 'streaming'
+  setSending(chatId, true)
+  setLoadingPhase(chatId, 'streaming')
   try {
-    await streamChat(userMsg.content)
+    await streamChat(userMsg.content, chatId)
   } finally {
-    loadingPhase.value = 'idle'
-    isSending.value = false
+    setLoadingPhase(chatId, 'idle')
+    setSending(chatId, false)
   }
 }
 
 function handleEditMessage(userMsg: any) {
-  if (isSending.value) return
+  const chatId = currentChatId.value
+  if (sendingChatIds.has(chatId)) return
   // 将消息内容填入输入框，截断该消息及之后的所有消息
   const idx = messages.value.findIndex(m => m.id === userMsg.id)
   if (idx === -1) return
@@ -982,9 +1042,9 @@ function handleEditMessage(userMsg: any) {
   createBranch(messages.value, idx, `edit-${new Date().toLocaleTimeString()}`)
 
   inputText.value = text
-  messages.value = messages.value.slice(0, idx)
-  messageIds.clear()
-  messages.value.forEach((m: any) => messageIds.add(m.id))
+  const truncated = messages.value.slice(0, idx)
+  setChatMessages(chatId, truncated)
+  truncated.forEach((m: any) => messageIds.add(m.id))
 }
 
 function formatSizeStr(bytes: number): string {
@@ -1074,6 +1134,7 @@ onMounted(() => {
     }
   }
   loadSessions()  // 始终加载侧边栏列表，不与自动恢复互斥
+  loadChatConcurrencyConfig()  // 多对话并行提问配置（管理后台系统参数）
 })
 </script>
 

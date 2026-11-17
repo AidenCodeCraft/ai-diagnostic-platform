@@ -22,11 +22,17 @@ class LLMService:
         self,
         log_content: str,
         events: list[Dict[str, Any]],
+        *,
+        prompt_built: bool = False,
     ) -> Dict[str, Any]:
-        """Generate diagnostic summary via the configured LLM provider."""
+        """Generate diagnostic summary via the configured LLM provider.
+
+        prompt_built=True：log_content 已是完整构建的诊断 Prompt，透传给
+        Provider 直接使用（不再二次包装/截断）。
+        """
         try:
             provider = ProviderRegistry().get_provider(self.model)
-            result = provider.generate_summary(log_content, events)
+            result = provider.generate_summary(log_content, events, prompt_built=prompt_built)
             return result
         except Exception as exc:
             logger.warning("LLM provider failed, returning fallback: %s", exc)

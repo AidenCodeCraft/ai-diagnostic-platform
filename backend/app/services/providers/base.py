@@ -15,8 +15,14 @@ class BaseProvider(ABC):
         self,
         log_content: str,
         events: list[Dict[str, Any]],
+        *,
+        prompt_built: bool = False,
     ) -> Dict[str, Any]:
-        """Generate a diagnostic summary from parsed log events."""
+        """Generate a diagnostic summary from parsed log events.
+
+        prompt_built=True 时，log_content 已是调用方构建好的完整诊断
+        Prompt（含用户问题/知识库证据/输出要求），不得再二次包装或截断。
+        """
 
     @abstractmethod
     def chat(

@@ -78,8 +78,16 @@ class DiagnosisPipeline:
     # Public API
     # ==================================================================
 
-    def run(self, file_path: str, user_query: str = "") -> Dict[str, Any]:
+    def run(
+        self,
+        file_path: str,
+        user_query: str = "",
+        on_stage: Optional[Any] = None,
+    ) -> Dict[str, Any]:
         """执行标准化诊断流水线。
+
+        Args:
+            on_stage: 阶段进度回调 fn(text)，供上层实时展示 Agent 处理进度。
 
         Returns:
             dict: summary, root_cause, confidence, next_steps,
@@ -92,10 +100,18 @@ class DiagnosisPipeline:
             filename, user_query[:80] if user_query else "(无)",
         )
 
+        def notify(text: str) -> None:
+            try:
+                if on_stage is not None:
+                    on_stage(text)
+            except Exception:  # noqa: BLE001 - 进度回调失败不影响分析
+                logger.debug("[Pipeline] on_stage callback failed", exc_info=True)
+
         # ═══════════════════════════════════════════════════════════
         # Stage 1: 日志解析 → 结构化事件
         # ═══════════════════════════════════════════════════════════
         logger.info("[Pipeline] Stage 1 — 日志解析")
+        notify("① 解析日志并提取结构化事件…")
         raw_events = self.parser.parse_structured(file_path)
         events = [e.to_dict() for e in raw_events]
         error_events = [e for e in events if e.get("is_error")]
@@ -108,6 +124,7 @@ class DiagnosisPipeline:
         # Stage 2: 日志智能裁剪 — 提取关键错误片段
         # ═══════════════════════════════════════════════════════════
         logger.info("[Pipeline] Stage 2 — 日志裁剪")
+        notify("② 提取关键错误片段…")
         trimmed_log = self._trim_log(file_path, error_events, user_query)
         logger.info(
             "[Pipeline] Stage 2 完成: 裁剪后 %d 字符 (原始上限 %d 字节)",
@@ -118,6 +135,7 @@ class DiagnosisPipeline:
         # Stage 3: 规则引擎 — 确定性模式匹配
         # ═══════════════════════════════════════════════════════════
         logger.info("[Pipeline] Stage 3 — 规则引擎")
+        notify("③ 规则引擎匹配已知错误模式…")
         rule_suggestions = self.rule_engine.generate_suggestions(raw_events)
         rule_summary = self._format_rule_results(rule_suggestions)
         logger.info("[Pipeline] Stage 3 完成: %d 条规则命中", len(rule_suggestions))
@@ -126,6 +144,7 @@ class DiagnosisPipeline:
         # Stage 4: RAG 知识检索 — 向量搜索 + 关键词回退
         # ═══════════════════════════════════════════════════════════
         logger.info("[Pipeline] Stage 4 — RAG 知识检索")
+        notify("④ 知识库检索相关案例…")
         knowledge_results = self._search_knowledge(user_query, rule_suggestions, events)
         knowledge_summary = self._format_knowledge_results(knowledge_results)
         logger.info("[Pipeline] Stage 4 完成: %d 条知识命中", len(knowledge_results))
@@ -134,6 +153,7 @@ class DiagnosisPipeline:
         # Stage 4.5: 知识驱动日志定位 — 用剧本在日志中定位证据
         # ═══════════════════════════════════════════════════════════
         logger.info("[Pipeline] Stage 4.5 — 知识驱动日志定位")
+        notify("⑤ 用知识库剧本校验日志证据…")
         detections = self._locate_by_knowledge(knowledge_results, file_path, user_query)
         self._annotate_detection_sections(detections)
         evidence = [d.to_dict() for d in detections if d.verdict in ("hit", "partial")]
@@ -147,6 +167,7 @@ class DiagnosisPipeline:
             logger.info("[Pipeline] 知识库无支撑 — 返回无结论结果")
             return self._no_support_result(
                 events, error_events, detections, knowledge_results, rule_suggestions,
+                user_query=user_query,
             )
 
         # ═══════════════════════════════════════════════════════════
@@ -166,9 +187,10 @@ class DiagnosisPipeline:
         # Stage 6: Agent 综合分析 — LLM 合成诊断报告
         # ═══════════════════════════════════════════════════════════
         logger.info("[Pipeline] Stage 5 — Agent 综合分析 (模型: %s)", self.model)
+        notify("⑥ AI 综合分析生成诊断结论…")
         try:
             llm_result = LLMService(model=self.model).generate_summary(
-                log_content=prompt, events=events
+                log_content=prompt, events=events, prompt_built=True,
             )
             logger.info(
                 "[Pipeline] Stage 5 完成: confidence=%.2f",
@@ -178,7 +200,10 @@ class DiagnosisPipeline:
             logger.warning(
                 "[Pipeline] LLM 失败 — 返回无结论结果: %s", exc,
             )
-            return self._llm_failure_result(events, error_events, detections, knowledge_results)
+            return self._llm_failure_result(
+                events, error_events, detections, knowledge_results,
+                user_query=user_query,
+            )
 
         # ═══════════════════════════════════════════════════════════
         # Stage 7: 结果规范化
@@ -465,7 +490,13 @@ class DiagnosisPipeline:
                 )
                 parts.append(f"## 严重错误摘要\n{error_summary}")
 
-        parts.append("\n请输出 JSON 格式的完整诊断结果（不要用 markdown 代码块包裹）。")
+        # 输出字段要求（Provider 层不再二次包装 Prompt，这里必须自带 schema）
+        from app.services.prompts.diagnostic_prompt import DiagnosticPrompt
+        parts.append(
+            "\n请输出 JSON 格式的完整诊断结果（不要用 markdown 代码块包裹），"
+            "必须包含以下字段：\n"
+            + json.dumps(DiagnosticPrompt.OUTPUT_SCHEMA, indent=2, ensure_ascii=False)
+        )
 
         prompt = "\n\n".join(parts)
         logger.debug("[Pipeline] Prompt 长度: %d 字符", len(prompt))
@@ -522,6 +553,7 @@ class DiagnosisPipeline:
         detections: list,
         knowledge_results: list,
         rule_suggestions: list,
+        user_query: str = "",
     ) -> Dict[str, Any]:
         """强约束：无知识库证据时返回无结论结果（禁止推测）。"""
         error_count = len(error_events)
@@ -533,6 +565,8 @@ class DiagnosisPipeline:
         else:
             reason = "知识库中暂无与该问题相关的可验证支撑，无法给出诊断结论。"
 
+        query_prefix = f"针对您的问题「{user_query.strip()[:80]}」：" if user_query and user_query.strip() else ""
+
         log_facts = []
         for e in error_events[:8]:
             msg = str(e.get("message", "")).strip()
@@ -541,7 +575,7 @@ class DiagnosisPipeline:
 
         return {
             "summary": (
-                f"{reason} 已解析 {len(events)} 条日志事件（其中 {error_count} 条错误）。"
+                f"{query_prefix}{reason} 已解析 {len(events)} 条日志事件（其中 {error_count} 条错误）。"
             ),
             "root_cause": "知识库中暂无支撑，按平台约束不输出推测性结论。",
             "confidence": 0.0,
@@ -574,9 +608,11 @@ class DiagnosisPipeline:
         error_events: list,
         detections: list,
         knowledge_results: list,
+        user_query: str = "",
     ) -> Dict[str, Any]:
         """LLM 不可用时的安全降级：只回事实，不下结论。"""
         error_count = len(error_events)
+        query_prefix = f"针对您的问题「{user_query.strip()[:80]}」：" if user_query and user_query.strip() else ""
         log_facts = []
         for e in error_events[:8]:
             msg = str(e.get("message", "")).strip()
@@ -585,7 +621,7 @@ class DiagnosisPipeline:
 
         return {
             "summary": (
-                f"AI 分析服务暂时不可用，无法给出诊断结论。"
+                f"{query_prefix}AI 分析服务暂时不可用，无法给出诊断结论。"
                 f"已解析 {len(events)} 条日志事件（其中 {error_count} 条错误）。"
             ),
             "root_cause": "AI 分析服务不可用，按平台约束不输出推测性结论。",

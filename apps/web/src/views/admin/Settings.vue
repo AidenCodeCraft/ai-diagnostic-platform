@@ -95,6 +95,22 @@
             <label class="config-label">日志保留天数</label>
             <el-input-number v-model="sysConfig.log_retention_days" :min="7" :max="365" style="width:160px" />
           </div>
+          <el-divider style="margin:12px 0" />
+          <div class="config-item">
+            <label class="config-label">允许多对话并行提问</label>
+            <el-switch v-model="sysConfig.parallel_chat_enabled" />
+            <span class="config-hint">开启后可在多个对话中同时发起提问，互不打断</span>
+          </div>
+          <div class="config-item">
+            <label class="config-label">单用户最大并行提问数</label>
+            <el-input-number v-model="sysConfig.max_parallel_chats" :min="1" :max="10" :disabled="!sysConfig.parallel_chat_enabled" style="width:160px" />
+            <span class="config-hint">同一用户可同时进行提问的对话数量上限</span>
+          </div>
+          <div class="config-item">
+            <label class="config-label">最大同时在线人数</label>
+            <el-input-number v-model="sysConfig.max_online_users" :min="10" :max="5000" style="width:160px" />
+            <span class="config-hint">全系统并发提问上限，超出的提问将提示稍后重试</span>
+          </div>
           <el-button type="primary" style="margin-top:12px" @click="saveSysConfig">保存配置</el-button>
         </div>
       </el-tab-pane>
@@ -189,6 +205,9 @@ const sysConfig = ref({
   max_upload_mb: 100,
   timeout_seconds: 300,
   log_retention_days: 90,
+  parallel_chat_enabled: true,
+  max_parallel_chats: 3,
+  max_online_users: 200,
 })
 
 const cleanupDate = ref('')
@@ -364,6 +383,9 @@ async function loadSysConfig() {
         max_upload_mb: data.max_upload_mb ?? 100,
         timeout_seconds: data.timeout_seconds ?? 300,
         log_retention_days: data.log_retention_days ?? 90,
+        parallel_chat_enabled: data.parallel_chat_enabled ?? true,
+        max_parallel_chats: data.max_parallel_chats ?? 3,
+        max_online_users: data.max_online_users ?? 200,
       }
     }
   } catch (err) {
@@ -382,6 +404,7 @@ onMounted(() => {
 .settings-tabs { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 0 16px 16px; }
 .config-section { padding-top: 8px; }
 .config-item { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+.config-hint { font-size: 12px; color: #9ca3af; }
 .config-label { width: 130px; font-size: 14px; color: #374151; text-align: right; flex-shrink: 0; }
 
 .llm-config-section { padding-top: 16px; }

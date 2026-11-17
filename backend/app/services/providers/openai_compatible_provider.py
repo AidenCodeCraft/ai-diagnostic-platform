@@ -57,13 +57,15 @@ class OpenAICompatibleProvider(BaseProvider):
         self.max_retries = max_retries
 
     def generate_summary(
-        self, log_content: str, events: List[Dict[str, Any]]
+        self, log_content: str, events: List[Dict[str, Any]],
+        *, prompt_built: bool = False,
     ) -> Dict[str, Any]:
         error_count = len([e for e in events if e.get("is_error")])
         if not self.api_key:
             return self._fallback(events, error_count, f"{self._provider_name} API key not configured.", 0.4)
 
-        prompt = DiagnosticPrompt.build(log_content, events)
+        # prompt_built=True：log_content 已是完整诊断 Prompt，禁止二次包装/截断
+        prompt = log_content if prompt_built else DiagnosticPrompt.build(log_content, events)
         for attempt in range(1, self.max_retries + 1):
             try:
                 raw = self._call_api(prompt)

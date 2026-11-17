@@ -15,9 +15,20 @@ from app.models import Organization, OrganizationMember, Project, BugCase, Clien
 
 logger = get_logger(__name__)
 
+engine_kwargs = {}
+if not settings.DATABASE_URL.startswith("sqlite"):
+    # 高并发下默认池（5+10）不够用；SQLite（测试）不支持这些参数
+    engine_kwargs = {
+        "pool_size": int(getattr(settings, "DB_POOL_SIZE", 20)),
+        "max_overflow": int(getattr(settings, "DB_MAX_OVERFLOW", 60)),
+        "pool_recycle": int(getattr(settings, "DB_POOL_RECYCLE", 1800)),
+        "pool_pre_ping": True,
+    }
+
 engine = create_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
+    **engine_kwargs,
 )
 logger.info("Database engine created: %s", settings.DATABASE_URL.split("@")[-1] if "@" in settings.DATABASE_URL else "local")
 
