@@ -1,11 +1,12 @@
 """Unified search API across logs, knowledge, analyses, and reports."""
 
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user_id
 from app.database.session import get_db
 from app.models.chat import ChatSession, ChatMessage
 from app.models.diagnostics import Log, Analysis, Report
@@ -21,6 +22,7 @@ def unified_search(
     type: str = Query("all", description="搜索类型: all, logs, knowledge, analyses, reports, bugs, chats"),
     limit: int = Query(20, ge=1, le=100, description="每类返回数量"),
     db: Session = Depends(get_db),
+    user_id: Optional[int] = Depends(get_current_user_id),
 ) -> dict[str, Any]:
     """
     统一搜索接口
@@ -125,9 +127,15 @@ def unified_search(
         ]
 
     def search_chats():
+        # 对话会话按用户隔离：未登录或跨用户一律不可见
+        if user_id is None:
+            return []
         items = (
             db.query(ChatSession)
-            .filter(ChatSession.title.ilike(pattern))
+            .filter(
+                ChatSession.title.ilike(pattern),
+                ChatSession.user_id == user_id,
+            )
             .limit(limit)
             .all()
         )

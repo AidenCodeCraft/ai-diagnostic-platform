@@ -18,6 +18,22 @@ def isolated_config(tmp_path, monkeypatch):
     return cfg_file
 
 
+def _chat_headers(client):
+    """注册临时用户并返回其 JWT 请求头（/chat-sessions 按登录用户隔离）。"""
+    import uuid
+
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": f"gate_{uuid.uuid4().hex[:8]}",
+            "password": "Str0ng!Passw0rd",
+            "role": "user",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
 class TestSystemConfig:
     def test_defaults_when_file_missing(self, isolated_config):
         cfg = get_system_config()
@@ -84,24 +100,38 @@ class TestConcurrencyGate:
 
 class TestChatConcurrencyLimit:
     def test_stream_rejected_when_full(self, client, isolated_config):
+        headers = _chat_headers(client)
+        session = client.post(
+            "/api/v1/chat-sessions", json={"title": "t", "model": "mock"}, headers=headers,
+        ).json()
         client.put("/api/v1/admin/config/system", json={"max_online_users": 1})
         from app.services.system.concurrency import chat_gate
 
         assert chat_gate.acquire(1) is True
         try:
-            resp = client.post("/api/v1/chat-sessions/1/stream", json={"content": "hi"})
+            resp = client.post(
+                f"/api/v1/chat-sessions/{session['id']}/stream",
+                json={"content": "hi"}, headers=headers,
+            )
             assert resp.status_code == 200  # SSE 始终 200，错误以事件返回
             assert "当前同时在线人数已达上限" in resp.text
         finally:
             chat_gate.release()
 
     def test_chat_rejected_when_full(self, client, isolated_config):
+        headers = _chat_headers(client)
+        session = client.post(
+            "/api/v1/chat-sessions", json={"title": "t", "model": "mock"}, headers=headers,
+        ).json()
         client.put("/api/v1/admin/config/system", json={"max_online_users": 1})
         from app.services.system.concurrency import chat_gate
 
         assert chat_gate.acquire(1) is True
         try:
-            resp = client.post("/api/v1/chat-sessions/1/chat", json={"content": "hi"})
+            resp = client.post(
+                f"/api/v1/chat-sessions/{session['id']}/chat",
+                json={"content": "hi"}, headers=headers,
+            )
             assert resp.status_code == 429
             assert "当前同时在线人数已达上限" in resp.json()["detail"]
         finally:
@@ -110,11 +140,13 @@ class TestChatConcurrencyLimit:
     def test_gate_released_after_stream(self, client, isolated_config):
         from app.services.system.concurrency import chat_gate
 
+        headers = _chat_headers(client)
         session = client.post(
-            "/api/v1/chat-sessions", json={"title": "t", "model": "mock"}
+            "/api/v1/chat-sessions", json={"title": "t", "model": "mock"}, headers=headers,
         ).json()
         resp = client.post(
-            f"/api/v1/chat-sessions/{session['id']}/stream", json={"content": "hi"}
+            f"/api/v1/chat-sessions/{session['id']}/stream",
+            json={"content": "hi"}, headers=headers,
         )
         assert resp.status_code == 200
         assert '"done"' in resp.text

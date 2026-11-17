@@ -2,14 +2,13 @@
 
 import pytest
 
-
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
 
-def _create_session(client):
+def _create_session(client, headers=None):
     resp = client.post(
-        "/api/v1/chat-sessions", json={"title": "t", "model": "mock"}
+        "/api/v1/chat-sessions", json={"title": "t", "model": "mock"}, headers=headers,
     )
     assert resp.status_code in (200, 201)
     return resp.json()
@@ -24,13 +23,20 @@ def _register(client, username="alice"):
     return resp.json()
 
 
+def _authed_session(client, username="alice"):
+    """注册临时用户并创建其名下会话（/chat-sessions 按登录用户隔离）。"""
+    data = _register(client, username)
+    headers = {"Authorization": f"Bearer {data['access_token']}"}
+    return _create_session(client, headers), headers
+
+
 # ------------------------------------------------------------------
 # Message versions (编辑重发保留历史)
 # ------------------------------------------------------------------
 
 class TestMessageVersions:
     def test_add_message_with_versions(self, client):
-        session = _create_session(client)
+        session, h = _authed_session(client)
         resp = client.post(
             f"/api/v1/chat-sessions/{session['id']}/messages",
             json={
@@ -42,6 +48,7 @@ class TestMessageVersions:
                 ],
                 "active_version": 1,
             },
+            headers=h,
         )
         assert resp.status_code == 201
         data = resp.json()
@@ -50,12 +57,12 @@ class TestMessageVersions:
         assert data["active_version"] == 1
 
     def test_update_message_keeps_both_versions(self, client):
-        session = _create_session(client)
+        session, h = _authed_session(client)
         msg = client.post(
             f"/api/v1/chat-sessions/{session['id']}/messages",
             json={"role": "user", "content": "原始提问"},
+            headers=h,
         ).json()
-
         resp = client.put(
             f"/api/v1/chat-sessions/{session['id']}/messages/{msg['id']}",
             json={
@@ -66,6 +73,7 @@ class TestMessageVersions:
                 ],
                 "active_version": 1,
             },
+            headers=h,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -73,13 +81,15 @@ class TestMessageVersions:
         assert data["active_version"] == 1
 
         # 刷新历史：GET 消息返回两个版本
-        msgs = client.get(f"/api/v1/chat-sessions/{session['id']}/messages").json()
+        msgs = client.get(
+            f"/api/v1/chat-sessions/{session['id']}/messages", headers=h,
+        ).json()
         assert len(msgs) == 1
         assert msgs[0]["content"] == "修改后的提问"
         assert [v["content"] for v in msgs[0]["versions"]] == ["原始提问", "修改后的提问"]
 
     def test_update_message_switches_active_version(self, client):
-        session = _create_session(client)
+        session, h = _authed_session(client)
         msg = client.post(
             f"/api/v1/chat-sessions/{session['id']}/messages",
             json={
@@ -88,32 +98,37 @@ class TestMessageVersions:
                 "versions": [{"content": "v1"}, {"content": "v2"}],
                 "active_version": 1,
             },
+            headers=h,
         ).json()
         resp = client.put(
             f"/api/v1/chat-sessions/{session['id']}/messages/{msg['id']}",
             json={"content": "v1", "active_version": 0},
+            headers=h,
         )
         assert resp.status_code == 200
         assert resp.json()["content"] == "v1"
         assert resp.json()["active_version"] == 0
 
     def test_update_message_not_found(self, client):
-        session = _create_session(client)
+        session, h = _authed_session(client)
         resp = client.put(
             f"/api/v1/chat-sessions/{session['id']}/messages/99999",
             json={"content": "x"},
+            headers=h,
         )
         assert resp.status_code == 404
 
     def test_update_message_ignores_unknown_fields(self, client):
-        session = _create_session(client)
+        session, h = _authed_session(client)
         msg = client.post(
             f"/api/v1/chat-sessions/{session['id']}/messages",
             json={"role": "user", "content": "a"},
+            headers=h,
         ).json()
         resp = client.put(
             f"/api/v1/chat-sessions/{session['id']}/messages/{msg['id']}",
             json={"content": "b", "role": "assistant", "session_id": 999},
+            headers=h,
         )
         assert resp.status_code == 200
         assert resp.json()["role"] == "user"

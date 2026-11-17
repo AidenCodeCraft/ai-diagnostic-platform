@@ -1,94 +1,138 @@
-"""Chat Session API — multi-turn conversation management."""
+"""Chat Session API — multi-turn conversation management.
+
+所有会话按登录用户隔离：会话归属以 JWT 解析出的用户为准，
+请求体/查询参数中的 user_id 一律忽略，跨用户访问按 404（不泄露存在性）处理。
+"""
 
 from __future__ import annotations
-
 import logging
 import traceback
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.database import session as session_module
+from app.api.deps import get_db_session, require_auth
 from app.services import ChatService
 
 logger = logging.getLogger(__name__)
-
-
-def get_db_session():
-    db = session_module.create_session()
-    try:
-        yield db
-    finally:
-        db.close()
-
 
 router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
 
 
 @router.post("", status_code=201)
-def create_session(body: Dict[str, Any], db: Session = Depends(get_db_session)):
+def create_session(
+    body: Dict[str, Any],
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
+):
+    # 会话归属以 token 解析出的用户为准，忽略 body 中的 user_id
     return ChatService(db).create_session(
-        title=body.get("title"), user_id=body.get("user_id"),
+        title=body.get("title"), user_id=user_id,
         log_id=body.get("log_id"), model=body.get("model"),
         project_id=body.get("project_id"),
     )
 
 
 @router.get("")
-def list_sessions(user_id: Optional[int] = Query(default=None), page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db_session)):
-    return ChatService(db).list_sessions(user_id=user_id, page=page, page_size=page_size)
+def list_sessions(
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
+):
+    # 只返回当前用户自己的会话
+    return ChatService(db).list_sessions(
+        user_id=user_id, page=max(1, page), page_size=max(1, min(100, page_size)),
+    )
 
 
 @router.get("/{session_id}")
-def get_session(session_id: int, db: Session = Depends(get_db_session)):
+def get_session(
+    session_id: int,
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
+):
     try:
-        return ChatService(db).get_session(session_id)
+        return ChatService(db).get_session(session_id, user_id=user_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
 
 
 @router.put("/{session_id}")
-def update_session(session_id: int, body: Dict[str, Any], db: Session = Depends(get_db_session)):
+def update_session(
+    session_id: int,
+    body: Dict[str, Any],
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
+):
     try:
-        return ChatService(db).update_session(session_id, title=body.get("title"))
+        return ChatService(db).update_session(
+            session_id, title=body.get("title"), user_id=user_id,
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
 
 
 @router.delete("/{session_id}", status_code=204)
-def delete_session(session_id: int, db: Session = Depends(get_db_session)):
+def delete_session(
+    session_id: int,
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
+):
     try:
-        ChatService(db).delete_session(session_id)
+        ChatService(db).delete_session(session_id, user_id=user_id)
         return Response(status_code=204)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
 
 
 # Messages
 @router.post("/{session_id}/messages", status_code=201)
-def add_message(session_id: int, body: Dict[str, Any], db: Session = Depends(get_db_session)):
-    return ChatService(db).add_message(
-        session_id, role=body["role"], content=body["content"],
-        sources=body.get("sources"), thinking=body.get("thinking"),
-        versions=body.get("versions"), active_version=body.get("active_version"),
-    )
+def add_message(
+    session_id: int,
+    body: Dict[str, Any],
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
+):
+    try:
+        return ChatService(db).add_message(
+            session_id, role=body["role"], content=body["content"],
+            sources=body.get("sources"), thinking=body.get("thinking"),
+            versions=body.get("versions"), active_version=body.get("active_version"),
+            user_id=user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
 
 
 @router.put("/{session_id}/messages/{message_id}")
 def update_message(
-    session_id: int, message_id: int, body: Dict[str, Any], db: Session = Depends(get_db_session)
+    session_id: int,
+    message_id: int,
+    body: Dict[str, Any],
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
 ):
     try:
-        return ChatService(db).update_message(session_id, message_id, fields=body)
+        return ChatService(db).update_message(
+            session_id, message_id, fields=body, user_id=user_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/{session_id}/messages")
-def get_messages(session_id: int, db: Session = Depends(get_db_session)):
-    return ChatService(db).get_messages(session_id)
+def get_messages(
+    session_id: int,
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
+):
+    try:
+        return ChatService(db).get_messages(session_id, user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
 
 
 # AI Chat
@@ -97,6 +141,7 @@ def chat(
     session_id: int,
     body: Dict[str, Any],
     db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
 ):
     """Send a message and get an AI reply (non-streaming).
 
@@ -118,9 +163,10 @@ def chat(
             content=body["content"],
             model=body.get("model"),
             log_analysis=body.get("log_analysis"),
+            user_id=user_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
     finally:
         chat_gate.release()
 
@@ -130,8 +176,14 @@ def chat_stream(
     session_id: int,
     body: Dict[str, Any],
     db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
 ):
     """Stream AI reply via SSE with diagnostic context injection."""
+    # 归属校验必须在流开始前完成（校验失败直接 404，而不是 SSE error 事件）
+    try:
+        ChatService(db).get_session(session_id, user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
 
     def generate():
         # Send an initial heartbeat immediately. Without this, Nginx/Vite may
@@ -153,6 +205,7 @@ def chat_stream(
                 content=body["content"],
                 model=body.get("model"),
                 log_analysis=body.get("log_analysis"),
+                user_id=user_id,
             )
         except ValueError as e:
             # 会话不存在等可恢复错误 → 通过 SSE 返回错误
@@ -189,9 +242,15 @@ def update_message_feedback(
     message_id: int,
     body: Dict[str, Any],
     db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
 ):
     """Update message feedback: { "feedback": "like" | "dislike" | null }"""
     from app.models.chat.chat_session import ChatMessage
+
+    try:
+        ChatService(db).get_session(session_id, user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
 
     msg = db.query(ChatMessage).filter(
         ChatMessage.id == message_id,
@@ -215,13 +274,17 @@ def resolve_message(
     message_id: int,
     body: Dict[str, Any],
     db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
 ):
     """用户确认「已解决/未解决」。已解决时触发自进化蒸馏（生成待审核候选）。"""
     resolved = bool(body.get("resolved"))
     if not resolved:
         return {"ok": True, "resolved": False, "candidate_profile_id": None}
 
-    session = ChatService(db).get_session(session_id)
+    try:
+        session = ChatService(db).get_session(session_id, user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
     from app.services.knowledge.distiller import KnowledgeDistiller
 
     try:

@@ -42,8 +42,12 @@ class ChatService:
         self.db.refresh(session)
         return session
 
-    def get_session(self, session_id: int) -> ChatSession:
-        s = self.db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    def get_session(self, session_id: int, user_id: Optional[int] = None) -> ChatSession:
+        """读取会话；提供 user_id 时校验归属（非本人的会话按不存在处理）。"""
+        query = self.db.query(ChatSession).filter(ChatSession.id == session_id)
+        if user_id is not None:
+            query = query.filter(ChatSession.user_id == user_id)
+        s = query.first()
         if not s:
             raise ValueError("session not found")
         return s
@@ -56,8 +60,8 @@ class ChatService:
         items = query.order_by(ChatSession.updated_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
         return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-    def update_session(self, session_id: int, title: Optional[str] = None, context: Optional[Dict[str, Any]] = None) -> ChatSession:
-        s = self.get_session(session_id)
+    def update_session(self, session_id: int, title: Optional[str] = None, context: Optional[Dict[str, Any]] = None, user_id: Optional[int] = None) -> ChatSession:
+        s = self.get_session(session_id, user_id)
         if title is not None:
             setattr(s, 'title', title)
         if context is not None:
@@ -68,8 +72,8 @@ class ChatService:
         self.db.refresh(s)
         return s
 
-    def delete_session(self, session_id: int) -> None:
-        s = self.get_session(session_id)
+    def delete_session(self, session_id: int, user_id: Optional[int] = None) -> None:
+        s = self.get_session(session_id, user_id)
         self.db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
         self.db.delete(s)
         self.db.commit()
@@ -82,9 +86,11 @@ class ChatService:
         self, session_id: int, role: str, content: str,
         sources: Optional[List[Dict[str, Any]]] = None,
         thinking: Optional[Dict[str, Any]] = None,
+        user_id: Optional[int] = None,
         versions: Optional[List[Dict[str, Any]]] = None,
         active_version: Optional[int] = None,
     ) -> ChatMessage:
+        self.get_session(session_id, user_id)  # 归属校验
         msg = ChatMessage(
             session_id=session_id, role=role, content=content,
             sources=sources, thinking=thinking,
@@ -96,9 +102,11 @@ class ChatService:
         return msg
 
     def update_message(
-        self, session_id: int, message_id: int, fields: Optional[Dict[str, Any]] = None
+        self, session_id: int, message_id: int, fields: Optional[Dict[str, Any]] = None,
+        user_id: Optional[int] = None,
     ) -> ChatMessage:
         """更新消息的可编辑字段（编辑重发：content / sources / thinking / versions / active_version）。"""
+        self.get_session(session_id, user_id)  # 归属校验
         msg = (
             self.db.query(ChatMessage)
             .filter(ChatMessage.id == message_id, ChatMessage.session_id == session_id)
@@ -114,7 +122,8 @@ class ChatService:
         self.db.refresh(msg)
         return msg
 
-    def get_messages(self, session_id: int) -> List[ChatMessage]:
+    def get_messages(self, session_id: int, user_id: Optional[int] = None) -> List[ChatMessage]:
+        self.get_session(session_id, user_id)  # 归属校验
         return self.db.query(ChatMessage).filter(
             ChatMessage.session_id == session_id
         ).order_by(ChatMessage.created_at.asc()).all()
@@ -242,11 +251,12 @@ class ChatService:
         content: str,
         model: Optional[str] = None,
         log_analysis: Optional[Dict[str, Any]] = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Send a user message and get an AI reply (non-streaming, with diagnostic context)."""
-        session = self.get_session(session_id)
+        session = self.get_session(session_id, user_id)
         provider_name = str(model or session.model or "mock")
-        self.add_message(session_id, "user", content)
+        self.add_message(session_id, "user", content, user_id=user_id)
         messages = self._build_messages(session_id)
 
         # Resolve log_analysis from session context if not explicitly provided
@@ -269,7 +279,7 @@ class ChatService:
             except Exception as e:
                 reply = f"[AI 服务暂时不可用: {e}]"
 
-        self.add_message(session_id, "assistant", reply)
+        self.add_message(session_id, "assistant", reply, user_id=user_id)
         self._auto_title(session_id, content)
         return {"reply": reply, "model": provider_name}
 
@@ -279,13 +289,14 @@ class ChatService:
         content: str,
         model: Optional[str] = None,
         log_analysis: Optional[Dict[str, Any]] = None,
+        user_id: Optional[int] = None,
     ):
         """Stream AI reply with diagnostic context injection.
 
         log_analysis: if provided, persists to session context for multi-turn inheritance.
         Subsequent messages in the same session will auto-inherit via session.context.last_analysis.
         """
-        session = self.get_session(session_id)
+        session = self.get_session(session_id, user_id)
         provider_name = str(model or session.model or "mock")
         # 用户消息由前端 saveMessage 统一持久化，后端不再重复保存
         messages = self._build_messages(session_id)

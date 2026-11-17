@@ -157,6 +157,7 @@ class SearchResult:
     matched_term: str                 # 匹配到的搜索词
     total_attempted: int              # 总共尝试的搜索词数
     is_partial_match: bool = False    # 是否部分匹配（实体匹配但意图不匹配）
+    unit_count: int = 1               # 复合提问拆分出的问题单元数（单问题为 1）
 
 
 # =========================================================================
@@ -786,7 +787,7 @@ def process_multi_query(query: str, search_fn: callable, **kwargs) -> SearchResu
     if len(units) <= 1:
         return preprocessor.process(query=query, search_fn=search_fn, **kwargs)
 
-    merged: Dict[Any, Dict[str, Any]] = {}
+    per_unit_items: List[List[Dict[str, Any]]] = []
     partial_flags: List[bool] = []
     total_attempted = 0
     matched_terms: List[str] = []
@@ -796,27 +797,46 @@ def process_multi_query(query: str, search_fn: callable, **kwargs) -> SearchResu
         if result.matched_term:
             matched_terms.append(result.matched_term)
         partial_flags.append(bool(result.items) and result.is_partial_match)
+        unit_items: List[Dict[str, Any]] = []
         for item in result.items:
             # 记录本单元命中的搜索词，供 snippet 提取定位
             item["_matched_term"] = result.matched_term or unit
+            unit_items.append(item)
+        per_unit_items.append(unit_items)
+
+    # 轮转交错合并：每个问题单元轮流出一条，保证任意单元的头部文档
+    # 不会被其他单元的高分文档挤出下游的条数截断（否则复合提问会丢掉
+    # 单独提问时能命中的答案文档，触发整体拒答）。
+    merged: Dict[Any, Dict[str, Any]] = {}
+    ordered: List[Dict[str, Any]] = []
+    max_rank = max((len(x) for x in per_unit_items), default=0)
+    for rank in range(max_rank):
+        for unit_items in per_unit_items:
+            if rank >= len(unit_items):
+                continue
+            item = unit_items[rank]
             doc_id = item.get("id")
             old = merged.get(doc_id)
-            if old is None or float(item.get("relevance_score", 0) or 0) > float(
+            if old is None:
+                merged[doc_id] = item
+                ordered.append(item)
+            elif float(item.get("relevance_score", 0) or 0) > float(
                 old.get("relevance_score", 0) or 0
             ):
+                # 同一文档命中多个单元：保留分数更高的版本，位置不变
                 merged[doc_id] = item
+                ordered[ordered.index(old)] = item
 
-    items = sorted(
-        merged.values(),
-        key=lambda d: float(d.get("relevance_score", 0) or 0),
-        reverse=True,
-    )[:8]
+    # 条数预算按单元数放大（每个单元至少保留单问题检索时的 6 条），
+    # 上限 12 条控制 Prompt 体积
+    items = ordered[: min(12, 6 * len(units))]
     return SearchResult(
         items=items,
         matched_layer="多问题检索",
         matched_term=" | ".join(matched_terms),
         total_attempted=total_attempted,
         is_partial_match=bool(partial_flags) and all(partial_flags),
+        unit_count=len(units),
     )
 
 
