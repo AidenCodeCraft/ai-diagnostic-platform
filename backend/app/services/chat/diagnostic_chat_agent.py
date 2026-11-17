@@ -445,10 +445,13 @@ class DiagnosticChatAgent:
 
         # snippet 大小和结果条数按输入长度对数缩放
         # 下限 6 条：短问题（十几个字）原来只有 5 条，正确文档排第 6 就会被截掉
+        # 复合提问按问题单元数放大条数预算：每个单元保留与单独提问相同的条数，
+        # 否则某个子问题的答案文档会被其他子问题的文档挤出截断（触发整体拒答）
+        num_units = max(1, getattr(search_result, "unit_count", 1))
         text_len = len(text)
         log_scale = math.log10(max(text_len, 10) / 10)  # 0.0 ~ 5.0
         snippet_max = min(4000, int(800 + 600 * log_scale))
-        max_items = min(8, 6 + int(log_scale / 1.5))  # 6 ~ 8
+        max_items = min(12, (6 + int(log_scale / 1.5)) * num_units)  # 单问题 6 ~ 8 条
 
         items = all_items[:max_items]
 
