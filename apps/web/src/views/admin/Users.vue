@@ -39,7 +39,7 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="edit">✏️ 编辑</el-dropdown-item>
-                  <el-dropdown-item v-if="isDeveloper" command="delete" divided style="color:#ef4444">🗑️ 删除</el-dropdown-item>
+                  <el-dropdown-item v-if="isDeveloper" command="delete" divided style="color:var(--chat-popup-danger-hover-text)">🗑️ 删除</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -272,14 +272,14 @@ onMounted(fetchUsers)
 </script>
 
 <style scoped>
-.page-title { font-size: 20px; font-weight: 600; color: #1f2937; margin: 0 0 20px; }
+.page-title { font-size: 20px; font-weight: 600; color: var(--chat-layout-text); margin: 0 0 20px; }
 
 .users-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.toolbar-total { margin-left: auto; font-size: 13px; color: #6b7280; }
+.toolbar-total { margin-left: auto; font-size: 13px; color: var(--chat-source-muted); }
 
-.users-table-wrap { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
+.users-table-wrap { background: var(--chat-popup-bg); border: 1px solid var(--chat-popup-border); border-radius: 10px; overflow: hidden; }
 
 /* 更多按钮 */
-.row-more-btn { width: 28px; height: 28px; border-radius: 6px; border: none; background: transparent; color: #9ca3af; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.12s; }
-.row-more-btn:hover { background: #e5e7eb; color: #374151; }
+.row-more-btn { width: 28px; height: 28px; border-radius: 6px; border: none; background: transparent; color: var(--chat-copy-text); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.12s; }
+.row-more-btn:hover { background: var(--chat-sidebar-icon-hover-bg); color: var(--chat-sidebar-icon-hover); }
 </style>

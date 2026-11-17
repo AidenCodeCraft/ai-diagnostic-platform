@@ -100,10 +100,27 @@ def add_message(
         return ChatService(db).add_message(
             session_id, role=body["role"], content=body["content"],
             sources=body.get("sources"), thinking=body.get("thinking"),
+            versions=body.get("versions"), active_version=body.get("active_version"),
             user_id=user_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="会话不存在") from exc
+
+
+@router.put("/{session_id}/messages/{message_id}")
+def update_message(
+    session_id: int,
+    message_id: int,
+    body: Dict[str, Any],
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
+):
+    try:
+        return ChatService(db).update_message(
+            session_id, message_id, fields=body, user_id=user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/{session_id}/messages")

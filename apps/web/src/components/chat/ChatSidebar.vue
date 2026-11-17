@@ -68,25 +68,28 @@
 
       <div class="sidebar-history" v-show="!collapsed">
         <div class="section-title">最近对话</div>
-        <div
-          v-for="chat in chats"
-          :key="chat.id"
-          class="history-item"
-          :class="{ active: chat.id === activeChatId }"
-          @click="$emit('selectChat', chat.id)"
-        >
-          <span class="history-title">{{ chat.title }}</span>
-          <span v-if="sendingIds && sendingIds.includes(chat.id)" class="streaming-badge" title="回答生成中">
-            <span class="streaming-dot" />回答中
-          </span>
-          <button class="history-more-btn" @click.stop="$emit('chatMenu', $event, chat)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="5" r="1" />
-              <circle cx="12" cy="12" r="1" />
-              <circle cx="12" cy="19" r="1" />
-            </svg>
-          </button>
-        </div>
+        <template v-for="group in chatGroups" :key="group.label">
+          <div class="history-group-title">{{ group.label }}</div>
+          <div
+            v-for="chat in group.chats"
+            :key="chat.id"
+            class="history-item"
+            :class="{ active: chat.id === activeChatId }"
+            @click="$emit('selectChat', chat.id)"
+          >
+            <span class="history-title">{{ chat.title }}</span>
+            <span v-if="sendingIds && sendingIds.includes(chat.id)" class="streaming-badge" title="回答生成中">
+              <span class="streaming-dot" />回答中
+            </span>
+            <button class="history-more-btn" @click.stop="$emit('chatMenu', $event, chat)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="5" r="1" />
+                <circle cx="12" cy="12" r="1" />
+                <circle cx="12" cy="19" r="1" />
+              </svg>
+            </button>
+          </div>
+        </template>
         <div v-if="chats.length === 0" class="empty-hint">暂无对话记录</div>
       </div>
 
@@ -99,10 +102,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import type { ChatRecord } from './types'
+import { groupChatsByTime } from '@/utils/chatGroups'
 
-defineProps<{
+const props = defineProps<{
   collapsed: boolean
   chats: ChatRecord[]
   loading?: boolean
@@ -113,6 +117,9 @@ defineProps<{
   userInitial: string
   isAdmin: boolean
 }>()
+
+/** 最近对话按时间分组：今天 / 7天内 / 30天内 / 具体月份 */
+const chatGroups = computed(() => groupChatsByTime(props.chats))
 
 const emit = defineEmits<{
   (e: 'update:collapsed', value: boolean): void
@@ -306,6 +313,14 @@ function closeSearch() {
   font-size: 12px;
   color: var(--chat-sidebar-section);
   padding: 8px 12px 4px;
+  letter-spacing: 0.5px;
+}
+
+/* 时间分组标题（今天 / 7天内 / 30天内 / 具体月份） */
+.history-group-title {
+  font-size: 11px;
+  color: var(--chat-sidebar-section);
+  padding: 10px 12px 4px;
   letter-spacing: 0.5px;
 }
 

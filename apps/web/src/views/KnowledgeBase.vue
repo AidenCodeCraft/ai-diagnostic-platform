@@ -7,17 +7,17 @@
       <el-breadcrumb separator="/">
         <el-breadcrumb-item>
           <a @click="backToList"
-            style="cursor:pointer;font-size:20px;font-weight:600;color:#1f2937;text-decoration:none">知识库</a>
+            style="cursor:pointer;font-size:20px;font-weight:600;color:var(--kb-text);text-decoration:none">知识库</a>
         </el-breadcrumb-item>
         <!-- 文件夹路径链（所有视图下都可点击跳转） -->
         <el-breadcrumb-item v-for="(f, i) in folderPath" :key="f.id"
-          style="font-size:20px;font-weight:600;color:#1f2937">
-          <a @click="navigateToFolder(i)" style="cursor:pointer;color:#2563eb;text-decoration:none">{{ f.title }}</a>
+          style="font-size:20px;font-weight:600;color:var(--kb-text)">
+          <a @click="navigateToFolder(i)" style="cursor:pointer;color:var(--kb-link);text-decoration:none">{{ f.title }}</a>
         </el-breadcrumb-item>
         <!-- 当前文件 -->
-        <el-breadcrumb-item v-if="viewState === 'preview'" style="font-size:20px;font-weight:600;color:#1f2937">{{
+        <el-breadcrumb-item v-if="viewState === 'preview'" style="font-size:20px;font-weight:600;color:var(--kb-text)">{{
           form.title }}</el-breadcrumb-item>
-        <el-breadcrumb-item v-if="viewState === 'edit'" style="font-size:20px;font-weight:600;color:#1f2937">{{
+        <el-breadcrumb-item v-if="viewState === 'edit'" style="font-size:20px;font-weight:600;color:var(--kb-text)">{{
           editingId ? form.title : createLabel }}</el-breadcrumb-item>
       </el-breadcrumb>
     </div>
@@ -73,7 +73,7 @@
               <div class="cell-name">
                 <span class="file-icon">{{ row.doc_type === 'note' ? '📝' : row.doc_type === 'folder' ? '📂' : '📄'
                   }}</span>
-                <span class="file-title" @click="openItem(row)" style="cursor:pointer;color:#2563eb">{{ row.title
+                <span class="file-title" @click="openItem(row)" style="cursor:pointer;color:var(--kb-link)">{{ row.title
                   }}</span>
               </div>
             </template>
@@ -113,7 +113,7 @@
                     <el-dropdown-item v-if="row.doc_type !== 'folder'" command="edit">✏️ 编辑</el-dropdown-item>
                     <el-dropdown-item command="rename">✏️ 重命名</el-dropdown-item>
                     <el-dropdown-item command="pin">📌 置顶</el-dropdown-item>
-                    <el-dropdown-item command="delete" divided style="color:#ef4444">🗑️ 删除</el-dropdown-item>
+                    <el-dropdown-item command="delete" divided style="color:var(--chat-popup-danger-hover-text)">🗑️ 删除</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -241,7 +241,7 @@
         </el-icon>
         <div style="margin-top:8px">拖拽文件或点击上传</div>
         <template #tip>
-          <div style="margin-top:8px;color:#909399">支持 .md, .txt, .pdf</div>
+          <div style="margin-top:8px;color:var(--el-text-color-secondary)">支持 .md, .txt, .pdf</div>
         </template>
       </el-upload>
       <div style="margin-top:12px">
@@ -1456,7 +1456,7 @@ function toggleSort() {
 .kb-header h2 {
   font-size: 20px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--kb-text);
   margin: 0;
 }
 
@@ -1518,8 +1518,8 @@ function toggleSort() {
 
 .kb-card {
   padding: 20px 16px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--kb-surface);
+  border: 1px solid var(--kb-border);
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.12s;
@@ -1527,8 +1527,8 @@ function toggleSort() {
 }
 
 .kb-card:hover {
-  border-color: #2563eb;
-  box-shadow: 0 2px 12px rgba(37, 99, 235, 0.08);
+  border-color: var(--kb-link);
+  box-shadow: 0 2px 12px var(--kb-shadow-accent);
 }
 
 .card-icon {
@@ -1538,7 +1538,7 @@ function toggleSort() {
 
 .card-title {
   font-size: 13px;
-  color: #1f2937;
+  color: var(--kb-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1547,7 +1547,7 @@ function toggleSort() {
 
 .card-meta {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--kb-text-muted);
 }
 
 .kb-empty {
@@ -1564,13 +1564,13 @@ function toggleSort() {
 .empty-title {
   font-size: 18px;
   font-weight: 500;
-  color: #4b5563;
+  color: var(--kb-text-3);
   margin-bottom: 8px;
 }
 
 .empty-desc {
   font-size: 14px;
-  color: #9ca3af;
+  color: var(--kb-text-muted);
 }
 
 /* 预览页 — 正文全宽 + 右侧悬浮目录 */
@@ -1598,7 +1598,7 @@ function toggleSort() {
   left: 0;
   margin-top: 4px;
   font-size: 12px;
-  color: #dc2626;
+  color: var(--kb-danger);
   white-space: nowrap;
   z-index: 2;
 }
@@ -1608,7 +1608,7 @@ function toggleSort() {
   flex-direction: column;
   gap: 10px;
   font-size: 13px;
-  color: #374151;
+  color: var(--kb-text-2);
 }
 
 .validation-row {
@@ -1620,7 +1620,7 @@ function toggleSort() {
 .validation-label {
   width: 84px;
   flex-shrink: 0;
-  color: #6b7280;
+  color: var(--kb-text-dim);
 }
 
 .validation-value {
@@ -1629,7 +1629,7 @@ function toggleSort() {
 }
 
 .validation-ok {
-  color: #059669;
+  color: var(--kb-success);
   font-weight: 600;
 }
 
@@ -1642,11 +1642,11 @@ function toggleSort() {
 }
 
 .validation-issues .error {
-  color: #dc2626;
+  color: var(--kb-danger);
 }
 
 .validation-issues .warn {
-  color: #d97706;
+  color: var(--kb-warning);
 }
 
 .selection-menu {
@@ -1654,17 +1654,17 @@ function toggleSort() {
   z-index: 3000;
   min-width: 210px;
   padding: 6px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--kb-surface);
+  border: 1px solid var(--kb-border);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px var(--kb-shadow-menu);
 }
 
 .selection-menu-title {
   padding: 4px 8px 6px;
   font-size: 12px;
-  color: #9ca3af;
-  border-bottom: 1px solid #f3f4f6;
+  color: var(--kb-text-muted);
+  border-bottom: 1px solid var(--kb-border-soft);
   margin-bottom: 4px;
 }
 
@@ -1677,13 +1677,13 @@ function toggleSort() {
   background: none;
   border-radius: 6px;
   font-size: 13px;
-  color: #374151;
+  color: var(--kb-text-2);
   cursor: pointer;
 }
 
 .selection-menu-item:hover:not(:disabled) {
-  background: #eff6ff;
-  color: #2563eb;
+  background: var(--kb-active-bg);
+  color: var(--kb-active-text);
 }
 
 .selection-menu-item:disabled {
@@ -1707,7 +1707,7 @@ function toggleSort() {
 .guide-body h4 {
   margin: 14px 0 8px;
   font-size: 14px;
-  color: #1f2937;
+  color: var(--kb-text);
 }
 
 .guide-body h4:first-child {
@@ -1716,7 +1716,7 @@ function toggleSort() {
 
 .guide-text {
   margin: 0;
-  color: #4b5563;
+  color: var(--kb-text-3);
   font-size: 13px;
   line-height: 1.8;
 }
@@ -1725,8 +1725,8 @@ function toggleSort() {
   max-height: 320px;
   overflow-y: auto;
   padding: 12px 16px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--kb-surface-2);
+  border: 1px solid var(--kb-border);
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.7;
@@ -1743,8 +1743,8 @@ function toggleSort() {
   flex: 1;
   overflow-y: auto;
   padding: 24px 48px 24px 24px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--kb-surface);
+  border: 1px solid var(--kb-border);
   border-radius: 10px;
   scroll-behavior: smooth;
 }
@@ -1778,7 +1778,7 @@ function toggleSort() {
   position: relative;
   width: 3px;
   height: 120px;
-  background: #e5e7eb;
+  background: var(--kb-border);
   border: none;
   border-radius: 2px;
   cursor: pointer;
@@ -1788,7 +1788,7 @@ function toggleSort() {
 
 .toc-float-toggle:hover {
   width: 5px;
-  background: #d1d5db;
+  background: var(--kb-border-2);
 }
 
 /* 当前阅读位置圆点 */
@@ -1798,10 +1798,10 @@ function toggleSort() {
   top: 0;
   width: 9px;
   height: 9px;
-  background: #2563eb;
+  background: var(--kb-link);
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 0 2px #fff, 0 0 0 3px #2563eb;
+  box-shadow: 0 0 0 2px var(--kb-surface), 0 0 0 3px var(--kb-link);
   transition: top 0.2s ease;
   pointer-events: none;
 }
@@ -1815,10 +1815,10 @@ function toggleSort() {
   width: 220px;
   max-height: 70vh;
   overflow-y: auto;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--kb-surface);
+  border: 1px solid var(--kb-border);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 24px var(--kb-shadow-panel);
   padding: 8px 0;
   opacity: 0;
   visibility: hidden;
@@ -1834,8 +1834,8 @@ function toggleSort() {
   padding: 4px 14px 8px;
   font-size: 12px;
   font-weight: 600;
-  color: #9ca3af;
-  border-bottom: 1px solid #f3f4f6;
+  color: var(--kb-text-muted);
+  border-bottom: 1px solid var(--kb-border-soft);
   margin-bottom: 4px;
   letter-spacing: 0.5px;
 }
@@ -1843,7 +1843,7 @@ function toggleSort() {
 .toc-item {
   padding: 5px 14px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--kb-text-dim);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -1853,14 +1853,14 @@ function toggleSort() {
 }
 
 .toc-item:hover {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--kb-hover-bg);
+  color: var(--kb-text-2);
 }
 
 /* 层级视觉：h1/h2/h3 不同缩进与字重 */
 .toc-level-1 {
   font-weight: 600;
-  color: #374151;
+  color: var(--kb-text-2);
   padding-left: 14px;
 }
 
@@ -1870,15 +1870,15 @@ function toggleSort() {
 
 .toc-level-3 {
   padding-left: 38px;
-  color: #9ca3af;
+  color: var(--kb-text-muted);
   font-size: 11px;
 }
 
 /* 当前阅读章节高亮 */
 .toc-active {
-  color: #2563eb;
-  background: #eff6ff;
-  border-left: 2px solid #2563eb;
+  color: var(--kb-active-text);
+  background: var(--kb-active-bg);
+  border-left: 2px solid var(--kb-active-text);
   font-weight: 600;
 }
 
@@ -1928,15 +1928,15 @@ function toggleSort() {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--kb-overlay-bg);
   border-radius: 8px;
 }
 
 .polish-spin {
   width: 36px;
   height: 36px;
-  border: 3px solid #e5e7eb;
-  border-top-color: #409eff;
+  border: 3px solid var(--kb-border);
+  border-top-color: var(--kb-spinner-head);
   border-radius: 50%;
   animation: polish-rotate 0.9s linear infinite;
 }
@@ -1950,24 +1950,24 @@ function toggleSort() {
 .polish-title {
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 .polish-elapsed {
   font-size: 13px;
-  color: #606266;
+  color: var(--el-text-color-regular);
 }
 
 .polish-tip {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 
 .editor-pane {
   flex: 1;
   min-width: 0;
   height: 100%;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--kb-border);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -1977,14 +1977,14 @@ function toggleSort() {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--kb-text-dim);
 }
 
 /* 编辑器工具栏中的质量分/可发布状态（“预览”开关左侧） */
 .editor-pane :deep(.v-md-editor__toolbar-item-kb-quality) {
   cursor: default;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--kb-text-dim);
   max-width: none;
 }
 
@@ -1998,18 +1998,18 @@ function toggleSort() {
 }
 
 .editor-pane :deep(.kb-quality-ok) {
-  color: #059669;
+  color: var(--kb-success);
   font-weight: 600;
 }
 
 .editor-pane :deep(.kb-quality-draft) {
-  color: #d97706;
+  color: var(--kb-warning);
   font-weight: 600;
 }
 
 .card-quality {
   font-size: 11px;
-  color: #2563eb;
+  color: var(--kb-link);
   margin-top: 4px;
 }
 
@@ -2034,15 +2034,15 @@ function toggleSort() {
 }
 
 .md-preview :deep(code) {
-  background: #f3f4f6;
+  background: var(--kb-surface-3);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
 }
 
 .md-preview :deep(pre) {
-  background: #1f2937;
-  color: #f9fafb;
+  background: var(--kb-code-block-bg);
+  color: var(--kb-code-block-text);
   padding: 12px 16px;
   border-radius: 8px;
   overflow-x: auto;
@@ -2055,9 +2055,9 @@ function toggleSort() {
 }
 
 .md-preview :deep(blockquote) {
-  border-left: 3px solid #d1d5db;
+  border-left: 3px solid var(--kb-border-2);
   padding-left: 12px;
-  color: #6b7280;
+  color: var(--kb-text-dim);
   margin: 8px 0;
 }
 
@@ -2069,19 +2069,19 @@ function toggleSort() {
 
 .md-preview :deep(th),
 .md-preview :deep(td) {
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--kb-border-2);
   padding: 8px 12px;
   text-align: left;
   font-size: 13px;
 }
 
 .md-preview :deep(th) {
-  background: #f3f4f6;
+  background: var(--kb-surface-3);
   font-weight: 600;
 }
 
 .md-preview :deep(tr:nth-child(even)) {
-  background: #fafafa;
+  background: var(--kb-zebra);
 }
 
 /* 更多按钮 */
@@ -2091,7 +2091,7 @@ function toggleSort() {
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: #9ca3af;
+  color: var(--kb-text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2100,7 +2100,189 @@ function toggleSort() {
 }
 
 .row-more-btn:hover {
-  background: #e5e7eb;
-  color: #374151;
+  background: var(--kb-hover-bg-strong);
+  color: var(--kb-text-2);
+}
+</style>
+
+<style>
+/* ==========================================================================
+   知识库本地主题 token（浅色为默认值，深色随 html[data-theme='dark'] 切换）
+   弹窗内容经 el-dialog teleport 到 body，无法继承 .kb-container 上的变量，
+   因此 token 同时定义在弹窗内容根节点（.guide-body / .validation-body）上。
+   ========================================================================== */
+.kb-container,
+.guide-body,
+.validation-body {
+  --kb-text: #1f2937;
+  --kb-text-2: #374151;
+  --kb-text-3: #4b5563;
+  --kb-text-muted: #9ca3af;
+  --kb-text-dim: #6b7280;
+  --kb-surface: #fff;
+  --kb-surface-2: #f9fafb;
+  --kb-surface-3: #f3f4f6;
+  --kb-border: #e5e7eb;
+  --kb-border-2: #d1d5db;
+  --kb-border-soft: #f3f4f6;
+  --kb-hover-bg: #f3f4f6;
+  --kb-hover-bg-strong: #e5e7eb;
+  --kb-link: #2563eb;
+  --kb-active-text: #2563eb;
+  --kb-active-bg: #eff6ff;
+  --kb-danger: #dc2626;
+  --kb-warning: #d97706;
+  --kb-success: #059669;
+  --kb-zebra: #fafafa;
+  --kb-code-block-bg: #1f2937;
+  --kb-code-block-text: #f9fafb;
+  --kb-overlay-bg: rgba(255, 255, 255, 0.85);
+  --kb-spinner-head: #409eff;
+  --kb-shadow-accent: rgba(37, 99, 235, 0.08);
+  --kb-shadow-menu: rgba(0, 0, 0, 0.12);
+  --kb-shadow-panel: rgba(0, 0, 0, 0.08);
+}
+
+html[data-theme='dark'] .kb-container,
+html[data-theme='dark'] .guide-body,
+html[data-theme='dark'] .validation-body {
+  --kb-text: #e7e9ee;
+  --kb-text-2: #dfe2e8;
+  --kb-text-3: #c2c7d0;
+  --kb-text-muted: #9298a5;
+  --kb-text-dim: #aeb4c0;
+  --kb-surface: #222326;
+  --kb-surface-2: #292a2e;
+  --kb-surface-3: #2c2d31;
+  --kb-border: #35363b;
+  --kb-border-2: #4a4c52;
+  --kb-border-soft: #34353a;
+  --kb-hover-bg: #393a40;
+  --kb-hover-bg-strong: #3a3b40;
+  --kb-link: #9fb3ff;
+  --kb-active-text: #aebfff;
+  --kb-active-bg: #303a5b;
+  --kb-danger: #f87171;
+  --kb-warning: #fbbf24;
+  --kb-success: #34d399;
+  --kb-zebra: #26272a;
+  --kb-code-block-bg: #242528;
+  --kb-code-block-text: #e5e7eb;
+  --kb-overlay-bg: rgba(23, 23, 25, 0.88);
+  --kb-spinner-head: #6688fa;
+  --kb-shadow-accent: rgba(0, 0, 0, 0.4);
+  --kb-shadow-menu: rgba(0, 0, 0, 0.45);
+  --kb-shadow-panel: rgba(0, 0, 0, 0.45);
+}
+
+/* ==========================================================================
+   深色主题 — v-md-editor（vuepress 主题）正文内容
+   主题自带浅色背景/文字（#fff / #2c3e50），在深色面板上需覆盖
+   ========================================================================== */
+html[data-theme='dark'] .kb-container .vuepress-markdown-body,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body {
+  color: var(--kb-text-2);
+  background-color: transparent;
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body :is(h1, h2, h3, h4, h5, h6),
+html[data-theme='dark'] .guide-body .vuepress-markdown-body :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--kb-text);
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body :is(h1, h2),
+html[data-theme='dark'] .guide-body .vuepress-markdown-body :is(h1, h2) {
+  border-bottom-color: var(--kb-border-soft);
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body blockquote,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body blockquote {
+  color: var(--kb-text-dim);
+  border-left-color: var(--kb-border-2);
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body hr,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body hr {
+  border-top-color: var(--kb-border-soft);
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body :is(th, td),
+html[data-theme='dark'] .guide-body .vuepress-markdown-body :is(th, td) {
+  border-color: var(--kb-border-2);
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body th,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body th {
+  background-color: var(--kb-surface-3);
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body img,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body img {
+  border-color: var(--kb-border);
+}
+
+/* ==========================================================================
+   深色主题 — v-md-editor 编辑器外壳（工具栏 / 菜单 / CodeMirror）
+   ========================================================================== */
+html[data-theme='dark'] .kb-container .v-md-editor,
+html[data-theme='dark'] .kb-container .v-md-editor__editor-wrapper,
+html[data-theme='dark'] .kb-container .CodeMirror {
+  background: var(--kb-surface);
+  color: var(--kb-text-2);
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__toolbar {
+  background: var(--kb-surface);
+  border-bottom-color: var(--kb-border);
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__toolbar-item {
+  color: var(--kb-text-dim);
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__toolbar-item:hover {
+  background: var(--kb-hover-bg);
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__toolbar-item--active,
+html[data-theme='dark'] .kb-container .v-md-editor__toolbar-item--active:hover {
+  background: var(--kb-hover-bg-strong);
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__menu {
+  background: var(--kb-surface);
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__menu-item {
+  color: var(--kb-text-2);
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__menu-item:hover {
+  background: var(--kb-hover-bg);
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__left-area {
+  background: var(--kb-surface-2);
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__left-area-title {
+  color: var(--kb-text-dim);
+}
+
+html[data-theme='dark'] .kb-container .CodeMirror-gutters {
+  background: var(--kb-surface);
+  border-right-color: var(--kb-border);
+}
+
+html[data-theme='dark'] .kb-container .CodeMirror-cursor {
+  border-left-color: var(--kb-text-2);
+}
+
+html[data-theme='dark'] .kb-container .CodeMirror-selected {
+  background: var(--kb-active-bg);
+}
+
+html[data-theme='dark'] .kb-container .CodeMirror-empty {
+  color: var(--kb-text-dim);
 }
 </style>

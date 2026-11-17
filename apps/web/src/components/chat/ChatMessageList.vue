@@ -38,7 +38,24 @@
             </div>
           </div>
           <div class="message-bubble">
+            <div v-if="editingId === msg.id" class="msg-edit">
+              <textarea
+                ref="editTextarea"
+                v-model="editText"
+                class="msg-edit-textarea"
+                rows="1"
+                placeholder="修改提问内容…"
+                @input="autoGrowEdit"
+                @keydown.enter.exact.prevent="submitEdit(msg)"
+                @keydown.escape="cancelEdit"
+              ></textarea>
+              <div class="msg-edit-actions">
+                <button class="msg-edit-btn" @click="cancelEdit">取消</button>
+                <button class="msg-edit-btn primary" :disabled="!editText.trim()" @click="submitEdit(msg)">发送</button>
+              </div>
+            </div>
             <div
+              v-else
               class="msg-content"
               v-html="renderContent(msg.content, msg, msg.files && msg.files.length > 0, msg.sources, msg.thinking?.active)"
               @click="onMsgContentClick"
@@ -72,6 +89,17 @@
               :images="getImages(msg)"
             />
           </div>
+          <!-- 版本切换（编辑重发后保留历史提问/回答，‹ › 切换查看） -->
+          <div
+            v-if="msg.role === 'user' && editingId !== msg.id && !loading && msg.versions && msg.versions.length > 1"
+            class="msg-version-nav"
+          >
+            <button class="ver-btn" :disabled="(msg.activeVersion ?? 0) <= 0" title="上一版本"
+              @click="switchVersion(msg, -1)">‹</button>
+            <span class="ver-count">{{ (msg.activeVersion ?? 0) + 1 }} / {{ msg.versions.length }}</span>
+            <button class="ver-btn" :disabled="(msg.activeVersion ?? 0) >= msg.versions.length - 1" title="下一版本"
+              @click="switchVersion(msg, 1)">›</button>
+          </div>
           <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active && !loading" class="message-actions">
             <button class="action-btn" :class="{ active: copiedId === msg.id }" @click="copyMessage(msg)" :title="copiedId === msg.id ? '已复制' : '复制回复'">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -89,8 +117,8 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
             </button>
           </div>
-          <div v-else-if="msg.role === 'user' && msg.content" class="message-actions">
-            <button class="action-btn" @click="editMessage(msg)" title="编辑">
+          <div v-else-if="msg.role === 'user' && msg.content && editingId !== msg.id" class="message-actions">
+            <button class="action-btn" @click="startEdit(msg)" title="修改">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
             </button>
             <button class="action-btn" @click="copyMessage(msg)" title="复制">
@@ -174,7 +202,10 @@ const emit = defineEmits<{
   (e: 'previewFile', file: { name: string; size: number; type: string }): void
   (e: 'openKnowledge', source: { id?: number; title: string }): void
   (e: 'regenerate', msg: any): void
-  (e: 'editMessage', msg: any): void
+  /** 内联编辑完成后重发（携带修改后的文本，由父组件做版本化保存） */
+  (e: 'editSend', msg: any, newText: string): void
+  /** 切换消息版本（编辑重发历史） */
+  (e: 'switchVersion', msg: any, index: number): void
   (e: 'selectClarification', text: string): void
 }>()
 
@@ -615,8 +646,47 @@ function regenerateMessage(msg: any) {
   emit('regenerate', msg)
 }
 
-function editMessage(msg: any) {
-  emit('editMessage', msg)
+// ── 消息内联编辑（DeepSeek 风格：编辑框覆盖在原气泡上，发送/取消在框内） ──
+const editingId = ref<string | number | null>(null)
+const editText = ref('')
+const editTextarea = ref<HTMLTextAreaElement>()
+
+function startEdit(msg: any) {
+  editingId.value = msg.id
+  // 去掉文件标签，只编辑文字（与旧版填入输入框的行为一致）
+  editText.value = (msg.content || '').replace(/\n?\[上传文件:.*?\]/g, '').trim()
+  nextTick(() => {
+    const el = editTextarea.value
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+    el.focus()
+    el.selectionStart = el.selectionEnd = el.value.length
+  })
+}
+
+function autoGrowEdit(e: Event) {
+  const el = e.target as HTMLTextAreaElement
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
+
+function cancelEdit() {
+  editingId.value = null
+  editText.value = ''
+}
+
+function submitEdit(msg: any) {
+  const text = editText.value.trim()
+  if (!text) return
+  editingId.value = null
+  emit('editSend', msg, text)
+}
+
+function switchVersion(msg: any, delta: number) {
+  const idx = (msg.activeVersion ?? 0) + delta
+  if (idx < 0 || idx >= (msg.versions?.length ?? 0)) return
+  emit('switchVersion', msg, idx)
 }
 
 function likeMessage(msg: any) {
@@ -1409,4 +1479,95 @@ function scrollToBottom() {
 .action-btn:hover { background: var(--chat-copy-hover-bg); color: var(--chat-copy-hover-text); }
 .action-btn.active { color: #2563eb; background: #eff6ff; }
 .action-btn svg { flex-shrink: 0; }
+
+/* ── 消息内联编辑（编辑框覆盖在原气泡上，参照 DeepSeek） ──── */
+.msg-edit {
+  width: 100%;
+  min-width: 240px;
+  background: var(--chat-input-bg);
+  border: 1px solid var(--chat-input-focus-border);
+  border-radius: 14px;
+  padding: 10px 14px;
+  box-shadow: 0 0 0 3px var(--chat-input-focus-ring);
+}
+.msg-edit-textarea {
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--chat-input-text);
+  font-size: 14px;
+  line-height: 1.8;
+  font-family: inherit;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.msg-edit-textarea::placeholder { color: var(--chat-input-placeholder); }
+.msg-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.msg-edit-btn {
+  padding: 6px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--chat-input-action-border);
+  background: var(--chat-input-action-bg);
+  color: var(--chat-input-action-text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.msg-edit-btn:hover:not(:disabled) {
+  background: var(--chat-input-action-hover-bg);
+  color: var(--chat-input-action-hover-text);
+}
+.msg-edit-btn.primary {
+  background: var(--chat-input-send-active-bg);
+  border-color: var(--chat-input-send-active-border);
+  color: #fff;
+}
+.msg-edit-btn.primary:hover:not(:disabled) { filter: brightness(1.05); }
+.msg-edit-btn.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── 消息版本切换（‹ 1/2 ›，参照 DeepSeek） ───────────────── */
+.msg-version-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 6px;
+  padding: 2px 6px;
+  border: 1px solid var(--chat-input-action-border);
+  border-radius: 10px;
+  background: var(--chat-input-action-bg);
+}
+.ver-btn {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--chat-input-action-text);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  transition: all 0.15s;
+}
+.ver-btn:hover:not(:disabled) {
+  background: var(--chat-input-action-hover-bg);
+  color: var(--chat-input-action-hover-text);
+}
+.ver-btn:disabled { opacity: 0.35; cursor: default; }
+.ver-count {
+  font-size: 12px;
+  color: var(--chat-copy-text);
+  min-width: 36px;
+  text-align: center;
+  user-select: none;
+}
 </style>

@@ -88,7 +88,8 @@
           <ChatMessageList ref="msgListRef" :key="'cl-' + currentChatId"
             :messages="displayMessages" :loading="loadingPhase !== 'idle'" :isEmpty="displayMessages.length === 0"
             :chatId="currentChatId"
-            @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editMessage="handleEditMessage"
+            @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editSend="handleEditSend"
+            @switchVersion="handleSwitchVersion"
             @selectClarification="onSelectClarification" />
           <div class="input-wrapper">
             <ChatInputArea v-model="inputText" :files="attachedFiles" :selectedModel="selectedModel"
@@ -120,6 +121,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '@/api/client'
 import { chatApi, type ChatSource } from '@/api/chat'
+import { appendVersion, snapshotVersion, applyVersion } from '@/utils/messageVersions'
 import { adminApi } from '@/api/admin'
 import { useUserStore } from '@/stores/user'
 import { exportChat as exportChatUtil } from '@/utils/export'
@@ -350,7 +352,7 @@ async function loadSessions() {
   sessionsLoading.value = true
   try {
     const { data } = await chatApi.listSessions()
-    recentChats.value = (data.items || []).map((s: any) => ({ id: s.id, title: s.title || '新对话', model: s.model }))
+    recentChats.value = (data.items || []).map((s: any) => ({ id: s.id, title: s.title || '新对话', model: s.model, updatedAt: s.updated_at || s.created_at }))
   } catch {
     recentChats.value = []
   } finally {
@@ -396,25 +398,33 @@ async function selectChat(id: number, options: { navigate?: boolean } = {}) {
     
     currentChatId.value = id
     setChatMessages(id, msgs.map((m: any) => {
+      // 编辑重发的版本历史：展示 active_version 对应的版本内容
+      const hasVersions = !!(m.versions && m.versions.length)
+      const activeIdx = hasVersions ? (m.active_version ?? m.versions.length - 1) : 0
+      const activeVersion = hasVersions ? m.versions[activeIdx] : null
       const msg: any = {
         id: m.id.toString(),
         role: m.role,
-        content: m.content || '',
+        content: activeVersion?.content ?? (m.content || ''),
         createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
         files: extractFiles(m),
-        sources: m.sources || [],
+        sources: activeVersion?.sources ?? m.sources ?? [],
         _persisted: true,
+        _dbId: m.id,
+        versions: hasVersions ? m.versions : undefined,
+        activeVersion: hasVersions ? activeIdx : undefined,
       }
       
       // 恢复持久化的思维链数据（短内容默认展开，长内容折叠）
-      if (m.role === 'assistant' && m.thinking) {
+      const thinkingData = activeVersion?.thinking ?? m.thinking
+      if (m.role === 'assistant' && thinkingData) {
         msg.thinking = {
-          text: m.thinking.text || '',
-          elapsed: m.thinking.elapsed || 0,
+          text: thinkingData.text || '',
+          elapsed: thinkingData.elapsed || 0,
           active: false
         }
         // 短思维链（<500字符）默认展开，长思维链折叠
-        msg._thinkOpen = !!(m.thinking.text) && (m.thinking.text || '').length < 500
+        msg._thinkOpen = !!(msg.thinking.text) && (msg.thinking.text || '').length < 500
       }
       
       return msg
@@ -633,7 +643,7 @@ async function sendMessage() {
         ensureChatMessages(s.id)
         currentChatId.value = s.id
         sessionStorage.setItem('activeChatId', String(s.id))
-        recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model || undefined })
+        recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model || undefined, updatedAt: s.updated_at || s.created_at })
       } catch (e: any) {
         console.error('[sendMessage] create session failed:', e?.response?.data?.detail || e?.message || e)
         ElMessage.warning('创建会话失败，请重试')
@@ -651,12 +661,13 @@ async function sendMessage() {
       ? `[上传文件: ${files.map(f => `${f.name} (${formatSizeStr(f.file.size)})`).join(', ')}]`
       : ''
     const userMsg = fileTag ? `${text}\n${fileTag}` : text
-    addMessage('user', userMsg, attachments, chatId)
+    const userMsgObj = addMessage('user', userMsg, attachments, chatId)
 
     // 用户消息先持久化，确保刷新后 selectChat 能恢复完整历史
     if (chatId) {
       try {
-        await chatApi.saveMessage(chatId, 'user', userMsg)
+        const { data: saved } = await chatApi.saveMessage(chatId, 'user', userMsg)
+        if (saved?.id != null && userMsgObj) userMsgObj._dbId = saved.id
       } catch {
         ElMessage.warning('用户消息保存失败，刷新后可能无法恢复')
       }
@@ -715,7 +726,7 @@ async function reanalyzeWithClarification(text: string, chatId: number) {
     await chatApi.saveMessage(chatId, 'assistant', response, msg.sources, {
       text: msg.thinking.text,
       elapsed: msg.thinking.elapsed,
-    }).catch(() => {})
+    }).then(({ data: saved }) => { if (saved?.id != null) msg._dbId = saved.id }).catch(() => {})
   } catch (e: any) {
     msg.content = `❌ 分析失败：${formatApiError(e)}`
     msg.thinking.active = false
@@ -885,7 +896,9 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
             text: processingMsg.thinking.text,
             elapsed: processingMsg.thinking.elapsed,
           }
-          await chatApi.saveMessage(chatId, 'assistant', response, sources, thinkingData).catch(() => {})
+          await chatApi.saveMessage(chatId, 'assistant', response, sources, thinkingData)
+            .then(({ data: saved }) => { if (saved?.id != null) processingMsg._dbId = saved.id })
+            .catch(() => {})
         }
       } catch (e: any) {
         processingMsg.content = `❌ 分析 \`${fa.name}\` 失败：${formatApiError(e)}`
@@ -899,17 +912,23 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
   )
 }
 
-async function streamChat(text: string, chatId: number) {
+async function streamChat(text: string, chatId: number, reuseMsg?: any) {
   const thinkStart = Date.now()
   const aId = thinkStart.toString()
   messageIds.add(aId)
   const msgs = ensureChatMessages(chatId)
-  msgs.push({
-    id: aId, role: 'assistant', content: '', createdAt: thinkStart,
-    thinking: { elapsed: 0, text: '', active: false }, sources: [] as ChatSource[],
-  })
-  // 必须经响应式代理取消息对象：直接持有原始对象，后续 token 追加不会触发渲染
-  const replyMsg = msgs[msgs.length - 1]
+  let replyMsg: any
+  if (reuseMsg) {
+    // 编辑重发：复用旧回答消息对象继续接收新回答（旧版本已归档进 versions）
+    replyMsg = reuseMsg
+  } else {
+    msgs.push({
+      id: aId, role: 'assistant', content: '', createdAt: thinkStart,
+      thinking: { elapsed: 0, text: '', active: false }, sources: [] as ChatSource[],
+    })
+    // 必须经响应式代理取消息对象：直接持有原始对象，后续 token 追加不会触发渲染
+    replyMsg = msgs[msgs.length - 1]
+  }
   const scrollToBottomIfActive = () => {
     if (currentChatId.value === chatId) msgListRef.value?.scrollToBottom()
   }
@@ -945,11 +964,7 @@ async function streamChat(text: string, chatId: number) {
       
       // 流式对话完成后保存消息（归属发起提问的对话），包含思维链数据（如果有）
       if (chatId && replyMsg.content) {
-        const thinkingData = (replyMsg.thinking.text || replyMsg.thinking.elapsed > 0) ? {
-          text: replyMsg.thinking.text || '',
-          elapsed: replyMsg.thinking.elapsed
-        } : undefined
-        await chatApi.saveMessage(chatId, 'assistant', replyMsg.content, replyMsg.sources, thinkingData).catch(e => console.warn('[streamChat] save message failed:', e))
+        await persistReplyMessage(chatId, replyMsg, !!reuseMsg)
       }
     },
     (err: string) => {
@@ -980,12 +995,43 @@ async function streamChat(text: string, chatId: number) {
 
   // 停止/出错中断时：保存已生成的部分内容，避免刷新后丢失
   if ((stopped || failed) && receivedToken) {
-    const thinkingData = (replyMsg.thinking.text || replyMsg.thinking.elapsed > 0) ? {
-      text: replyMsg.thinking.text || '',
-      elapsed: replyMsg.thinking.elapsed,
-    } : undefined
-    await chatApi.saveMessage(chatId, 'assistant', replyMsg.content, replyMsg.sources, thinkingData)
-      .catch(e => console.warn('[streamChat] save partial message failed:', e))
+    await persistReplyMessage(chatId, replyMsg, !!reuseMsg)
+  }
+}
+
+/**
+ * 持久化回答消息。
+ * 编辑重发（versioned）：新回答快照为新版本后整体更新原消息行（保留旧版本）；
+ * 普通回答：插入新消息行并记住行 ID（供后续编辑/反馈更新用）。
+ */
+async function persistReplyMessage(chatId: number, replyMsg: any, versioned: boolean) {
+  const thinkingData = (replyMsg.thinking?.text || replyMsg.thinking?.elapsed > 0) ? {
+    text: replyMsg.thinking.text || '',
+    elapsed: replyMsg.thinking.elapsed,
+  } : undefined
+  if (versioned && replyMsg._dbId != null) {
+    const idx = snapshotVersion(replyMsg, replyMsg.activeVersion)
+    try {
+      await chatApi.updateMessage(chatId, replyMsg._dbId, {
+        content: replyMsg.content,
+        sources: replyMsg.sources,
+        thinking: thinkingData,
+        versions: replyMsg.versions,
+        active_version: idx,
+      })
+    } catch (e) {
+      console.warn('[persistReplyMessage] versioned update failed:', e)
+    }
+    return
+  }
+  try {
+    const { data: saved } = await chatApi.saveMessage(
+      chatId, 'assistant', replyMsg.content, replyMsg.sources, thinkingData,
+      replyMsg.versions, replyMsg.activeVersion,
+    )
+    if (saved?.id != null) replyMsg._dbId = saved.id
+  } catch (e) {
+    console.warn('[persistReplyMessage] save message failed:', e)
   }
 }
 
@@ -1021,10 +1067,12 @@ function addMessage(role: string, content: string, files?: MsgAttachment[], chat
   
   ensureChatMessages(chatId).push(newMsg)
   if (import.meta.env.DEV) console.log(`[addMessage] Added ${role} message to chat ${chatId}`, newMsg)
-  
+
   setTimeout(() => {
     if (currentChatId.value === chatId) msgListRef.value?.scrollToBottom()
   }, 50)
+  // 返回响应式代理对象（后续持久化后把行 ID 记到 _dbId）
+  return ensureChatMessages(chatId)[ensureChatMessages(chatId).length - 1]
 }
 
 // ── Regenerate / Edit ────────────────────────────────────────
@@ -1060,24 +1108,91 @@ async function handleRegenerate(assistantMsg: any) {
   }
 }
 
-function handleEditMessage(userMsg: any) {
+/**
+ * 内联编辑重发（编辑提问 → 保留历史版本 → 重新生成回答）。
+ * 不删除原始提问：旧提问/旧回答归档为上一版本，消息下方出现 ‹ 1/2 › 切换。
+ */
+async function handleEditSend(userMsg: any, newText: string) {
   const chatId = currentChatId.value
-  if (sendingChatIds.has(chatId)) return
-  // 将消息内容填入输入框，截断该消息及之后的所有消息
-  const idx = messages.value.findIndex(m => m.id === userMsg.id)
+  if (!chatId || sendingChatIds.has(chatId)) return
+  const limit = effectiveParallelLimit()
+  if (sendingChatIds.size >= limit) {
+    ElMessage.warning(
+      chatConcurrency.parallelEnabled
+        ? `最多支持 ${limit} 个对话同时提问，请等待进行中的对话完成`
+        : '已有对话正在提问（系统未开启多对话并行提问）',
+    )
+    return
+  }
+  const msgs = messagesByChat.get(chatId)
+  if (!msgs) return
+  const idx = msgs.findIndex((m: any) => m.id === userMsg.id)
   if (idx === -1) return
-  // 去掉文件标签，只保留文字
-  const text = userMsg.content.replace(/\n?\[上传文件:.*?\]/g, '').trim()
 
-  // 创建分支
-  createBranch(messages.value, idx, `edit-${new Date().toLocaleTimeString()}`)
+  setSending(chatId, true)
+  try {
+    // 1. 提问消息版本化：保留修改前内容，追加修改后版本
+    const newIdx = appendVersion(userMsg, newText)
+    if (userMsg._dbId != null) {
+      chatApi.updateMessage(chatId, userMsg._dbId, {
+        content: newText,
+        versions: userMsg.versions,
+        active_version: newIdx,
+      }).catch(e => console.warn('[handleEditSend] persist question versions failed:', e))
+    }
 
-  inputText.value = text
-  const truncated = messages.value.slice(0, idx)
-  setChatMessages(chatId, truncated)
-  truncated.forEach((m: any) => messageIds.add(m.id))
+    // 2. 配对回答（该提问后的第一条 assistant 消息）：旧回答归档为旧版本，重新生成新版本
+    const ans: any = idx + 1 < msgs.length && msgs[idx + 1].role === 'assistant' && !msgs[idx + 1].thinking?.active
+      ? msgs[idx + 1]
+      : null
+
+    setLoadingPhase(chatId, 'streaming')
+    if (ans) {
+      // 归档旧回答（快照到其当前版本下标，与提问版本下标对齐）
+      const oldIdx = snapshotVersion(ans, ans.activeVersion ?? Math.max(0, newIdx - 1))
+      ans.activeVersion = newIdx
+      if (ans.versions && ans.versions.length <= newIdx) {
+        ans.versions = [...ans.versions]
+        ans.versions[newIdx] = { content: '' }
+      }
+      ans.content = ''
+      ans.sources = []
+      ans.thinking = { elapsed: 0, text: '', active: true }
+      ans._versionedFrom = oldIdx
+      await streamChat(newText, chatId, ans)
+    } else {
+      await streamChat(newText, chatId)
+    }
+  } finally {
+    setLoadingPhase(chatId, 'idle')
+    setSending(chatId, false)
+  }
 }
 
+/** 切换消息版本：提问与其配对回答一起切换（DeepSeek 式版本浏览） */
+function handleSwitchVersion(msg: any, idx: number) {
+  const chatId = currentChatId.value
+  if (!chatId || sendingChatIds.has(chatId)) return
+  const msgs = messagesByChat.get(chatId)
+  if (!msgs) return
+  if (!applyVersion(msg, idx)) return
+
+  // 配对回答（该提问后的第一条 assistant 消息）同步切换
+  const i = msgs.findIndex((m: any) => m.id === msg.id)
+  const ans: any = i !== -1 && i + 1 < msgs.length && msgs[i + 1].role === 'assistant' ? msgs[i + 1] : null
+  if (ans && ans.versions?.[idx]) applyVersion(ans, idx)
+
+  // 持久化当前浏览的版本（fire-and-forget）
+  if (msg._dbId != null) {
+    chatApi.updateMessage(chatId, msg._dbId, { content: msg.content, active_version: idx })
+      .catch(e => console.warn('[handleSwitchVersion] persist failed:', e))
+  }
+  if (ans && ans._dbId != null && ans.versions?.[idx]) {
+    chatApi.updateMessage(chatId, ans._dbId, {
+      content: ans.content, sources: ans.sources, thinking: ans.thinking, active_version: idx,
+    }).catch(e => console.warn('[handleSwitchVersion] persist answer failed:', e))
+  }
+}
 function formatSizeStr(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
@@ -1304,8 +1419,9 @@ onMounted(() => {
   max-height: 60vh;
   overflow: auto;
   padding: 16px;
-  background: #1e293b;
-  color: #e2e8f0;
+  background: var(--chat-msg-pre-bg);
+  color: var(--chat-msg-pre-text);
+  border: 1px solid var(--chat-msg-pre-border);
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.6;

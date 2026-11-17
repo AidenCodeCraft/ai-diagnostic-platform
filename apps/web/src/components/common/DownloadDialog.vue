@@ -1,6 +1,6 @@
 <template>
   <teleport to="body">
-    <div v-if="visible" class="menu-overlay" @click="$emit('close')"></div>
+    <div v-if="visible" class="menu-overlay download-overlay" @click="$emit('close')"></div>
     <transition name="download-modal">
       <div v-if="visible" class="download-dialog">
         <div class="download-header">
@@ -249,4 +249,87 @@ defineEmits<{ (e: 'close'): void }>()
 
 .web-hint a { color: #2563eb; text-decoration: none; font-weight: 500; }
 .web-hint a:hover { text-decoration: underline; }
+</style>
+
+<style>
+/* 深色主题（teleport 到 body，使用全局选择器，html[data-theme] 前缀保证优先级覆盖 scoped 基础样式） */
+html[data-theme='dark'] .download-overlay {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+html[data-theme='dark'] .download-dialog {
+  background: #292a2e;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+html[data-theme='dark'] .download-header {
+  border-bottom-color: #3a3b40;
+}
+
+html[data-theme='dark'] .download-header h3 {
+  color: #e7e9ee;
+}
+
+html[data-theme='dark'] .download-close {
+  color: #858b97;
+}
+
+html[data-theme='dark'] .download-close:hover {
+  color: #e7e9ee;
+  background: #393a40;
+}
+
+html[data-theme='dark'] .download-subtitle {
+  color: #aeb4c0;
+}
+
+html[data-theme='dark'] .platform-section {
+  background: #222326;
+  border-color: #3f4147;
+}
+
+html[data-theme='dark'] .platform-header h4 {
+  color: #e7e9ee;
+}
+
+html[data-theme='dark'] .platform-header p {
+  color: #9298a5;
+}
+
+html[data-theme='dark'] .platform-card {
+  background: #2c2d31;
+  border-color: #3f4147;
+}
+
+html[data-theme='dark'] .platform-card:hover {
+  border-color: #6688fa;
+  box-shadow: 0 2px 8px rgba(102, 136, 250, 0.12);
+}
+
+html[data-theme='dark'] .card-icon {
+  color: #d3d7df;
+}
+
+html[data-theme='dark'] .card-title {
+  color: #e7e9ee;
+}
+
+html[data-theme='dark'] .card-version,
+html[data-theme='dark'] .card-size {
+  color: #9298a5;
+}
+
+html[data-theme='dark'] .card-dl-btn {
+  background: #35363b;
+  border-color: #46474d;
+  color: #858b97;
+}
+
+html[data-theme='dark'] .web-hint {
+  color: #aeb4c0;
+}
+
+html[data-theme='dark'] .web-hint a {
+  color: #8ea9ff;
+}
 </style>
