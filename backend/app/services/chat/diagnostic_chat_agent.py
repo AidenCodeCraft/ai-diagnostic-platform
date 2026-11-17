@@ -37,6 +37,8 @@ from app.services.chat.query_preprocessor import (
     QueryPreprocessor,
     SearchResult,
     get_preprocessor,
+    process_multi_query,
+    split_query_units,
 )
 
 logger = logging.getLogger(__name__)
@@ -418,15 +420,14 @@ class DiagnosticChatAgent:
             return "", []
 
         try:
-            # 使用通用预处理器
-            preprocessor = get_preprocessor()
-
+            # 使用通用预处理器；复合提问按问题单元逐个检索后合并
+            # （每个子问题独立分词/独立意图校验，避免互相稀释）
             def search_fn(term: str, page_size: int) -> dict:
                 return self.knowledge.search(
                     term, page=1, page_size=page_size, project_id=self.project_id,
                 )
 
-            search_result = preprocessor.process(
+            search_result = process_multi_query(
                 query=text,
                 search_fn=search_fn,
                 max_layers=4,
@@ -459,7 +460,8 @@ class DiagnosticChatAgent:
                     full_doc = self.knowledge.get(doc_id)
                     item["_full_content"] = full_doc.content or ""
                     info = self.knowledge._extract_snippet_info(
-                        item["_full_content"], search_result.matched_term,
+                        item["_full_content"],
+                        item.get("_matched_term") or search_result.matched_term,
                     )
                     item["snippet"] = info["snippet"]
                     item["_section"] = info
@@ -826,8 +828,19 @@ class DiagnosticChatAgent:
         if analysis_context:
             system_prompt += f"\n\n---\n## 补充：日志分析结果\n{analysis_context}"
 
+        # 复合提问：显式列出子问题，要求逐条作答（禁止只答第一条）
+        sub_units = split_query_units(cleaned_input)
+        sub_question_block = ""
+        if len(sub_units) > 1:
+            lines = [f"{i + 1}. {q}" for i, q in enumerate(sub_units)]
+            sub_question_block = (
+                "\n[系统识别到以下子问题，必须逐条回答全部子问题，不得只回答其中一条]\n"
+                + "\n".join(lines)
+                + "\n"
+            )
+
         user_content = (
-            f"## 用户问题\n{cleaned_input}\n\n"
+            f"## 用户问题\n{cleaned_input}\n{sub_question_block}\n"
             f"## 知识库检索结果（唯一事实来源）\n\n{knowledge_context}"
         )
         image_context = self._build_image_context()
