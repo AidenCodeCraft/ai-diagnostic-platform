@@ -46,13 +46,22 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
 
 // 增强表格渲染 - 添加滚动容器
 // marked v18+ renderer.table 接收 Table token，手动构建 HTML 以包裹 wrapper
+// ⚠️ 单元格文本必须再次做内联解析（marked.parseInline）：
+//    否则粗体、行内代码、链接、图片（如 ![](ref://img/12)）都会以原始 Markdown 文本显示
 renderer.table = function (token) {
   const align = token.align || []
-  const headerHtml = token.header
-    .map((cell, i) => `<th${align[i] ? ` align="${align[i]}"` : ''}>${cell.text}</th>`)
-    .join('')
+  const renderCell = (cell: { text: string }, tag: string, i: number) => {
+    let inline = ''
+    try {
+      inline = marked.parseInline(cell.text || '') as string
+    } catch {
+      inline = cell.text || ''
+    }
+    return `<${tag}${align[i] ? ` align="${align[i]}"` : ''}>${inline}</${tag}>`
+  }
+  const headerHtml = token.header.map((cell, i) => renderCell(cell, 'th', i)).join('')
   const bodyHtml = token.rows
-    .map(row => `<tr>${row.map((cell, i) => `<td${align[i] ? ` align="${align[i]}"` : ''}>${cell.text}</td>`).join('')}</tr>`)
+    .map(row => `<tr>${row.map((cell, i) => renderCell(cell, 'td', i)).join('')}</tr>`)
     .join('')
   return `<div class="table-wrapper"><table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`
 }

@@ -492,6 +492,9 @@ class DiagnosticChatAgent:
                 )
                 self.references.append({
                     "id": item.get("id"),
+                    # 检索结果编号：与知识上下文中 `{i + 1}. **标题**` 一致，
+                    # LLM 的 ref://N 引用即按此编号解析
+                    "num": i + 1,
                     "title": title,
                     "source": item.get("source") or "知识库",
                     "excerpt": snippet,

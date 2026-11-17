@@ -102,11 +102,13 @@ class RAGService:
         sources = [
             {
                 "id": r.chunk.doc_id,
+                # 检索结果编号（与上下文列表序号一致，供前端解析 ref://N 引用）
+                "num": i + 1,
                 "title": r.chunk.doc_title or "Untitled",
                 "excerpt": r.chunk.text[:300],
                 "score": round(r.score, 4),
             }
-            for r in output.results
+            for i, r in enumerate(output.results)
         ]
 
         return {
@@ -136,11 +138,13 @@ class RAGService:
         sources_data = [
             {
                 "id": r.chunk.doc_id,
+                # 检索结果编号（与上下文列表序号一致，供前端解析 ref://N 引用）
+                "num": i + 1,
                 "title": r.chunk.doc_title or "Untitled",
                 "excerpt": r.chunk.text[:300],
                 "score": round(r.score, 4),
             }
-            for r in output.results
+            for i, r in enumerate(output.results)
         ]
         yield {"type": "sources", "data": sources_data}
 

@@ -83,7 +83,9 @@
             @switch="onBranchSwitch"
             @delete="onBranchDelete"
           />
-          <ChatMessageList ref="msgListRef" :key="'cl-' + currentChatId + '-' + displayMessages.length"
+          <!-- key 不能包含消息条数：否则每加一条消息组件都会重建，
+               容器 scrollTop 归零导致页面先跳到顶部再瞬间拉回底部 -->
+          <ChatMessageList ref="msgListRef" :key="'cl-' + currentChatId"
             :messages="displayMessages" :loading="loadingPhase !== 'idle'" :isEmpty="displayMessages.length === 0"
             :chatId="currentChatId"
             @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editMessage="handleEditMessage"

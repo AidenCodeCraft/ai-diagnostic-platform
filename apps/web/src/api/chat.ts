@@ -177,6 +177,8 @@ export interface ChatImage {
 
 export interface ChatSource {
   id?: number
+  /** 检索结果编号（与 LLM 引用中的文档编号一致，用于 ref://N 解析） */
+  num?: number
   title: string
   source: string
   excerpt: string

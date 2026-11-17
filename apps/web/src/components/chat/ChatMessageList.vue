@@ -155,6 +155,7 @@
 import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted, reactive } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { anchorCandidate } from '@/utils/markdownLine'
+import { splitSourcesFromContent, normalizeCitationMarkdown, processRefLinks } from '@/utils/citations'
 import { useFormat } from '@/composables/useFormat'
 import { chatApi, type ChatImage } from '@/api/chat'
 import { knowledgeApi } from '@/api/knowledge'
@@ -528,66 +529,26 @@ function onImageError(e: Event) {
   el.replaceWith(span)
 }
 
-// ── 分离参考来源行 ──────────────────────────────────────────
-// 从 LLM 输出中提取底部参考来源行，返回 { body, sources } 两部分
-function splitSourcesFromContent(text: string): { body: string; sourcesText: string } {
-  const lines = text.split('\n')
-  const sourceLines: string[] = []
-  const bodyLines: string[] = []
-
-  // 从末尾向前扫描，收集连续的参考来源行
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const trimmed = lines[i].trim()
-    if (/^\|?\s*参考来源：/.test(trimmed)) {
-      sourceLines.unshift(lines[i])
-    } else if (trimmed === '') {
-      // 跳过参考来源行之间的空行
-      if (sourceLines.length > 0 && i < lines.length - 1 && /^\|?\s*参考来源：/.test(lines[i + 1]?.trim() || '')) {
-        continue
-      }
-      bodyLines.unshift(lines[i])
-    } else {
-      bodyLines.unshift(lines[i])
-    }
-  }
-
-  return {
-    body: bodyLines.join('\n').trim(),
-    sourcesText: sourceLines.join('\n').trim(),
-  }
-}
-
+// ── 消息内容渲染 ──────────────────────────────────────────
 function renderContent(text: string, msg: any, hasFiles?: boolean, sources: any[] = [], isStreaming = false): string {
   let display = text
   if (hasFiles) {
     display = display.replace(/\n?\[上传文件:.*?\]/g, '')
   }
 
-  // 分离参考来源行
+  // 分离参考来源行 + 引用语法归一化
   const { body, sourcesText } = splitSourcesFromContent(display)
 
   try {
-    let bodyHtml = renderMarkdown(body)
+    let bodyHtml = renderMarkdown(normalizeCitationMarkdown(body))
     bodyHtml = validateInlineImages(bodyHtml, sources)
-    let sourcesHtml = ''
-    if (sourcesText) {
-      sourcesHtml = renderMarkdown(sourcesText)
-    }
-    // 合并处理 ref:// 链接
-    const combined = bodyHtml + (sourcesHtml ? '\n<!--REF_SOURCES_SEPARATOR-->\n' + sourcesHtml : '')
-    const processed = processRefLinks(combined, sources, msg.id, isStreaming)
+    const sourcesHtml = sourcesText ? renderMarkdown(normalizeCitationMarkdown(sourcesText)) : ''
+    // 处理 ref:// 引用：正文 → ①②③ 标记（同知识点去重）；参考来源 → 带序号的可点击链接
+    const processed = processRefLinks(bodyHtml, sourcesHtml, sources, isStreaming)
+    msg._renderedBody = processed.bodyHtml
+    msg._renderedSources = processed.sourcesHtml
 
-    // 拆分为正文和参考来源两部分
-    const sepIdx = processed.indexOf('<!--REF_SOURCES_SEPARATOR-->')
-    if (sepIdx >= 0) {
-      msg._renderedBody = processed.substring(0, sepIdx)
-      msg._renderedSources = processed.substring(sepIdx + '<!--REF_SOURCES_SEPARATOR-->'.length)
-    } else {
-      msg._renderedBody = processed
-      msg._renderedSources = ''
-    }
-
-    // 兼容旧版调用（v-html），返回空字符串（因为内容已设到 msg 属性上）
+    // 兼容旧版调用（v-html），返回值即正文 HTML
     return msg._renderedBody
   } catch {
     const escaped = display.replace(/\n/g, '<br>')
@@ -595,281 +556,6 @@ function renderContent(text: string, msg: any, hasFiles?: boolean, sources: any[
     msg._renderedSources = ''
     return escaped
   }
-}
-
-/**
- * 处理 ref:// 协议的引用链接：
- * 1. 将正文中的序号链接替换为可点击的蓝色圆形序号按钮
- * 2. 将底部的参考来源行替换为带链接的灰色管道符文本
- * 3. 将所有 ref:// 链接的 href 改为 javascript:void(0) 防止浏览器导航报错
- *
- * LLM 生成示例：
- *   正文: ...关键信息[1](ref://123#章节名)...
- *   底部: | 参考来源：知识库"[FAQ](ref://123)"文档中"[章节](ref://123#章节)"部分 |
- *
- * marked 渲染后：
- *   正文: ...关键信息<a href="ref://123#章节名">1</a>...
- *   底部: <p>| 参考来源：知识库&quot;<a href="ref://123">FAQ</a>&quot;文档...</p>
- *
- * 兼容非数字 ID（LLM 可能输出 ref://FAQ 而非 ref://123）：
- *   通过 sourceMap 按标题反查数字 ID
- */
-function processRefLinks(html: string, sources: any[], _messageId?: string | number, isStreaming = false): string {
-  // 构建双重映射表
-  // sourceMap: doc_id → source info
-  // titleMap: doc_title → source info（用于 LLM 输出 ref://FAQ 时的反查）
-  const sourceMap = new Map<string, { id: number; title: string; excerpt: string; source: string; start_line?: number }>()
-  const titleMap = new Map<string, { id: number; title: string; excerpt: string; source: string; start_line?: number }>()
-  for (const s of sources) {
-    if (s.id && s.title) {
-      const info = {
-        id: s.id,
-        title: s.title,
-        excerpt: s.excerpt || '',
-        source: s.source || '知识库',
-        start_line: typeof s.start_line === 'number' ? s.start_line : undefined,
-      }
-      sourceMap.set(String(s.id), info)
-      // 按标题建立映射（用于 ref://FAQ 等非数字 ID 的反查）
-      titleMap.set(s.title.toLowerCase(), info)
-      // 也添加简化版标题（去掉括号内容等）
-      const simplified = s.title.replace(/[（(][^)）]*[)）]/g, '').trim().toLowerCase()
-      if (simplified && simplified !== s.title.toLowerCase()) {
-        titleMap.set(simplified, info)
-      }
-    }
-  }
-
-  /**
-   * 根据 ref:// 后的 ID 文本解析出实际的数字 docId
-   * 支持：纯数字 "123"、"FAQ"、"FAQ文档" 等
-   */
-  function resolveDocId(rawId: string): { docId: string; info: typeof sourceMap extends Map<string, infer V> ? V : never } | null {
-    // 优先按数字 ID 查找
-    const byId = sourceMap.get(rawId)
-    if (byId) return { docId: rawId, info: byId }
-    // 按标题模糊查找
-    const decoded = decodeURIComponent(rawId).toLowerCase()
-    const byTitle = titleMap.get(decoded)
-    if (byTitle) return { docId: String(byTitle.id), info: byTitle }
-    // 遍历 sourceMap 做包含匹配
-    for (const [id, info] of sourceMap) {
-      if (info.title.toLowerCase().includes(decoded) || decoded.includes(info.title.toLowerCase())) {
-        return { docId: id, info }
-      }
-    }
-    // 如果 LLM 用了非数字 ID 且 sources 有数据，取第一个 source 作为兜底
-    if (sourceMap.size > 0) {
-      const first = sourceMap.values().next().value
-      if (first) return { docId: String(first.id), info: first }
-    }
-    return null
-  }
-
-  // ── 第零步（预处理）：处理表格内反引号包裹导致的解析异常 ──
-  // 如果 marked 未能正确解析表格内的链接（例如反引号干扰），
-  // 将原始 Markdown 语法 [1](ref://xxx) 手动转换为可被后续步骤匹配的 <a> 标签
-  html = html.replace(
-    /\[(\d+)\]\(ref:\/\/([^\s"#)]+)(?:#([^)]*))?\)/gi,
-    (_match, num: string, rawId: string, anchor: string) => {
-      // 只处理在表格单元格（<td>...</td>）或代码块外的原始 Markdown 链接
-      // 如果这个位置已经有一个 <a> 标签，则不处理（说明 marked 已正确解析）
-      const anchorSuffix = anchor ? `#${anchor}` : ''
-      return `<a href="ref://${rawId}${anchorSuffix}">${num}</a>`
-    },
-  )
-
-  // ── 第一步：替换正文中的序号引用链接 ──
-  // 按出现顺序重新分配全局序号（同一 docId 的引用使用相同序号）
-  let globalSeq = 0
-  const docSeqMap = new Map<string, number>() // docId → 全局序号
-
-  html = html.replace(
-    /<a\s+href="ref:\/\/([^\s"#]+)(?:#([^"]*))?"[^>]*>(\d+)<\/a>/gi,
-    (_match, rawId: string, anchor: string, _seqNum: string) => {
-      if (_match.includes('class="ref-link')) return _match
-      if (_match.includes('参考来源')) return _match
-
-      const resolved = resolveDocId(rawId)
-      const docId = resolved?.docId || rawId
-      const info = resolved?.info
-      const title = info?.title || rawId
-      const excerpt = info?.excerpt || ''
-      const sourceLabel = info?.source || '知识库'
-      const anchorAttr = anchor ? ` data-anchor="${escapeAttr(anchor)}"` : ''
-      const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
-      const lineAttr = info?.start_line ? ` data-line="${info.start_line}"` : ''
-
-      // 同一 docId 使用相同的全局序号，否则分配新序号
-      let displayNum: string
-      if (docSeqMap.has(docId)) {
-        displayNum = String(docSeqMap.get(docId)!)
-      } else {
-        globalSeq++
-        docSeqMap.set(docId, globalSeq)
-        displayNum = String(globalSeq)
-      }
-
-      return `<a class="ref-link ref-seq" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(title)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${anchorAttr} href="javascript:void(0)" title="点击查看文档">${displayNum}</a>`
-    },
-  )
-
-  // ── 第二步：替换参考来源行中的文档链接 ──
-  // ⚠️ 关键：
-  //   1. LLM 可能用 Markdown 链接语法 [标题](ref://id)，也可能用纯文本
-  //   2. 有 Markdown 链接时 marked 生成 <a> 标签，无链接时是纯文本
-  //   3. 中文引号 \u201C\u201D 在 marked 中不会被转义
-  //   4. 先处理"有 Markdown 链接"的情况，再兜底"无链接"的情况
-
-  // 情况A：LLM 使用了 Markdown 链接语法 [文档名](ref://id)
-  // 兼容管道符（旧格式）和无管道符（新格式）
-  // 兼容 marked 渲染后的 <p> 标签包裹
-  html = html.replace(
-    /(?:<p>)?\|?\s*参考来源：知识库(?:&quot;|"|\u201C|\u201D)<a\s+href="ref:\/\/([^\s"#]+)"[^>]*>([^<]*)<\/a>(?:&quot;|"|\u201C|\u201D)文档(?:中(?:&quot;|"|\u201C|\u201D)<a\s+href="ref:\/\/([^\s"#]+)(?:#([^"]*))?"[^>]*>([^<]*)<\/a>(?:&quot;|"|\u201C|\u201D)部分)?\s*\|?(?:<\/p>)?/gi,
-    (_match, rawDocId: string, docTitle: string, rawSectionId: string, sectionAnchor: string, sectionTitle: string) => {
-      const resolved = resolveDocId(rawDocId)
-      const docId = resolved?.docId || rawDocId
-      const info = resolved?.info
-      const excerpt = info?.excerpt || ''
-      const sourceLabel = info?.source || '知识库'
-      const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
-      const lineAttr = info?.start_line ? ` data-line="${info.start_line}"` : ''
-
-      const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(docTitle)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${lineAttr} href="javascript:void(0)">${escapeHtml(docTitle)}</a>`
-
-      if (sectionTitle && rawSectionId) {
-        const sectionResolved = resolveDocId(rawSectionId)
-        const sectionId = sectionResolved?.docId || rawSectionId
-        const sectionAnchorAttr = sectionAnchor ? ` data-anchor="${escapeAttr(sectionAnchor)}"` : ''
-        const sectionLineAttr = sectionResolved?.info?.start_line
-          ? ` data-line="${sectionResolved.info.start_line}"`
-          : lineAttr
-        const sectionLink = `<a class="ref-link ref-source-section" data-doc-id="${escapeAttr(sectionId)}" data-title="${escapeAttr(sectionTitle)}" data-source="${escapeAttr(sourceLabel)}"${sectionAnchorAttr}${excerptAttr}${sectionLineAttr} href="javascript:void(0)">${escapeHtml(sectionTitle)}</a>`
-        return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档中\u201C${sectionLink}\u201D部分</span></span>`
-      }
-      return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span></span>`
-    },
-  )
-
-  // 情况B（兜底）：LLM 没有使用 Markdown 链接，纯文本格式
-  // 格式：参考来源：知识库"FAQ"文档中"搜索协议启动的类型"部分
-  // 从 sourceMap 中按标题查找对应的 docId，自动添加可点击链接
-  //
-  // 注意：用 new RegExp 构建，避免 &quot; 在字符组中分解为 &,q,u,o,t,; 导致匹配异常
-  // 引号匹配兼容：&quot;（英文转义）、"（英文）、\u201C（中文左）、\u201D（中文右）
-  // 同时兼容 marked 渲染后的 <p> 标签包裹
-  {
-    const Q = '(?:&quot;|"|\\u201C|\\u201D)' // 引号 alternation
-    const CONTENT = '([^<>\\u201C\\u201D\\u0022]+?)' // 非贪婪匹配内容（排除尖括号和所有引号）
-    const pattern = new RegExp(
-      '(?:<p>)?\\|?\\s*参考来源：知识库' + Q + CONTENT + Q + '文档' +
-      '(?:中' + Q + CONTENT + Q + '部分)?' +
-      '\\s*\\|?(?:</p>)?',
-      'gi',
-    )
-    html = html.replace(pattern, (_match, docTitleRaw: string, sectionTitleRaw: string) => {
-      const docTitle = (docTitleRaw || '').trim()
-      const sectionTitle = (sectionTitleRaw || '').trim()
-      if (!docTitle) return _match
-
-      // 按标题从 sourceMap 反查 docId
-      let resolved = resolveDocId(docTitle)
-      if (!resolved) {
-        for (const [id, info] of sourceMap) {
-          if (info.title.includes(docTitle) || docTitle.includes(info.title)) {
-            resolved = { docId: id, info }
-            break
-          }
-        }
-      }
-
-      const docId = resolved?.docId || '0'
-      const info = resolved?.info
-      const excerpt = info?.excerpt || ''
-      const sourceLabel = info?.source || '知识库'
-      const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
-      const lineAttr = info?.start_line ? ` data-line="${info.start_line}"` : ''
-
-      const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(docTitle)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${lineAttr} href="javascript:void(0)">${escapeHtml(docTitle)}</a>`
-
-      if (sectionTitle) {
-        const sectionResolved = resolveDocId(sectionTitle)
-        const sectionId = sectionResolved?.docId || docId
-        const sectionLineAttr = sectionResolved?.info?.start_line
-          ? ` data-line="${sectionResolved.info.start_line}"`
-          : lineAttr
-        const sectionLink = `<a class="ref-link ref-source-section" data-doc-id="${escapeAttr(sectionId)}" data-title="${escapeAttr(sectionTitle)}" data-source="${escapeAttr(sourceLabel)}" data-anchor="${escapeAttr(encodeURIComponent(sectionTitle))}"${excerptAttr}${sectionLineAttr} href="javascript:void(0)">${escapeHtml(sectionTitle)}</a>`
-        return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档中\u201C${sectionLink}\u201D部分</span></span>`
-      }
-      return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span></span>`
-    })
-  }
-
-  // ── 第三步（兜底）：处理所有剩余的 ref:// 链接 ──
-  // 将所有未被前两步处理的 ref:// 链接的 href 改为 javascript:void(0)，
-  // 防止浏览器触发 "scheme does not have a registered handler" 错误
-  html = html.replace(
-    /<a\s+href="ref:\/\/([^\s"#]+)(?:#([^"]*))?"[^>]*>([^<]*)<\/a>/gi,
-    (_match, rawId: string, anchor: string, linkText: string) => {
-      if (_match.includes('class="ref-link')) return _match
-
-      const resolved = resolveDocId(rawId)
-      const docId = resolved?.docId || rawId
-      const info = resolved?.info
-      const title = info?.title || rawId
-      const excerpt = info?.excerpt || ''
-      const sourceLabel = info?.source || '知识库'
-      const anchorAttr = anchor ? ` data-anchor="${escapeAttr(anchor)}"` : ''
-      const excerptAttr = excerpt ? ` data-excerpt="${escapeAttr(excerpt)}"` : ''
-      const lineAttr = info?.start_line ? ` data-line="${info.start_line}"` : ''
-
-      // 纯数字文本 → 序号样式（使用全局序号映射）
-      if (/^\d{1,2}$/.test(linkText.trim())) {
-        let displayNum: string
-        if (docSeqMap.has(docId)) {
-          displayNum = String(docSeqMap.get(docId)!)
-        } else {
-          globalSeq++
-          docSeqMap.set(docId, globalSeq)
-          displayNum = String(globalSeq)
-        }
-        return `<a class="ref-link ref-seq" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(title)}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${anchorAttr}${lineAttr} href="javascript:void(0)" title="点击查看文档">${displayNum}</a>`
-      }
-      // 文档名链接 → 参考来源样式
-      return `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(docId)}" data-title="${escapeAttr(linkText.trim())}" data-source="${escapeAttr(sourceLabel)}"${excerptAttr}${anchorAttr}${lineAttr} href="javascript:void(0)">${escapeHtml(linkText.trim())}</a>`
-    },
-  )
-
-  // 如果 sources 有数据但回答中没有任何 ref-link 或 ref:// 链接，
-  // 且不在流式输出中（避免过早追加），且不是无匹配响应，在末尾追加兜底参考来源
-  if (sourceMap.size > 0 && !isStreaming && !html.includes('class="ref-link') && !html.includes('href="ref://') && html.trim().length > 0 && !/知识库中暂无/.test(html)) {
-    const sourceLines = Array.from(sourceMap.values()).map((info) => {
-      const lineAttr = info.start_line ? ` data-line="${info.start_line}"` : ''
-      const docLink = `<a class="ref-link ref-source-doc" data-doc-id="${escapeAttr(String(info.id))}" data-title="${escapeAttr(info.title)}" data-source="${escapeAttr(info.source)}" data-excerpt="${escapeAttr(info.excerpt)}"${lineAttr} href="javascript:void(0)">${escapeHtml(info.title)}</a>`
-      return `<span class="ref-source-line"><span style="color: gray;">参考来源：知识库\u201C${docLink}\u201D文档</span></span>`
-    })
-    html += `<br>${sourceLines.join('<br>')}`
-  }
-
-  return html
-}
-
-function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/'/g, '&#39;')
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
 }
 
 // Auto-scroll when new messages arrive or content grows (streaming)
@@ -1449,31 +1135,22 @@ function scrollToBottom() {
   .source-open { display: none; }
 }
 
-/* ── 引用序号链接（正文中的 [1], [2], [3]） ────────────────── */
+/* ── 引用序号标记（正文中的 ①②③） ───────────────────────── */
 .msg-content :deep(.ref-link.ref-seq) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  margin: 0 2px;
-  font-size: 11px;
+  display: inline-block;
+  margin: 0 1px;
+  padding: 0 1px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1;
-  color: #fff;
-  background: #2563eb;
-  border-radius: 50%;
+  color: #2563eb;
   text-decoration: none;
   cursor: pointer;
-  vertical-align: middle;
-  transition: all 0.15s;
-  box-sizing: border-box;
-  flex-shrink: 0;
+  vertical-align: baseline;
+  transition: transform 0.15s;
 }
 .msg-content :deep(.ref-link.ref-seq:hover) {
-  background: #1d4ed8;
-  transform: scale(1.15);
+  transform: scale(1.2);
 }
 
 /* ── 参考来源独立区域 ──────────────────────────────────────── */
@@ -1484,7 +1161,8 @@ function scrollToBottom() {
 }
 
 /* ── 参考来源行（管道符包裹的灰色文本） ────────────────────── */
-.msg-content :deep(.ref-source-line) {
+.msg-content :deep(.ref-source-line),
+.msg-sources :deep(.ref-source-line) {
   display: block;
   margin: 2px 0;
   font-size: 13px;
@@ -1492,7 +1170,9 @@ function scrollToBottom() {
   color: #9ca3af;
 }
 .msg-content :deep(.ref-source-line .ref-link.ref-source-doc),
-.msg-content :deep(.ref-source-line .ref-link.ref-source-section) {
+.msg-content :deep(.ref-source-line .ref-link.ref-source-section),
+.msg-sources :deep(.ref-source-line .ref-link.ref-source-doc),
+.msg-sources :deep(.ref-source-line .ref-link.ref-source-section) {
   display: inline;
   color: #6b7280;
   font-size: inherit;
@@ -1504,11 +1184,22 @@ function scrollToBottom() {
   transition: all 0.15s;
 }
 .msg-content :deep(.ref-source-line .ref-link.ref-source-doc:hover),
-.msg-content :deep(.ref-source-line .ref-link.ref-source-section:hover) {
+.msg-content :deep(.ref-source-line .ref-link.ref-source-section:hover),
+.msg-sources :deep(.ref-source-line .ref-link.ref-source-doc:hover),
+.msg-sources :deep(.ref-source-line .ref-link.ref-source-section:hover) {
   color: #2563eb;
   background: #eff6ff;
   border-radius: 3px;
   border-bottom-color: #2563eb;
+}
+
+/* ── 参考来源行的 ①②③ 序号 ─────────────────────────────── */
+.msg-content :deep(.ref-source-line .ref-source-num),
+.msg-sources :deep(.ref-source-line .ref-source-num) {
+  color: #2563eb;
+  font-weight: 600;
+  margin-right: 2px;
+  font-size: inherit;
 }
 
 /* ── 引用浮框 Tooltip ──────────────────────────────────────── */
