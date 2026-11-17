@@ -68,7 +68,7 @@
               @mouseout="onMsgContentMouseOut"
             ></div>
             <KnowledgeImageGallery
-              v-if="msg.role === 'assistant' && !isNoMatchResponse(msg.content) && getImages(msg).length > 0"
+              v-if="msg.role === 'assistant' && msg.content && !loading && !msg.thinking?.active && !isNoMatchResponse(msg.content) && getImages(msg).length > 0"
               :images="getImages(msg)"
             />
           </div>

@@ -200,36 +200,92 @@ class KnowledgeImageService:
         query: str = "",
         anchor: Optional[str] = None,
         top_k: int = 4,
+        section_range: Optional[Tuple[int, int]] = None,
+        content: Optional[str] = None,
     ) -> List[KnowledgeImage]:
-        """为命中文档挑选关联图片（章节锚点为主，文本相似度为辅，位置兜底）。
+        """为命中文档挑选关联图片 —— 图片必须属于「命中章节」这个知识点。
 
-        策略：
-          1. 若存在与命中章节锚点匹配的图片 → 仅返回这些（强过滤，抑制图不对文）
-          2. 否则按 query 与 caption/上下文 的文本相似度排序，取有信号的
-          3. 无任何信号时回退到按文档内位置取前 top_k（文档级相关兜底）
+        策略（按优先级）：
+          1. 命中章节的行号区间可用时：只保留位于该区间内的图片。
+             图片在文档中的位置由其前文 context_text 定位；
+             区间外的图片直接排除——即使文本有零星重合（如只撞上 "gps" 这种通用词），
+             因为它属于另一个知识点的配图。
+          2. 区间不可用 → 图片锚点与命中章节匹配 → 返回该章节图片。
+          3. 再退化 → 按「图片文本与查询主题的重合度」筛选。
+          4. 没有任何信号时返回空列表 —— 宁可不展示，也不展示图不对文的图片。
         """
         images = self.list_images(doc_id)
         if not images:
             return []
 
         penalties = self._feedback_penalties(images)
+        candidates = images
 
+        # 1) 章节区间过滤：图片属于哪个知识点，由它在文档中的位置决定
+        start, end = section_range or (0, 0)
+        if content and start > 0 and end >= start:
+            inside: List[KnowledgeImage] = []
+            unknown: List[KnowledgeImage] = []
+            for img in images:
+                line = self._image_line(content, img)
+                if line is None:
+                    unknown.append(img)
+                elif start <= line <= end:
+                    inside.append(img)
+                # 区间外 → 明确属于其它知识点，排除
+            if inside:
+                return self._rank_with_penalty(inside, penalties, top_k)
+            candidates = unknown  # 只有"定位不了"的图片才走下面的回退规则
+
+        # 2) 章节锚点匹配
         a = (anchor or "").strip()
-        if a:
-            matched = [img for img in images if self._anchor_matches(img.anchor, a)]
+        if a and candidates:
+            matched = [img for img in candidates if self._anchor_matches(img.anchor, a)]
             if matched:
                 return self._rank_with_penalty(matched, penalties, top_k)
 
-        if query.strip():
+        # 3) 查询主题重合度
+        if query.strip() and candidates:
             scored = [
                 (self._text_relevance(img, query) - 0.3 * penalties.get(img.id, 0), img)
-                for img in images
+                for img in candidates
             ]
-            scored.sort(key=lambda x: (-x[0], x[1].position or 0))
-            if scored and scored[0][0] > 0:
+            scored = [x for x in scored if x[0] > 0]
+            if scored:
+                scored.sort(key=lambda x: (-x[0], x[1].position or 0))
                 return [img for _, img in scored[:top_k]]
 
-        return self._rank_with_penalty(images, penalties, top_k)
+        return []
+
+    @staticmethod
+    def _image_line(content: str, img: KnowledgeImage) -> Optional[int]:
+        """图片在文档中的行号。
+
+        context_text 是以图片为中心的 ±120 字窗口（前文 + 图片 + 后文），
+        所以必须先切出「图片之前」的那段前文再定位——直接用整段/尾部会定位到图片后面。
+        无法唯一定位（前文缺失/在文档中出现多次）时返回 None，调用方按"未知"处理。
+        """
+        if not content:
+            return None
+        ctx = (img.context_text or "").strip()
+        if not ctx:
+            return None
+        marker = re.search(r"!\[[^\]]*\]\([^)]*\)", ctx)
+        pre = ctx[: marker.start()] if marker else ctx
+        pre = pre.strip("\n")
+        if not pre.strip():
+            return None
+        for window in (120, 60, 30, 12):
+            if len(pre) < window:
+                continue
+            tail = pre[-window:]
+            first = content.find(tail)
+            if first < 0:
+                continue
+            if content.find(tail, first + 1) >= 0:
+                return None  # 多处出现，无法唯一定位
+            return content.count("\n", 0, first + len(tail)) + 1
+        return None
 
     def _rank_with_penalty(
         self,
@@ -275,21 +331,54 @@ class KnowledgeImageService:
             return False
         return ia == anchor or ia in anchor or anchor in ia
 
-    @staticmethod
-    def _text_relevance(img: KnowledgeImage, query: str) -> float:
+    # 查询主题重合度门槛：长词组至少连续命中 6 字，短词组（≤6 字）须整段命中
+    _MIN_TOPIC_OVERLAP = 6
+
+    @classmethod
+    def _text_relevance(cls, img: KnowledgeImage, query: str) -> float:
+        """图片文本与查询主题的重合度（0~1）；判定不相关时返回 0。
+
+        旧实现把整段中文查询当成一个词去匹配，几乎永远匹配不上，
+        于是每次都落到"按位置兜底"，把无关图片也带出来。
+
+        现在：把查询拆成中文/英文词组，逐个计算与图片文本的最长公共子串，
+        词组较短（≤6 字）必须整段命中，较长的至少连续命中 6 字才算相关。
+        例：查"设备端日志搜索版本号什么关键字"，图片上下文只有"日志搜索"（4 字）
+            重合 → 判定不相关；查"线路运行方向相反"整段命中 → 相关。
+        """
         text = " ".join(
             x for x in [img.caption or "", img.anchor or "", img.context_text or ""] if x
         ).lower()
-        if not text:
+        q = (query or "").lower().strip()
+        if not text or not q:
             return 0.0
-        q = query.lower()
-        cn_terms = [t for t in re.findall(r"[\u4e00-\u9fff]{2,}", q) if t]
-        en_terms = [t for t in re.findall(r"[a-z0-9]{2,}", q) if t]
-        terms = cn_terms + en_terms
-        if not terms:
-            return 0.0
-        hits = sum(1 for t in terms if t in text)
-        return hits / len(terms)
+
+        best = 0.0
+        for run in re.findall(r"[一-鿿]{2,}|[a-z0-9_]{3,}", q):
+            if run[0].isascii():
+                # 短英文缩写（gps / usb / tmp 这类）区分度太低，
+                # 单独命中不足以判定"图片与问题相关"；含数字的型号（l10、fc09、9206）除外
+                if not (len(run) >= 4 or (len(run) >= 3 and any(c.isdigit() for c in run))):
+                    continue
+            elif len(run) < 4:
+                # 2-3 字中文（上报 / 日志 / 关键字…）在语料里到处都是，
+                # 不足以单独判定图片相关；真正对题的表述通常 ≥4 字
+                continue
+            overlap = cls._min_common_substring(run, text)
+            if overlap:
+                best = max(best, overlap / len(run))
+        return best
+
+    @classmethod
+    def _min_common_substring(cls, a: str, b: str) -> int:
+        """a、b 之间长度 ≥ min(6, len(a)) 的最长公共子串长度；不足则返回 0。"""
+        need = min(cls._MIN_TOPIC_OVERLAP, len(a))
+        upper = min(len(a), len(b))
+        for size in range(upper, need - 1, -1):
+            for i in range(len(a) - size + 1):
+                if a[i:i + size] in b:
+                    return size
+        return 0
 
     @staticmethod
     def image_url(image_id: int) -> str:

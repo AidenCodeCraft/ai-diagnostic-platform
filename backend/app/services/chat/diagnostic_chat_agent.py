@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 import re
 import logging
+import traceback
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -442,10 +443,11 @@ class DiagnosticChatAgent:
             return "", []
 
         # snippet 大小和结果条数按输入长度对数缩放
+        # 下限 6 条：短问题（十几个字）原来只有 5 条，正确文档排第 6 就会被截掉
         text_len = len(text)
         log_scale = math.log10(max(text_len, 10) / 10)  # 0.0 ~ 5.0
         snippet_max = min(4000, int(800 + 600 * log_scale))
-        max_items = min(8, 5 + int(log_scale / 1.5))  # 5 ~ 8
+        max_items = min(8, 6 + int(log_scale / 1.5))  # 6 ~ 8
 
         items = all_items[:max_items]
 
@@ -475,9 +477,19 @@ class DiagnosticChatAgent:
                     f"{i + 1}. **{title}** (相关度: {score:.0%})\n   {snippet}"
                 )
                 # 章节定位 + 图片关联（章节标题优先，回退到 snippet 解析）
+                # section_range：命中章节在文档中的行号区间，用于判断"图片属于哪个知识点"
                 section = item.get("_section") or {}
                 anchor = section.get("section_title") or self._extract_section_anchor(snippet)
-                images = self._match_doc_images(item.get("id"), text, anchor)
+                images = self._match_doc_images(
+                    item.get("id"),
+                    text,
+                    anchor,
+                    section_range=(
+                        int(section.get("start_line") or 0),
+                        int(section.get("end_line") or 0),
+                    ),
+                    content=item.get("_full_content") or "",
+                )
                 self.references.append({
                     "id": item.get("id"),
                     "title": title,
@@ -522,11 +534,23 @@ class DiagnosticChatAgent:
                 return m.group(1).strip()
         return ""
 
-    def _match_doc_images(self, doc_id: Any, query: str, anchor: str) -> list:
+    def _match_doc_images(
+        self,
+        doc_id: Any,
+        query: str,
+        anchor: str,
+        section_range: tuple[int, int] = (0, 0),
+        content: str = "",
+    ) -> list:
         """为命中文档挑选关联图片（失败时静默降级为空列表，不影响主链路）。"""
         try:
             return KnowledgeImageService(self.db).match_images(
-                doc_id, query=query or "", anchor=anchor or "", top_k=4,
+                doc_id,
+                query=query or "",
+                anchor=anchor or "",
+                top_k=4,
+                section_range=section_range,
+                content=content,
             )
         except Exception as exc:
             logger.debug("[知识检索] 图片匹配失败 doc=%s: %s", doc_id, exc)

@@ -319,7 +319,7 @@ class QueryPreprocessor:
         )
 
         # Step 3: 执行搜索
-        result = self._execute_plan(plan, search_fn, high_score_threshold)
+        result = self._execute_plan(plan, search_fn, high_score_threshold, query=query)
 
         # Step 4: 结果校验
         if result.items:
@@ -491,7 +491,7 @@ class QueryPreprocessor:
             if combo_terms:
                 layers.append(SearchLayer(
                     priority=priority, name="组合搜索",
-                    terms=combo_terms, page_size=5,
+                    terms=combo_terms, page_size=8,
                 ))
                 priority += 1
 
@@ -510,7 +510,7 @@ class QueryPreprocessor:
             if variant_terms:
                 layers.append(SearchLayer(
                     priority=priority, name="实体变体",
-                    terms=variant_terms[:8], page_size=5,
+                    terms=variant_terms[:8], page_size=8,
                     stop_on_high_score=True,
                 ))
                 priority += 1
@@ -536,7 +536,7 @@ class QueryPreprocessor:
             if intent_terms:
                 layers.append(SearchLayer(
                     priority=priority, name="意图搜索",
-                    terms=intent_terms[:15], page_size=5,
+                    terms=intent_terms[:15], page_size=8,
                     stop_on_high_score=False,
                 ))
                 priority += 1
@@ -545,7 +545,7 @@ class QueryPreprocessor:
         if entities and priority <= max_layers:
             layers.append(SearchLayer(
                 priority=priority, name="实体搜索",
-                terms=entities[:5], page_size=3,
+                terms=entities[:5], page_size=5,
             ))
             priority += 1
 
@@ -566,8 +566,9 @@ class QueryPreprocessor:
         plan: SearchPlan,
         search_fn: callable,
         high_score_threshold: float = 0.3,
+        query: str = "",
     ) -> SearchResult:
-        """按分层计划执行搜索，逐层降级。"""
+        """按分层计划执行搜索，逐层降级，最后按「检索分 × 字面重合加成」排序。"""
         all_items: List[Dict[str, Any]] = []
         seen_ids: Set[int] = set()
         high_score_ids: Set[int] = set()
@@ -637,9 +638,12 @@ class QueryPreprocessor:
                     matched_layer = "兜底搜索"
                     matched_term = term
 
-        # 排序
+        # 排序：检索分 × 字面重合加成
+        # 纯按检索分排序会让"被大量宽泛词命中的文档"压过真正对题的文档
+        # （RRF 分数只反映命中了多少个搜索词，不反映是否切题）。
         all_items.sort(
-            key=lambda d: float(d.get("relevance_score", 0) or 0),
+            key=lambda d: float(d.get("relevance_score", 0) or 0)
+            * self._lexical_boost(query, d),
             reverse=True,
         )
 
@@ -649,6 +653,34 @@ class QueryPreprocessor:
             matched_term=matched_term,
             total_attempted=total_attempted,
         )
+
+    @staticmethod
+    def _lexical_boost(query: str, item: Dict[str, Any]) -> float:
+        """字面重合加成（乘性，1.0 表示无加成）。
+
+        两条强信号：
+          1. 查询里直接出现了文档标题（问"设备端…"而文档就叫《设备端》）
+          2. 查询中的连续中文片段（≥4 字）出现在标题/摘要里
+        例：问"设备端日志搜索版本号什么关键字"，
+            《设备端》同时命中两条 → ×3.5，从第 8 名提到第 1 名；
+            而《长沙》《线路》等只被宽泛词命中的文档保持 ×1.0。
+        """
+        q = (query or "").strip().lower()
+        if not q:
+            return 1.0
+        boost = 1.0
+        title = (item.get("title") or "").strip().lower()
+        if title and title in q:
+            boost += 1.5
+        text = f"{title} {(item.get('snippet') or '')}".lower()
+        if text.strip():
+            hits = 0
+            for run in re.findall(r"[一-鿿]{4,}", q):
+                for i in range(len(run) - 3):
+                    if run[i:i + 4] in text:
+                        hits += 1
+            boost += min(1.0, 0.3 * hits)
+        return boost
 
     # ------------------------------------------------------------------
     # Step 4: 结果校验

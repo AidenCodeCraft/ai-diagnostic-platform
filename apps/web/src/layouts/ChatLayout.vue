@@ -325,10 +325,13 @@ async function newChat() {
   router.push('/chat')
 }
 
-async function selectChat(id: number) {
+async function selectChat(id: number, options: { navigate?: boolean } = {}) {
+  // navigate=false：仅恢复消息（刷新页面时），不改变当前路由——
+  // 否则在知识库/诊断报告页刷新会被强制跳回 /chat。
+  const { navigate = true } = options
   // 已有完整本地消息时跳过；刷新后 messages 为空，必须重新拉取。
   if (id === currentChatId.value && messages.value.length > 0) {
-    router.push('/chat')
+    if (navigate) router.push('/chat')
     return
   }
   pendingClarification.value = null
@@ -375,7 +378,7 @@ async function selectChat(id: number) {
     )
     canGenerateReport.value = hasAnalysis
     
-    router.push('/chat')
+    if (navigate) router.push('/chat')
     loadingPhase.value = 'idle'
     
     // 等待DOM更新后滚动到底部
@@ -1064,7 +1067,8 @@ onMounted(() => {
   if (savedChatId) {
     const id = parseInt(savedChatId, 10)
     if (!isNaN(id) && id > 0) {
-      selectChat(id).catch(() => { currentChatId.value = 0 })
+      // 只恢复消息，不跳转路由：刷新时停留在当前页面（知识库/诊断报告等）
+      selectChat(id, { navigate: false }).catch(() => { currentChatId.value = 0 })
     }
   }
   loadSessions()  // 始终加载侧边栏列表，不与自动恢复互斥
