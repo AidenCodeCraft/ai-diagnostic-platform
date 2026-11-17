@@ -733,6 +733,94 @@ class QueryPreprocessor:
 
 
 # =========================================================================
+# 复合提问拆分与多问题检索
+# =========================================================================
+
+# 疑问/断句切分
+_QUESTION_SPLIT = re.compile(r"[？?。！!\n]+")
+
+# 序号前缀：1、 2. 3） (4) 一、 二、 等（数字序号后必须不是小数点数字，避免误伤 "2.5 版本"）
+_NUMBERING_PREFIX = re.compile(r"^(?:\d+[.、）)\]](?=[^\d.])|[一二三四五六七八九十]+[、.）)])\s*")
+
+# 追问/补充说明前缀：紧跟前一问的从句，不构成独立问题
+_FOLLOWUP_PREFIX = re.compile(
+    r"^(如果|假如|要是|若是|若|那么|则|可以|是否|在哪里|哪里|怎么修改|如何修改|改的话|"
+    r"否则|以及|还有|另外|并且|同时|具体)"
+)
+
+
+def split_query_units(text: str) -> List[str]:
+    """把复合提问拆成独立的问题单元。
+
+    规则：
+      - 带序号的段落（"1、…""2. …"）各自成为一个单元（去掉序号前缀）；
+      - 不带序号、以追问词开头的片段（如"如果可以修改在哪里修改呢"）
+        并入上一个问题单元；
+      - 其余不带序号的片段独立成单元。
+
+    示例：
+      "1、如何判断设备版本号？2、L10的GPS上报间隔能改吗？在哪改？"
+      → ["如何判断设备版本号", "L10的GPS上报间隔能改吗？在哪改"]
+    """
+    fragments = [f.strip() for f in _QUESTION_SPLIT.split(text or "") if f.strip()]
+    units: List[str] = []
+    for frag in fragments:
+        stripped = _NUMBERING_PREFIX.sub("", frag, count=1).strip()
+        numbered = bool(_NUMBERING_PREFIX.match(frag))
+        if not units or numbered or not _FOLLOWUP_PREFIX.match(stripped):
+            units.append(stripped)
+        else:
+            units[-1] = f"{units[-1]}？{stripped}"
+    return [u for u in units if u]
+
+
+def process_multi_query(query: str, search_fn: callable, **kwargs) -> SearchResult:
+    """复合提问的检索入口：按问题单元逐个检索后合并结果。
+
+    单问题直接走 process；多问题时每个单元独立检索（各自的分词与意图
+    不互相稀释），结果按文档去重、保留最高分；「部分匹配」仅当所有单元
+    都是部分匹配时才置位，避免某个单元的弱匹配污染整个回答。
+    """
+    preprocessor = get_preprocessor()
+    units = split_query_units(query)
+    if len(units) <= 1:
+        return preprocessor.process(query=query, search_fn=search_fn, **kwargs)
+
+    merged: Dict[Any, Dict[str, Any]] = {}
+    partial_flags: List[bool] = []
+    total_attempted = 0
+    matched_terms: List[str] = []
+    for unit in units:
+        result = preprocessor.process(query=unit, search_fn=search_fn, **kwargs)
+        total_attempted += result.total_attempted
+        if result.matched_term:
+            matched_terms.append(result.matched_term)
+        partial_flags.append(bool(result.items) and result.is_partial_match)
+        for item in result.items:
+            # 记录本单元命中的搜索词，供 snippet 提取定位
+            item["_matched_term"] = result.matched_term or unit
+            doc_id = item.get("id")
+            old = merged.get(doc_id)
+            if old is None or float(item.get("relevance_score", 0) or 0) > float(
+                old.get("relevance_score", 0) or 0
+            ):
+                merged[doc_id] = item
+
+    items = sorted(
+        merged.values(),
+        key=lambda d: float(d.get("relevance_score", 0) or 0),
+        reverse=True,
+    )[:8]
+    return SearchResult(
+        items=items,
+        matched_layer="多问题检索",
+        matched_term=" | ".join(matched_terms),
+        total_attempted=total_attempted,
+        is_partial_match=bool(partial_flags) and all(partial_flags),
+    )
+
+
+# =========================================================================
 # 工厂函数：便捷使用
 # =========================================================================
 
