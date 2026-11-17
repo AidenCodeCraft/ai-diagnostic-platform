@@ -119,3 +119,40 @@ class TestChatConcurrencyLimit:
         assert resp.status_code == 200
         assert '"done"' in resp.text
         assert chat_gate.inflight == 0
+
+    def test_stats_exposes_active_chat_streams(self, client, isolated_config):
+        resp = client.get("/api/v1/admin/stats")
+        assert resp.status_code == 200
+        assert "active_chat_streams" in resp.json()
+        assert resp.json()["active_chat_streams"] == 0
+
+    def test_provider_stream_closed_on_client_disconnect(self, db_session, monkeypatch):
+        """客户端停止/断开（gen.close()）必须显式关闭上游 LLM 流。"""
+        closed = {"v": False}
+
+        class FakeProvider:
+            def chat_stream(self, messages):
+                try:
+                    yield "t1"
+                    yield "t2"
+                finally:
+                    closed["v"] = True
+
+        from app.services.chat.chat_service import ChatService
+
+        monkeypatch.setattr(
+            ChatService, "_get_provider", classmethod(lambda cls, name: FakeProvider())
+        )
+        svc = ChatService(db_session)
+        session = svc.create_session(title="t", model="mock")
+        gen = svc.send_message_stream(session_id=session.id, content="hi")  # type: ignore[arg-type]
+
+        try:
+            for _ in range(20):
+                chunk = next(gen, None)
+                if chunk is None or '"token"' in chunk:
+                    break
+        except StopIteration:
+            pass
+        gen.close()  # 模拟客户端断开
+        assert closed["v"] is True

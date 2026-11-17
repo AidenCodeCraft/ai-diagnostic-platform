@@ -76,6 +76,9 @@
           @click="$emit('selectChat', chat.id)"
         >
           <span class="history-title">{{ chat.title }}</span>
+          <span v-if="sendingIds && sendingIds.includes(chat.id)" class="streaming-badge" title="回答生成中">
+            <span class="streaming-dot" />回答中
+          </span>
           <button class="history-more-btn" @click.stop="$emit('chatMenu', $event, chat)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="5" r="1" />
@@ -104,6 +107,8 @@ defineProps<{
   chats: ChatRecord[]
   loading?: boolean
   activeChatId: number
+  /** 正在生成回复的会话 ID 列表 */
+  sendingIds?: number[]
   userName: string
   userInitial: string
   isAdmin: boolean
@@ -329,6 +334,31 @@ function closeSearch() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.streaming-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  color: #2563eb;
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.streaming-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2563eb;
+  animation: streamingPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes streamingPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .history-more-btn {

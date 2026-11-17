@@ -309,9 +309,11 @@ class ChatService:
             return
 
         full_reply = ""
+        stream_iter = None
         try:
             provider = self._get_provider(provider_name)
-            for chunk in provider.chat_stream(messages):
+            stream_iter = provider.chat_stream(messages)
+            for chunk in stream_iter:
                 if isinstance(chunk, dict):
                     reasoning = chunk.get("reasoning", "")
                     if reasoning:
@@ -330,6 +332,15 @@ class ChatService:
             )
             full_reply = f"[AI 服务暂时不可用: {e}]"
             yield f"data: {json.dumps({'token': full_reply})}\n\n"
+        finally:
+            # 客户端停止/断开时显式关闭上游 LLM 流（含 HTTP 连接），不依赖 GC
+            if stream_iter is not None:
+                close = getattr(stream_iter, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:  # noqa: BLE001 - 关闭失败不影响响应
+                        pass
 
         try:
             self._auto_title(session_id, content)

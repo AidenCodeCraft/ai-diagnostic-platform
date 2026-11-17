@@ -71,7 +71,10 @@ def get_stats(
 
     total_log_size = db.query(func.sum(Log.size)).scalar() or 0
 
+    from app.services.system.concurrency import chat_gate
+
     return {
+        "active_chat_streams": chat_gate.inflight,
         "total_users": total_users,
         "total_projects": total_projects,
         "total_logs": total_logs,

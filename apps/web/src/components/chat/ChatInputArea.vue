@@ -53,7 +53,13 @@
             </svg>
             <input type="file" accept=".log,.txt,.zip" @change="$emit('fileInput', $event)" hidden multiple />
           </label>
-          <button class="action-btn send-btn" :disabled="!model.trim() || isUploading"
+          <button v-if="isStreaming" class="action-btn stop-btn" title="停止生成" @click="$emit('stop')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+            <span>停止</span>
+          </button>
+          <button v-else class="action-btn send-btn" :disabled="!model.trim() || isUploading"
             :class="{ active: model.trim() && !isUploading }" @click="$emit('send')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
               <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
@@ -80,11 +86,14 @@ const props = defineProps<{
   isUploading: boolean
   canReport: boolean
   hasMessages: boolean
+  /** 当前对话正在流式生成中 */
+  isStreaming?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
   (e: 'send'): void
+  (e: 'stop'): void
   (e: 'fileInput', event: Event): void
   (e: 'removeFile', id: string): void
   (e: 'modelChange', model: string): void
@@ -406,6 +415,18 @@ function statusText(fa: FileAttachment): string {
 
 .attach-btn input[type="file"] {
   display: none;
+}
+
+.stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+}
+.stop-btn:hover {
+  background: #fee2e2;
 }
 
 .send-btn {

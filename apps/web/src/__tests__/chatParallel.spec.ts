@@ -27,9 +27,9 @@ const sidebarStub = vi.hoisted(() => ({
 
 /** ChatInputArea 桩：模拟输入并发送 */
 const inputStub = vi.hoisted(() => ({
-  props: ['modelValue'],
-  emits: ['update:modelValue', 'send'],
-  template: '<div><button class="fill" @click="$emit(\'update:modelValue\', \'问题\')">输入</button><button class="send" @click="$emit(\'send\')">发送</button></div>',
+  props: ['modelValue', 'isStreaming'],
+  emits: ['update:modelValue', 'send', 'stop'],
+  template: '<div><button class="fill" @click="$emit(\'update:modelValue\', \'问题\')">输入</button><button v-if="isStreaming" class="stop" @click="$emit(\'stop\')">停止</button><button v-else class="send" @click="$emit(\'send\')">发送</button></div>',
 }))
 
 vi.mock('@/api/client', () => ({ default: { get: vi.fn(), post: vi.fn() } }))
@@ -90,8 +90,13 @@ vi.mock('element-plus', () => ({
   ElMessageBox: { prompt: vi.fn(), confirm: vi.fn() },
 }))
 
-/** 按会话捕获 sendMessageStream 的回调 */
-const streams = vi.hoisted(() => new Map<number, { content: string; onToken: (t: string) => void; onDone: (m: string) => void }>())
+/** 按会话捕获 sendMessageStream 的回调（onDone/onError 包装为触发后结束等待，模拟真实 chat.ts） */
+const streams = vi.hoisted(() => new Map<number, {
+  content: string
+  onToken: (t: string) => void
+  onDone: (m: string) => void
+  onError: (e: string) => void
+}>())
 
 async function mountChat() {
   const pinia = createPinia()
@@ -142,10 +147,23 @@ describe('多对话并行提问', () => {
     chatApiMock.getMessages.mockResolvedValue({ data: [] })
     chatApiMock.saveMessage.mockResolvedValue({ data: {} })
     chatApiMock.sendMessageStream.mockImplementation(
-      (sessionId: number, content: string, _model: string, onToken: (t: string) => void, onDone: (m: string) => void) => {
-        streams.set(sessionId, { content, onToken, onDone })
-        // 返回 pending promise：模拟流持续进行中，直到测试触发完成
-        return new Promise<void>(() => {})
+      (
+        sessionId: number, content: string, _model: string,
+        onToken: (t: string) => void, onDone: (m: string) => void, onError: (e: string) => void,
+        _logAnalysis: any, _onReasoning: any, _onSources: any, _onClarification: any,
+        onStopped?: () => void, signal?: AbortSignal,
+      ) => {
+        // 流持续进行中，直到完成/出错/停止（模拟真实 chat.ts 的 promise 语义）
+        let resolveFn: () => void = () => {}
+        const pending = new Promise<void>((res) => { resolveFn = res })
+        streams.set(sessionId, {
+          content,
+          onToken,
+          onDone: (m: string) => { onDone(m); resolveFn() },
+          onError: (e: string) => { onError(e); resolveFn() },
+        })
+        signal?.addEventListener('abort', () => { onStopped?.(); resolveFn() })
+        return pending
       },
     )
     adminApiMock.getSystemConfig.mockResolvedValue({
@@ -206,6 +224,36 @@ describe('多对话并行提问', () => {
     await flushPromises()
     await sendInCurrentChat(wrapper)
     expect(chatApiMock.sendMessageStream).toHaveBeenCalledTimes(1)
+  })
+
+  it('停止生成：中止当前对话的流并保存已生成的部分内容', async () => {
+    const wrapper = await mountChat()
+    await sendInCurrentChat(wrapper)
+    streams.get(1)!.onToken('部分内容')
+    await flushPromises()
+
+    // 流式中输入区显示停止按钮，点击后中止
+    await wrapper.find('.stop').trigger('click')
+    await flushPromises()
+
+    const save = chatApiMock.saveMessage.mock.calls.find(c => c[0] === 1 && c[1] === 'assistant')
+    expect(save?.[2]).toBe('部分内容')
+
+    // 停止后可再次发起提问
+    await sendInCurrentChat(wrapper)
+    expect(chatApiMock.sendMessageStream.mock.calls.length).toBe(2)
+  })
+
+  it('流式出错：保留已生成内容并追加中断提示', async () => {
+    const wrapper = await mountChat()
+    await sendInCurrentChat(wrapper)
+    streams.get(1)!.onToken('部分内容')
+    streams.get(1)!.onError('boom')
+    await flushPromises()
+
+    const text = wrapper.find('.mlist').text()
+    expect(text).toContain('部分内容')
+    expect(text).toContain('流式回复中断')
   })
 
   it('并行开启但超过上限：提示并拦截', async () => {

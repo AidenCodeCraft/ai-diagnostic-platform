@@ -79,6 +79,8 @@ export const chatApi = {
     onReasoning?: (reasoning: string) => void,
     onSources?: (sources: ChatSource[]) => void,
     onClarification?: (questions: any[]) => void,
+    onStopped?: () => void,
+    signal?: AbortSignal,
   ) {
     const token = sessionStorage.getItem('token')
     let resp: Response
@@ -87,8 +89,11 @@ export const chatApi = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ content, model, log_analysis: logAnalysis }),
+        signal,
       })
     } catch (e: any) {
+      // 用户主动停止（AbortController）不是错误
+      if (signal?.aborted || e?.name === 'AbortError') { onStopped?.(); return }
       onError?.(`网络错误: ${e.message || '无法连接到服务器'}`)
       return
     }
@@ -127,6 +132,7 @@ export const chatApi = {
         if (done) break
       }
     } catch (e: any) {
+      if (signal?.aborted || e?.name === 'AbortError') { onStopped?.(); return }
       onError?.(`流读取错误: ${e.message || '连接中断'}`)
     } finally {
       try { reader.cancel() } catch { /* ignore */ }

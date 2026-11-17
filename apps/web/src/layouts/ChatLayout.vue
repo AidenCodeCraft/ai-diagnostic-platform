@@ -2,7 +2,7 @@
   <div class="chat-layout">
     <!-- 左侧边栏 -->
     <ChatSidebar v-model:collapsed="sidebarCollapsed" :chats="filteredChats" :loading="sessionsLoading"
-      :activeChatId="isChatRoute ? currentChatId : 0"
+      :activeChatId="isChatRoute ? currentChatId : 0" :sendingIds="[...sendingChatIds]"
       :userName="userName" :userInitial="userInitial" :isAdmin="isAdmin" @toggleSearch="toggleSearch"
       @newChat="newChat" @navigate="navigateTo" @selectChat="selectChat" @chatMenu="openChatMenu"
       @toggleUserMenu="showUserMenu = !showUserMenu" @searchChats="onSearchChats" />
@@ -93,7 +93,9 @@
           <div class="input-wrapper">
             <ChatInputArea v-model="inputText" :files="attachedFiles" :selectedModel="selectedModel"
               :isUploading="isUploading" :canReport="canGenerateReport" :hasMessages="messages.length > 0"
-              @send="sendMessage" @fileInput="onFileInput" @removeFile="removeFile" @modelChange="onModelChange"
+              :isStreaming="loadingPhase === 'streaming'"
+              @send="sendMessage" @stop="stopChatStream(currentChatId)" @fileInput="onFileInput"
+              @removeFile="removeFile" @modelChange="onModelChange"
               @generateReport="generateDiagnosticReport" />
           </div>
         </div>
@@ -178,6 +180,11 @@ function ensureChatMessages(chatId: number): any[] {
 }
 function setChatMessages(chatId: number, arr: any[]) { messagesByChat.set(chatId, arr) }
 function setLoadingPhase(chatId: number, phase: LoadingPhase) { loadingPhases.set(chatId, phase) }
+/** 各对话进行中的流式请求控制器（用于停止生成） */
+const activeStreams = reactive(new Map<number, AbortController>())
+function stopChatStream(chatId: number) {
+  activeStreams.get(chatId)?.abort()
+}
 function setSending(chatId: number, on: boolean) {
   if (on) sendingChatIds.add(chatId)
   else sendingChatIds.delete(chatId)
@@ -908,12 +915,18 @@ async function streamChat(text: string, chatId: number) {
   }
 
   let firstToken = true
+  let receivedToken = false
+  let stopped = false
+  let failed = false
+  const controller = new AbortController()
+  activeStreams.set(chatId, controller)
 
   await chatApi.sendMessageStream(
     chatId,
     text,
     selectedModel.value,
     (token: string) => {
+      receivedToken = true
       if (firstToken) {
         firstToken = false
         const elapsed = Math.max(1, Math.round((Date.now() - thinkStart) / 1000))
@@ -940,7 +953,11 @@ async function streamChat(text: string, chatId: number) {
       }
     },
     (err: string) => {
-      replyMsg.content = '❌ 流式回复失败：' + err
+      failed = true
+      // 保留已生成的内容，仅追加中断提示（不覆盖已有 token）
+      replyMsg.content = replyMsg.content
+        ? `${replyMsg.content}\n\n⚠️ 流式回复中断：${err}`
+        : '❌ 流式回复失败：' + err
       replyMsg.thinking.active = false
     },
     lastAnalysisByChat.get(chatId),
@@ -955,7 +972,21 @@ async function streamChat(text: string, chatId: number) {
     },
     (sources: ChatSource[]) => { replyMsg.sources = sources },
     (questions: any[]) => { replyMsg.clarification = questions },
+    () => { stopped = true },
+    controller.signal,
   )
+
+  activeStreams.delete(chatId)
+
+  // 停止/出错中断时：保存已生成的部分内容，避免刷新后丢失
+  if ((stopped || failed) && receivedToken) {
+    const thinkingData = (replyMsg.thinking.text || replyMsg.thinking.elapsed > 0) ? {
+      text: replyMsg.thinking.text || '',
+      elapsed: replyMsg.thinking.elapsed,
+    } : undefined
+    await chatApi.saveMessage(chatId, 'assistant', replyMsg.content, replyMsg.sources, thinkingData)
+      .catch(e => console.warn('[streamChat] save partial message failed:', e))
+  }
 }
 
 /** 供澄清选项芯片点击：把选项填入输入框，由用户确认后发送 */
