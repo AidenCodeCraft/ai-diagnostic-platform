@@ -175,4 +175,29 @@ describe('end-to-end citation rendering', () => {
     expect(out.bodyHtml).toContain('data-doc-id="58"')
     expect(out.sourcesHtml).toContain('ref-source-num">①')
   })
+
+  it('keeps source lines tight: no blank line between ① and ②', () => {
+    const answer =
+      '结论正文。\n\n' +
+      '参考来源：知识库"[客流逻辑](ref://2)"文档中"[启动类型](ref://2#启动类型)"部分\n' +
+      '参考来源：知识库"[超速规则](ref://1)"文档'
+    const { body, sourcesText } = splitSourcesFromContent(answer)
+    const bodyHtml = renderMarkdown(normalizeCitationMarkdown(body))
+    const sourcesHtml = renderMarkdown(normalizeCitationMarkdown(sourcesText))
+    const out = processRefLinks(bodyHtml, sourcesHtml, sources)
+
+    expect(out.sourcesHtml.match(/ref-source-line/g)?.length).toBe(2)
+    expect(out.sourcesHtml).toContain('①')
+    expect(out.sourcesHtml).toContain('②')
+    // 块级来源行之间残留的 <br> 软换行会渲染出一行空白
+    expect(out.sourcesHtml).not.toContain('<br>')
+  })
+
+  it('appends fallback source lines without blank lines between them', () => {
+    const { sourcesHtml } = processRefLinks('<p>完全没有引用的回答</p>', '', sources)
+    expect(sourcesHtml.match(/ref-source-line/g)?.length).toBe(2)
+    expect(sourcesHtml).not.toContain('<br>')
+    expect(sourcesHtml).toContain('①')
+    expect(sourcesHtml).toContain('②')
+  })
 })

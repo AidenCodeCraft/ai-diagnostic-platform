@@ -350,7 +350,7 @@ async function loadSessions() {
   sessionsLoading.value = true
   try {
     const { data } = await chatApi.listSessions()
-    recentChats.value = (data.items || []).map((s: any) => ({ id: s.id, title: s.title || '新对话', model: s.model }))
+    recentChats.value = (data.items || []).map((s: any) => ({ id: s.id, title: s.title || '新对话', model: s.model, updatedAt: s.updated_at || s.created_at }))
   } catch {
     recentChats.value = []
   } finally {
@@ -633,7 +633,7 @@ async function sendMessage() {
         ensureChatMessages(s.id)
         currentChatId.value = s.id
         sessionStorage.setItem('activeChatId', String(s.id))
-        recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model || undefined })
+        recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model || undefined, updatedAt: s.updated_at || s.created_at })
       } catch (e: any) {
         console.error('[sendMessage] create session failed:', e?.response?.data?.detail || e?.message || e)
         ElMessage.warning('创建会话失败，请重试')

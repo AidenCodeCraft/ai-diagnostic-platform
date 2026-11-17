@@ -5,6 +5,8 @@ export interface ChatRecord {
   title: string
   pinned?: boolean
   model?: string
+  /** 最近更新时间（ISO 字符串），用于侧边栏按时间分组 */
+  updatedAt?: string
 }
 
 export interface FileAttachment {
