@@ -16,6 +16,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     organization = Column(String(100), nullable=True)  # 企业/单位
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
+    theme = Column(String(20), nullable=True)  # 用户主题偏好：light / dark / system（空=未设置）
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,

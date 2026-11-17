@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any, Dict
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.database import session as session_module
+from app.models import User
 from app.schemas import TokenResponse, UserLogin, UserCreate
 from app.services import AuthService
 
@@ -81,3 +84,37 @@ def login(
         )
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+def _require_user(request: Request, db: Session) -> User:
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing token")
+    user_id = AuthService(db).verify_token(auth[7:])
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+@router.get("/preferences")
+def get_preferences(request: Request, db: Session = Depends(get_db_session)):
+    """当前登录用户的主题偏好（每个用户独立配置）。"""
+    user = _require_user(request, db)
+    return {"theme": user.theme}
+
+
+@router.put("/preferences")
+def update_preferences(
+    body: Dict[str, Any], request: Request, db: Session = Depends(get_db_session)
+):
+    """保存当前登录用户的主题偏好：light / dark / system。"""
+    theme = body.get("theme")
+    if theme not in ("light", "dark", "system"):
+        raise HTTPException(status_code=400, detail="theme must be light / dark / system")
+    user = _require_user(request, db)
+    user.theme = theme
+    db.commit()
+    return {"theme": user.theme}
