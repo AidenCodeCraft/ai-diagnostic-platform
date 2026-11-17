@@ -1,6 +1,6 @@
 <template>
   <teleport to="body">
-    <div v-if="visible" class="menu-overlay" @click="$emit('close')"></div>
+    <div v-if="visible" class="menu-overlay help-overlay" @click="$emit('close')"></div>
     <transition name="help-modal">
       <div v-if="visible" class="help-dialog">
         <div class="help-header">
@@ -311,4 +311,103 @@ watch(() => activeTab.value, () => {
 
 .about-key { font-size: 13px; color: #6b7280; }
 .about-val { font-size: 13px; color: #1f2937; font-weight: 500; }
+</style>
+
+<style>
+/* 深色主题（teleport 到 body，使用全局选择器，html[data-theme] 前缀保证优先级覆盖 scoped 基础样式） */
+html[data-theme='dark'] .help-overlay {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+html[data-theme='dark'] .help-dialog {
+  background: #292a2e;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+html[data-theme='dark'] .help-header {
+  border-bottom-color: #3a3b40;
+}
+
+html[data-theme='dark'] .help-header h3 {
+  color: #e7e9ee;
+}
+
+html[data-theme='dark'] .help-close {
+  color: #858b97;
+}
+
+html[data-theme='dark'] .help-close:hover {
+  color: #e7e9ee;
+  background: #393a40;
+}
+
+html[data-theme='dark'] .help-nav {
+  background: #222326;
+}
+
+html[data-theme='dark'] .help-nav-item {
+  color: #aeb4c0;
+}
+
+html[data-theme='dark'] .help-nav-item:hover {
+  background: #393a40;
+}
+
+html[data-theme='dark'] .help-nav-item.active {
+  background: #303a5b;
+  color: #aebfff;
+}
+
+html[data-theme='dark'] .help-section h4 {
+  color: #e7e9ee;
+}
+
+html[data-theme='dark'] .help-desc {
+  color: #aeb4c0;
+}
+
+html[data-theme='dark'] .faq-item {
+  border-color: #3a3b40;
+}
+
+html[data-theme='dark'] .faq-item:hover {
+  border-color: #46474d;
+}
+
+html[data-theme='dark'] .faq-q {
+  color: #d3d7df;
+}
+
+html[data-theme='dark'] .faq-q svg {
+  color: #858b97;
+}
+
+html[data-theme='dark'] .faq-a {
+  color: #aeb4c0;
+}
+
+html[data-theme='dark'] .contact-card {
+  background: #222326;
+  border-color: #3f4147;
+}
+
+html[data-theme='dark'] .contact-label {
+  color: #9298a5;
+}
+
+html[data-theme='dark'] .contact-value {
+  color: #e7e9ee;
+}
+
+html[data-theme='dark'] .about-row {
+  background: #222326;
+}
+
+html[data-theme='dark'] .about-key {
+  color: #9298a5;
+}
+
+html[data-theme='dark'] .about-val {
+  color: #e7e9ee;
+}
 </style>

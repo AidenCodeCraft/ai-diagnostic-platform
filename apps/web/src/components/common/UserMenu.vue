@@ -81,3 +81,10 @@ function handleAction(action: 'download' | 'settings' | 'help' | 'logout') {
   border-top: 1px solid var(--chat-popup-border);
 }
 </style>
+
+<style>
+/* 深色主题（teleport 到 body，使用全局选择器）：配色已由 --chat-popup-* 主题令牌随主题切换，这里仅补深色投影 */
+html[data-theme='dark'] .user-menu-popup {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+</style>

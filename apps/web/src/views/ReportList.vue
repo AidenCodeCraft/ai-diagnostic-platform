@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container">
+  <div class="page-container report-page">
     <div class="card-header"><h2>诊断报告</h2></div>
     <el-card>
       <el-table :data="items" stripe v-loading="loading" @row-click="viewDetail" style="cursor:pointer">
@@ -21,7 +21,7 @@
       <el-pagination v-if="total > pageSize" style="margin-top:16px;justify-content:center" background layout="prev,pager,next" :total="total" :page-size="pageSize" v-model:current-page="page" @change="fetch" />
     </el-card>
 
-    <el-dialog v-model="showDetail" title="报告详情" width="700px">
+    <el-dialog v-model="showDetail" title="报告详情" width="700px" class="report-detail-dialog" overlay-class="report-detail-overlay">
       <template v-if="detail">
         <el-descriptions :column="2" border style="margin-bottom:16px">
           <el-descriptions-item label="模型">{{ detail.model }}</el-descriptions-item>
@@ -96,3 +96,65 @@ async function remove(id: number) {
 
 onMounted(fetch)
 </script>
+
+<style scoped>
+/* Report list page theme tokens (light = current look, dark follows app palette) */
+.report-page {
+  --rp-heading: #303133;
+  --rp-muted: #9ca3af;
+}
+
+.card-header h2 { color: var(--rp-heading); }
+
+.empty-hint {
+  text-align: center; padding: 40px 0; font-size: 14px; color: var(--rp-muted);
+}
+
+/* Dark: align Element Plus surfaces (card, table rows, borders) with the app
+   dark palette instead of EP's default near-black neutrals. Upstream tokens are
+   overridden on the page root so they flow into .el-card / .el-table vars. */
+[data-theme='dark'] .report-page {
+  --rp-heading: #e7e9ee;
+  --rp-muted: #9298a5;
+
+  --el-fill-color-blank: #202124;
+  --el-fill-color-lighter: #222326;
+  --el-fill-color-light: #292a2e;
+  --el-border-color-light: #35363b;
+  --el-border-color-lighter: #35363b;
+}
+
+[data-theme='dark'] .report-page .el-table {
+  --el-table-header-bg-color: #292a2e;
+  --el-table-header-text-color: #aeb4c0;
+}
+</style>
+
+<style>
+/* Report detail dialog — teleported to <body>, so scoped styles can't reach it */
+[data-theme='dark'] .el-dialog.report-detail-dialog,
+[data-theme='dark'] .report-detail-dialog .el-dialog {
+  --el-dialog-bg-color: #292a2e;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme='dark'] .el-dialog.report-detail-dialog .el-dialog__title,
+[data-theme='dark'] .report-detail-dialog .el-dialog__title {
+  color: #e7e9ee;
+}
+
+[data-theme='dark'] .el-dialog.report-detail-dialog .el-descriptions__label,
+[data-theme='dark'] .report-detail-dialog .el-descriptions__label {
+  color: #9298a5;
+}
+
+[data-theme='dark'] .el-dialog.report-detail-dialog .el-descriptions__content,
+[data-theme='dark'] .report-detail-dialog .el-descriptions__content {
+  color: #e7e9ee;
+}
+
+[data-theme='dark'] .el-dialog.report-detail-dialog .el-descriptions__cell,
+[data-theme='dark'] .report-detail-dialog .el-descriptions__cell {
+  background-color: #292a2e;
+}
+</style>

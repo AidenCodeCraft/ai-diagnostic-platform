@@ -96,7 +96,7 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElSelect, ElOption, ElButton } from 'element-plus'
-import { applyTheme, getSavedTheme, type ThemePreference } from '@/composables/useTheme'
+import { getSavedTheme, setTheme, type ThemePreference } from '@/composables/useTheme'
 import { setLocale, type SupportedLocale } from '@/locales'
 
 const { locale } = useI18n()
@@ -131,17 +131,13 @@ const themeOptions = [
 
 function updateTheme(value: ThemePreference) {
   theme.value = value
-  applyTheme(value)
-  saveSettings()
+  // 立即生效（所有界面实时同步），并按当前登录用户保存独立的配置（本地 + 服务端）
+  setTheme(value)
 }
 
 function updateLanguage(lang: SupportedLocale) {
   language.value = lang
   setLocale(lang)
-}
-
-function saveSettings() {
-  localStorage.setItem('theme', theme.value)
 }
 
 // Sync language with current locale on open
@@ -340,5 +336,83 @@ watch(() => props.visible, (v) => {
   position: fixed;
   inset: 0;
   z-index: 99;
+}
+</style>
+
+<style>
+/* 深色主题（teleport 到 body，使用全局选择器，html[data-theme] 前缀保证优先级覆盖 scoped 基础样式） */
+html[data-theme='dark'] .settings-overlay {
+  background: rgba(0, 0, 0, 0.5) !important;
+}
+
+html[data-theme='dark'] .settings-dialog {
+  background: #292a2e;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+html[data-theme='dark'] .settings-header {
+  border-bottom-color: #3a3b40;
+}
+
+html[data-theme='dark'] .settings-header h3 {
+  color: #e7e9ee;
+}
+
+html[data-theme='dark'] .settings-close {
+  color: #858b97;
+}
+
+html[data-theme='dark'] .settings-close:hover {
+  color: #e7e9ee;
+  background: #393a40;
+}
+
+html[data-theme='dark'] .settings-nav {
+  background: #222326;
+}
+
+html[data-theme='dark'] .settings-nav-item {
+  color: #aeb4c0;
+}
+
+html[data-theme='dark'] .settings-nav-item:hover {
+  background: #393a40;
+}
+
+html[data-theme='dark'] .settings-nav-item.active {
+  background: #303a5b;
+  color: #aebfff;
+}
+
+html[data-theme='dark'] .setting-group h4 {
+  color: #e7e9ee;
+}
+
+html[data-theme='dark'] .setting-row span {
+  color: #d3d7df;
+}
+
+html[data-theme='dark'] .setting-value {
+  color: #9298a5 !important;
+}
+
+html[data-theme='dark'] .setting-desc {
+  color: #aeb4c0;
+}
+
+html[data-theme='dark'] .theme-switch button {
+  background: #222326;
+  border-color: #46474d;
+  color: #aeb4c0;
+}
+
+html[data-theme='dark'] .theme-switch button.active {
+  background: #303a5b;
+  border-color: #698dff;
+  color: #aebfff;
+}
+
+html[data-theme='dark'] .theme-switch button:hover:not(.active) {
+  background: #393a40;
 }
 </style>
