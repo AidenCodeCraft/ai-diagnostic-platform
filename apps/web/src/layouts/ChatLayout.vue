@@ -1,11 +1,11 @@
 <template>
   <div class="chat-layout">
     <!-- 左侧边栏 -->
-    <ChatSidebar v-model:collapsed="sidebarCollapsed" :chats="filteredChats" :loading="sessionsLoading"
+    <ChatSidebar ref="sidebarRef" v-model:collapsed="sidebarCollapsed" :chats="filteredChats" :loading="sessionsLoading"
       :activeChatId="isChatRoute ? currentChatId : 0" :sendingIds="[...sendingChatIds]"
       :userName="userName" :userInitial="userInitial" :isAdmin="isAdmin" @toggleSearch="toggleSearch"
       @newChat="newChat" @navigate="navigateTo" @selectChat="selectChat" @chatMenu="openChatMenu"
-      @toggleUserMenu="showUserMenu = !showUserMenu" @searchChats="onSearchChats" />
+      @renameChat="onRenameChat" @toggleUserMenu="showUserMenu = !showUserMenu" @searchChats="onSearchChats" />
 
     <button v-if="sidebarCollapsed" class="float-open-btn" @click="sidebarCollapsed = false" title="展开侧栏">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -30,7 +30,7 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="12" y1="5" x2="12" y2="19" />
             <polyline points="19 12 12 19 5 12" />
-          </svg> 置顶
+          </svg> {{ chatMenuChat?.pinned ? '取消置顶' : '置顶' }}
         </button>
         <button @click="exportChat">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -270,6 +270,8 @@ const filteredChats = computed(() => {
   return recentChats.value.filter(c => (c.title || '').toLowerCase().includes(q))
 })
 const chatMenu = reactive({ visible: false, x: 0, y: 0, chatId: 0 })
+const sidebarRef = ref<InstanceType<typeof ChatSidebar>>()
+const chatMenuChat = computed(() => recentChats.value.find(c => c.id === chatMenu.chatId))
 
 const msgListRef = ref<InstanceType<typeof ChatMessageList>>()
 
@@ -354,7 +356,13 @@ async function loadSessions(): Promise<boolean> {
   sessionsLoading.value = true
   try {
     const { data } = await chatApi.listSessions()
-    recentChats.value = (data.items || []).map((s: any) => ({ id: s.id, title: s.title || '新对话', model: s.model, updatedAt: s.updated_at || s.created_at }))
+    recentChats.value = (data.items || []).map((s: any) => ({
+      id: s.id,
+      title: s.title || '新对话',
+      model: s.model,
+      pinned: !!s.is_pinned,
+      updatedAt: s.updated_at || s.created_at,
+    }))
     return true
   } catch {
     recentChats.value = []
@@ -365,13 +373,20 @@ async function loadSessions(): Promise<boolean> {
 }
 
 /** 会话有新消息后刷新更新时间并重排（最近对话：最新在前） */
+/** 置顶优先，其余按最近更新时间倒序 */
+function sortChats() {
+  recentChats.value = [...recentChats.value].sort((a, b) => {
+    const pinDiff = Number(!!b.pinned) - Number(!!a.pinned)
+    if (pinDiff) return pinDiff
+    return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+  })
+}
+
 function touchChat(chatId: number) {
   const chat = recentChats.value.find(c => c.id === chatId)
   if (!chat) return
   chat.updatedAt = new Date().toISOString()
-  recentChats.value = [...recentChats.value].sort(
-    (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime(),
-  )
+  sortChats()
 }
 
 async function newChat() {
@@ -502,26 +517,42 @@ function openChatMenu(e: MouseEvent, chat: ChatRecord) {
 
 function closeChatMenu() { chatMenu.visible = false }
 
-async function renameChat() {
-  const chat = recentChats.value.find(c => c.id === chatMenu.chatId)
-  if (!chat) return
-  try {
-    const { value } = await ElMessageBox.prompt('新标题', '重命名', { inputValue: chat.title })
-    if (value?.trim()) {
-      chat.title = value.trim()
-      await chatApi.updateSession(chat.id, value.trim())
-    }
-  } catch { /* cancelled */ }
+/** 重命名：不弹框，直接让侧栏对应条目进入内联编辑 */
+function renameChat() {
+  const id = chatMenu.chatId
   closeChatMenu()
+  sidebarRef.value?.startRename(id)
 }
 
-function pinChat() {
-  const idx = recentChats.value.findIndex(c => c.id === chatMenu.chatId)
-  if (idx > 0) {
-    const [item] = recentChats.value.splice(idx, 1)
-    recentChats.value.unshift(item)
+/** 侧栏内联重命名提交 */
+async function onRenameChat(id: number, title: string) {
+  const chat = recentChats.value.find(c => c.id === id)
+  const prevTitle = chat?.title
+  if (chat) chat.title = title
+  try {
+    await chatApi.updateSession(id, { title })
+  } catch (e: any) {
+    if (chat && prevTitle !== undefined) chat.title = prevTitle
+    ElMessage.error('重命名失败: ' + (e?.response?.data?.detail || e?.message))
   }
+}
+
+/** 置顶/取消置顶：置顶会话单独成组，取消后回到原日期分组 */
+async function pinChat() {
+  const chat = recentChats.value.find(c => c.id === chatMenu.chatId)
   closeChatMenu()
+  if (!chat) return
+  const next = !chat.pinned
+  chat.pinned = next
+  sortChats()
+  try {
+    await chatApi.updateSession(chat.id, { is_pinned: next })
+    ElMessage.success(next ? '已置顶' : '已取消置顶')
+  } catch (e: any) {
+    chat.pinned = !next
+    sortChats()
+    ElMessage.error('操作失败: ' + (e?.response?.data?.detail || e?.message))
+  }
 }
 
 async function exportChat() {
@@ -672,7 +703,7 @@ async function sendMessage() {
         ensureChatMessages(s.id)
         currentChatId.value = s.id
         setActiveChatId(s.id)
-        recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model || undefined, updatedAt: s.updated_at || s.created_at })
+        recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model || undefined, pinned: false, updatedAt: s.updated_at || s.created_at })
       } catch (e: any) {
         console.error('[sendMessage] create session failed:', e?.response?.data?.detail || e?.message || e)
         ElMessage.warning('创建会话失败，请重试')

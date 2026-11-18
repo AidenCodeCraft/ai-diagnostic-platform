@@ -52,6 +52,7 @@ def _apply_compat_migrations() -> None:
     # (表名, 列名, 列定义) —— 与 migrations/versions 的增量迁移保持同步
     patches = [
         ("chat_sessions", "project_id", "INTEGER REFERENCES projects(id)"),
+        ("chat_sessions", "is_pinned", "BOOLEAN DEFAULT FALSE NOT NULL"),
         ("chat_messages", "versions", "JSON"),
         ("chat_messages", "active_version", "INTEGER"),
         ("users", "theme", "VARCHAR(20)"),

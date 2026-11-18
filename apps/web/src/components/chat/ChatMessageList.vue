@@ -90,55 +90,45 @@
               :images="getImages(msg)"
             />
           </div>
-          <!-- 版本切换（编辑重发后保留历史提问/回答，‹ › 切换查看） -->
-          <div
-            v-if="msg.role === 'user' && editingId !== msg.id && !loading && msg.versions && msg.versions.length > 1"
-            class="msg-version-nav"
-          >
-            <button class="ver-btn" :disabled="(msg.activeVersion ?? 0) <= 0" title="上一版本"
-              @click="switchVersion(msg, -1)">‹</button>
-            <span class="ver-count">{{ (msg.activeVersion ?? 0) + 1 }} / {{ msg.versions.length }}</span>
-            <button class="ver-btn" :disabled="(msg.activeVersion ?? 0) >= msg.versions.length - 1" title="下一版本"
-              @click="switchVersion(msg, 1)">›</button>
-          </div>
           <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active && !loading" class="message-actions">
-            <el-tooltip :content="copiedId === msg.id ? '已复制' : '复制'" placement="top" :show-after="0">
+            <el-tooltip :content="copiedId === msg.id ? '已复制' : '复制'" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" :class="{ active: copiedId === msg.id }" @click="copyMessage(msg)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
               </button>
             </el-tooltip>
-            <el-tooltip content="重新生成" placement="top" :show-after="0">
+            <el-tooltip content="重新生成" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" @click="regenerateMessage(msg)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
               </button>
             </el-tooltip>
-            <el-tooltip v-if="msg._persisted" :content="msg._resolved ? '已标记解决' : '标记已解决并沉淀知识'" placement="top" :show-after="0">
-              <button class="action-btn" :class="{ active: msg._resolved }" @click="resolveMessage(msg)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-              </button>
-            </el-tooltip>
-            <el-tooltip content="有帮助" placement="top" :show-after="0">
+            <el-tooltip content="有帮助" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" :class="{ active: msg._liked }" @click="likeMessage(msg)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
               </button>
             </el-tooltip>
-            <el-tooltip content="无帮助" placement="top" :show-after="0">
+            <el-tooltip content="无帮助" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" :class="{ active: msg._disliked }" @click="dislikeMessage(msg)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
               </button>
             </el-tooltip>
           </div>
           <div v-else-if="msg.role === 'user' && msg.content && editingId !== msg.id" class="message-actions">
-            <el-tooltip content="编辑" placement="top" :show-after="0">
+            <el-tooltip content="编辑" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" @click="startEdit(msg)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
               </button>
             </el-tooltip>
-            <el-tooltip content="复制" placement="top" :show-after="0">
+            <el-tooltip content="复制" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" @click="copyMessage(msg)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
               </button>
             </el-tooltip>
+            <!-- 编辑重发后的版本切换（位于复制按钮之后） -->
+            <div v-if="!loading && msg.versions && msg.versions.length > 1" class="msg-version-nav">
+              <button class="ver-btn" :disabled="(msg.activeVersion ?? 0) <= 0" @click="switchVersion(msg, -1)">‹</button>
+              <span class="ver-count">{{ (msg.activeVersion ?? 0) + 1 }} / {{ msg.versions.length }}</span>
+              <button class="ver-btn" :disabled="(msg.activeVersion ?? 0) >= msg.versions.length - 1" @click="switchVersion(msg, 1)">›</button>
+            </div>
           </div>
         </div>
       </div>
@@ -707,7 +697,15 @@ function switchVersion(msg: any, delta: number) {
 function likeMessage(msg: any) {
   const newLiked = !msg._liked
   msg._liked = newLiked
-  if (newLiked) msg._disliked = false
+  if (newLiked) {
+    msg._disliked = false
+    // 「有帮助」即认可答案：同时标记已解决并沉淀到知识库候选（合并原独立功能）
+    if (props.chatId && msg._persisted) {
+      chatApi.resolveMessage(props.chatId, msg.id, true)
+        .then(() => { msg._resolved = true })
+        .catch(e => console.warn('[likeMessage] resolve failed:', e))
+    }
+  }
   if (props.chatId) {
     chatApi.updateFeedback(props.chatId, msg.id, newLiked ? 'like' : null)
       .catch(e => console.warn('[likeMessage] persist failed:', e))
@@ -727,17 +725,6 @@ function dislikeMessage(msg: any) {
 /** 澄清选项芯片：把选项内容回填给父组件（填入输入框） */
 function pickClarification(value: string) {
   emit('selectClarification', value)
-}
-
-/** 标记「已解决」并触发自进化蒸馏（仅对已持久化的消息可用） */
-async function resolveMessage(msg: any) {
-  if (!props.chatId || !msg._persisted) return
-  try {
-    await chatApi.resolveMessage(props.chatId, msg.id, true)
-    msg._resolved = true
-  } catch (e) {
-    console.warn('[resolveMessage] failed:', e)
-  }
 }
 
 defineExpose({ scrollToBottom })
@@ -831,14 +818,14 @@ function scrollToBottom() {
 .message-bubble {
   padding: 0;
   border-radius: 14px;
-  line-height: 1.8;
+  line-height: 1.7;
   font-size: 15px;
   color: var(--chat-msg-text);
 }
 
 .message-row.user .message-bubble {
   max-width: 72%;
-  padding: 10px 16px;
+  padding: 8px 14px;
   background: var(--chat-msg-user-bg);
   border: 1px solid transparent;
   border-radius: 18px;
@@ -1617,11 +1604,10 @@ function scrollToBottom() {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-top: 6px;
-  padding: 2px 6px;
-  border: 1px solid var(--chat-input-action-border);
-  border-radius: 10px;
-  background: var(--chat-input-action-bg);
+  margin-left: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 .ver-btn {
   width: 22px;

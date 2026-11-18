@@ -58,13 +58,17 @@ class ChatService:
         if user_id:
             query = query.filter(ChatSession.user_id == user_id)
         total = query.count()
-        items = query.order_by(ChatSession.updated_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        items = query.order_by(
+            ChatSession.is_pinned.desc(), ChatSession.updated_at.desc(),
+        ).offset((page - 1) * page_size).limit(page_size).all()
         return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-    def update_session(self, session_id: int, title: Optional[str] = None, context: Optional[Dict[str, Any]] = None, user_id: Optional[int] = None) -> ChatSession:
+    def update_session(self, session_id: int, title: Optional[str] = None, context: Optional[Dict[str, Any]] = None, is_pinned: Optional[bool] = None, user_id: Optional[int] = None) -> ChatSession:
         s = self.get_session(session_id, user_id)
         if title is not None:
             setattr(s, 'title', title)
+        if is_pinned is not None:
+            setattr(s, 'is_pinned', bool(is_pinned))
         if context is not None:
             existing = s.context or {}
             existing.update(context)

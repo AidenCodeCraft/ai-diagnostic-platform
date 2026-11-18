@@ -52,8 +52,8 @@ export const chatApi = {
   getSession(id: number) {
     return client.get<ChatSession>(`/chat-sessions/${id}`)
   },
-  updateSession(id: number, title: string) {
-    return client.put<ChatSession>(`/chat-sessions/${id}`, { title })
+  updateSession(id: number, data: { title?: string; is_pinned?: boolean }) {
+    return client.put<ChatSession>(`/chat-sessions/${id}`, data)
   },
   deleteSession(id: number) {
     return client.delete(`/chat-sessions/${id}`)
