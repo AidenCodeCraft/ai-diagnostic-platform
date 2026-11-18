@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Respon
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.api.deps import require_auth
 from app.core.config import settings
 from app.database import session as session_module
 from app.schemas import (
@@ -109,7 +110,7 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 # ------------------------------------------------------------------
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[Depends(require_auth)])
 def create_document(
     body: KnowledgeCreate,
     db: Session = Depends(get_db_session),
@@ -126,7 +127,7 @@ def create_document(
     return _doc_payload(db, doc.id)
 
 
-@router.post("/upload", response_model=KnowledgeResponse, status_code=201)
+@router.post("/upload", response_model=KnowledgeResponse, status_code=201, dependencies=[Depends(require_auth)])
 def upload_document(
     file: UploadFile = File(...),
     category: Optional[str] = Form(default=None),
@@ -195,7 +196,7 @@ def list_documents(
     )
 
 
-@router.post("/polish")
+@router.post("/polish", dependencies=[Depends(require_auth)])
 def polish_document(
     body: PolishRequest,
     db: Session = Depends(get_db_session),
@@ -255,7 +256,7 @@ def get_tree(
 # ------------------------------------------------------------------
 
 
-@router.post("/images", response_model=KnowledgeImageResponse, status_code=201)
+@router.post("/images", response_model=KnowledgeImageResponse, status_code=201, dependencies=[Depends(require_auth)])
 def upload_image(
     file: UploadFile = File(...),
     db: Session = Depends(get_db_session),
@@ -293,7 +294,7 @@ def get_image(
     )
 
 
-@router.post("/images/{image_id}/feedback", status_code=200)
+@router.post("/images/{image_id}/feedback", status_code=200, dependencies=[Depends(require_auth)])
 def feedback_image(
     image_id: int,
     body: Dict[str, Any],
@@ -316,7 +317,7 @@ def get_templates() -> Dict[str, Any]:
     return {"templates": list_templates()}
 
 
-@router.put("/templates/{doc_type}")
+@router.put("/templates/{doc_type}", dependencies=[Depends(require_auth)])
 def update_template(doc_type: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """编辑某文档类型的格式说明（说明/结构项/骨架/示例均可自定义）。"""
     from app.services.knowledge.template_store import upsert_override
@@ -332,7 +333,7 @@ def update_template(doc_type: str, body: Dict[str, Any]) -> Dict[str, Any]:
     return template_to_dict(template, customized=True)
 
 
-@router.delete("/templates/{doc_type}")
+@router.delete("/templates/{doc_type}", dependencies=[Depends(require_auth)])
 def reset_template(doc_type: str) -> Dict[str, Any]:
     """删除自定义覆盖，恢复内置格式说明。"""
     from app.services.knowledge.template_store import reset_override
@@ -359,7 +360,7 @@ def get_sections(
     return {"sections": [KnowledgeSectionService.to_dict(r) for r in rows]}
 
 
-@router.post("/format/preview")
+@router.post("/format/preview", dependencies=[Depends(require_auth)])
 def format_preview(body: Dict[str, Any]) -> Dict[str, Any]:
     """不落库：规范化 + 校验，返回「提交后格式」预览。"""
     return KnowledgeFormatService().preview(
@@ -386,7 +387,7 @@ def get_document(
 # ------------------------------------------------------------------
 
 
-@router.put("/{doc_id}")
+@router.put("/{doc_id}", dependencies=[Depends(require_auth)])
 def update_document(
     doc_id: int,
     body: KnowledgeUpdate,
@@ -413,7 +414,7 @@ def update_document(
 # ------------------------------------------------------------------
 
 
-@router.delete("/{doc_id}", status_code=204)
+@router.delete("/{doc_id}", status_code=204, dependencies=[Depends(require_auth)])
 def delete_document(
     doc_id: int,
     db: Session = Depends(get_db_session),

@@ -7,7 +7,9 @@ from app.models.knowledge import (
     KnowledgeDocument, KnowledgeImage, KnowledgeImageFeedback, KnowledgeDiagnosisProfile,
     KnowledgeSection, KnowledgeDocumentMeta,
 )
-from app.models.system import Organization, OrganizationMember, Project, BugCase, ClientLogEntry
+from app.models.system import (
+    Organization, OrganizationMember, Project, BugCase, ClientLogEntry, AdminAuditLog,
+)
 
 __all__ = [
     "User", "LoginAttempt", "ApiKey",
@@ -17,4 +19,5 @@ __all__ = [
     "KnowledgeDocument", "KnowledgeImage", "KnowledgeImageFeedback", "KnowledgeDiagnosisProfile",
     "KnowledgeSection", "KnowledgeDocumentMeta",
     "Organization", "OrganizationMember", "Project", "BugCase", "ClientLogEntry",
+    "AdminAuditLog",
 ]

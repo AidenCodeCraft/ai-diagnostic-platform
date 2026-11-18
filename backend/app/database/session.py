@@ -11,7 +11,9 @@ from app.models import (  # noqa: F401
     KnowledgeDocument, KnowledgeImage, KnowledgeImageFeedback, KnowledgeDiagnosisProfile,
     KnowledgeSection, KnowledgeDocumentMeta,
 )
-from app.models import Organization, OrganizationMember, Project, BugCase, ClientLogEntry  # noqa: F401
+from app.models import (  # noqa: F401
+    Organization, OrganizationMember, Project, BugCase, ClientLogEntry, AdminAuditLog,
+)
 
 logger = get_logger(__name__)
 

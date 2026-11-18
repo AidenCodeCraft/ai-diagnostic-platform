@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin, require_developer
+from app.api.deps import (
+    require_admin, require_admin_user, require_developer, require_developer_user,
+)
 from app.database import session as session_module
 from app.models import User
 from app.schemas import UserCreate, UserResponse, UserListResponse
 from app.services import AuthService
+from app.services.system.audit_log import record_operation
 
 
 def get_db_session():
@@ -36,7 +39,9 @@ WEAK_PASSWORDS = {
 @router.post("", response_model=UserResponse, status_code=201)
 def create_user(
     body: UserCreate,
+    request: Request,
     db: Session = Depends(get_db_session),
+    operator: User = Depends(require_admin_user),
 ) -> Any:
     """Create a new user (admin only)."""
     # Check weak password
@@ -61,6 +66,10 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    record_operation(
+        db, operator, "user.create", target_type="user", target_id=user.id,
+        detail={"username": user.username, "role": user.role}, request=request,
+    )
     return user
 
 
@@ -99,7 +108,9 @@ def list_users(
 def update_user(
     user_id: int,
     body: Dict[str, Any],
+    request: Request,
     db: Session = Depends(get_db_session),
+    operator: User = Depends(require_admin_user),
 ) -> Any:
     """Update user fields."""
     user = db.query(User).filter(User.id == user_id).first()
@@ -125,19 +136,37 @@ def update_user(
 
     db.commit()
     db.refresh(user)
+    record_operation(
+        db, operator, "user.update", target_type="user", target_id=user.id,
+        detail={
+            "username": user.username,
+            "fields": sorted(body.keys()),
+            "role": user.role,
+            "is_active": user.is_active,
+            "password_changed": bool(body.get("password")),
+        },
+        request=request,
+    )
     return user
 
 
 @router.delete("/{user_id}", status_code=204, dependencies=[Depends(require_developer)])
 def delete_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db_session),
+    operator: User = Depends(require_developer_user),
 ):
     """Delete a user. Only developer role can perform this action."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    username = user.username
     db.delete(user)
     db.commit()
+    record_operation(
+        db, operator, "user.delete", target_type="user", target_id=user_id,
+        detail={"username": username}, request=request,
+    )
     return None

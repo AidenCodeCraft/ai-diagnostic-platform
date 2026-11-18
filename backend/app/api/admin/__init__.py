@@ -5,15 +5,16 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin, require_auth
+from app.api.deps import require_admin, require_admin_user, require_auth
 from app.database import session as session_module
 from app.models import User, Project, Log, Analysis, KnowledgeDocument
+from app.services.system.audit_log import record_operation
 
 
 def get_db_session():
@@ -116,6 +117,24 @@ def get_stats(
     }
 
 
+@router.get("/audit-logs", dependencies=[Depends(require_admin)])
+def list_audit_logs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    action: Optional[str] = Query(default=None),
+    operator: Optional[str] = Query(default=None),
+    result: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """管理后台操作审计记录（按时间倒序）。"""
+    from app.services.system.audit_log import list_operations
+
+    return list_operations(
+        db, page=page, page_size=page_size,
+        action=action, operator=operator, result=result,
+    )
+
+
 @router.get("/config/llm", dependencies=[Depends(require_admin)])
 def get_llm_config():
     """Get saved LLM configuration (supports multiple models).
@@ -154,7 +173,12 @@ def get_llm_config():
 
 
 @router.put("/config/llm", dependencies=[Depends(require_admin)])
-def save_llm_config(body: Dict[str, Any]):
+def save_llm_config(
+    body: Dict[str, Any],
+    request: Request,
+    db: Session = Depends(get_db_session),
+    operator: User = Depends(require_admin_user),
+):
     """Save LLM configuration (supports multiple models).
 
     收到空值或脱敏占位（含 ****）时沿用已保存的 key，避免把掩码写回配置。
@@ -185,6 +209,12 @@ def save_llm_config(body: Dict[str, Any]):
         }
     
     _save_config(config)
+    record_operation(
+        db, operator, "config.llm.save",
+        target_type="llm_config",
+        detail={"models": [str(m.get("model") or "") for m in (config["llm"].get("models") or [])]},
+        request=request,
+    )
     return {"ok": True, "message": "LLM 配置已保存"}
 
 
@@ -223,7 +253,12 @@ def get_system_config():
 
 
 @router.put("/config/system", dependencies=[Depends(require_admin)])
-def save_system_config(body: Dict[str, Any]):
+def save_system_config(
+    body: Dict[str, Any],
+    request: Request,
+    db: Session = Depends(get_db_session),
+    operator: User = Depends(require_admin_user),
+):
     """Save system parameters. Accepts snake_case keys (camelCase tolerated)."""
     from app.services.system.system_config import KEY_ALIASES, normalize
 
@@ -233,15 +268,30 @@ def save_system_config(body: Dict[str, Any]):
         raw[KEY_ALIASES.get(key, key)] = value
     config["system"] = normalize(raw)
     _save_config(config)
+    record_operation(
+        db, operator, "config.system.save",
+        target_type="system_config",
+        detail={"keys": sorted(body.keys())},
+        request=request,
+    )
     return {"ok": True, "message": "系统参数已保存", "config": config["system"]}
 
 
 @router.post("/knowledge/seed", dependencies=[Depends(require_admin)])
 def seed_knowledge(
+    request: Request,
     reset: bool = Query(default=False),
     db: Session = Depends(get_db_session),
+    operator: User = Depends(require_admin_user),
 ) -> Dict[str, Any]:
     """导入知识库示例数据（四类模板）；reset=true 时先删除同名示例再重建。"""
     from app.services.knowledge.seed_service import seed
 
-    return seed(db, reset=reset)
+    result = seed(db, reset=reset)
+    record_operation(
+        db, operator, "knowledge.seed",
+        target_type="knowledge",
+        detail={"reset": reset},
+        request=request,
+    )
+    return result

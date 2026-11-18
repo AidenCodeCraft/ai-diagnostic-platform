@@ -74,3 +74,27 @@ def require_role(*roles: str):
 require_admin = require_role("admin", "developer")
 # 高危操作：仅 developer（如删除用户）
 require_developer = require_role("developer")
+
+
+def get_current_user(
+    user_id: int = Depends(require_auth),
+    db: Session = Depends(get_db_session),
+) -> User:
+    """FastAPI dependency — 返回当前登录用户对象（用于审计记录操作人）。"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+def _require_role_user(*roles: str):
+    def dependency(user: User = Depends(get_current_user)) -> User:
+        if user.role not in roles:
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+        return user
+
+    return dependency
+
+
+require_admin_user = _require_role_user("admin", "developer")
+require_developer_user = _require_role_user("developer")

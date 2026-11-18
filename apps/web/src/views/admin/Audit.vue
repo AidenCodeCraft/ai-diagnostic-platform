@@ -108,7 +108,7 @@
     </el-tabs>
 
     <!-- 候选详情 -->
-    <el-dialog v-model="viewDraftVisible" title="候选详情" width="760px" top="6vh">
+    <el-dialog v-model="viewDraftVisible" class="admin-dialog" title="候选详情" width="760px" top="6vh">
       <div v-if="viewDraftLoading" class="empty-hint">加载中…</div>
       <template v-else>
         <div class="draft-meta">
@@ -306,10 +306,5 @@ onMounted(() => {
   --adm-draft-warn: #fbbf24;
 }
 
-/* 深色主题：弹窗内节点兜底覆盖（teleported 节点不保证命中 scoped 规则） */
-[data-theme='dark'] .draft-meta { color: var(--chat-popup-text); }
-[data-theme='dark'] .draft-issue.error { color: var(--adm-draft-danger); }
-[data-theme='dark'] .draft-issue.warn { color: var(--adm-draft-warn); }
-[data-theme='dark'] .draft-content { background: var(--chat-source-bg); border-color: var(--chat-source-border); }
-[data-theme='dark'] .empty-hint { color: var(--chat-copy-text); }
+/* 弹窗内样式已全部使用会随主题翻转的令牌，无需重复覆盖 */
 </style>

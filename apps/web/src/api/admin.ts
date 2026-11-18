@@ -69,6 +69,20 @@ export interface AdminStats {
 /** 管理员统计信息（从后端 /admin/stats 返回） */
 export interface AdminStatsResponse extends AdminStats {}
 
+/** 管理后台操作审计记录 */
+export interface AdminAuditLog {
+  id: number
+  operator_id?: number | null
+  operator_name?: string | null
+  action: string
+  target_type?: string | null
+  target_id?: string | null
+  detail?: string | null
+  result: string
+  ip?: string | null
+  created_at?: string | null
+}
+
 export const adminApi = {
   // ── 模型配置 ──────────────────────────────────────────────
   /** 获取可用模型列表（用于对话界面选择器） */
@@ -90,6 +104,23 @@ export const adminApi = {
   /** 获取系统统计信息 */
   getStats() {
     return client.get<AdminStatsResponse>('/admin/stats')
+  },
+
+  // ── 操作审计 ──────────────────────────────────────────────
+  /** 查询管理后台操作记录 */
+  listAuditLogs(params?: {
+    page?: number
+    page_size?: number
+    action?: string
+    operator?: string
+    result?: string
+  }) {
+    return client.get<{
+      items: AdminAuditLog[]
+      total: number
+      page: number
+      page_size: number
+    }>('/admin/audit-logs', { params })
   },
 
   // ── 系统参数 ──────────────────────────────────────────────

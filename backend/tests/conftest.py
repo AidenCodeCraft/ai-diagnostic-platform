@@ -50,6 +50,33 @@ def _setup_in_memory_db(tmp_path):
     return sm.SessionLocal
 
 
+@pytest.fixture(autouse=True)
+def _auto_auth_testclient(monkeypatch):
+    """为所有 TestClient 自动注入默认 admin 登录态。
+
+    大量既有集成测试在本地定义了自己的 client fixture 且未携带 token；
+    统一在 TestClient.__enter__ 时登录 admin 并写入 Authorization。
+    需要验证未登录行为的用例请使用 anon_client（会移除该请求头）。
+    """
+    original_enter = TestClient.__enter__
+
+    def enter(self):
+        result = original_enter(self)
+        try:
+            login = self.post(
+                "/api/v1/auth/login",
+                json={"username": "admin", "password": "admin123"},
+            )
+            if login.status_code == 200:
+                self.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
+        except Exception:  # noqa: BLE001 - 无 auth 路由的测试忽略
+            pass
+        return result
+
+    monkeypatch.setattr(TestClient, "__enter__", enter)
+    yield
+
+
 @pytest.fixture(scope="function")
 def client(tmp_path):
     """Create an isolated test client with in-memory SQLite database."""
@@ -60,6 +87,20 @@ def client(tmp_path):
     importlib.reload(app.main)
 
     with TestClient(app.main.app) as test_client:
+        yield test_client
+
+
+@pytest.fixture(scope="function")
+def anon_client(tmp_path):
+    """未登录的测试客户端（用于 401 边界用例）。"""
+    _ = _setup_in_memory_db(tmp_path)
+
+    import app.main
+    importlib.reload(app.main)
+
+    with TestClient(app.main.app) as test_client:
+        if "Authorization" in test_client.headers:
+            del test_client.headers["Authorization"]
         yield test_client
 
 

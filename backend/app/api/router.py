@@ -1,6 +1,8 @@
 """Aggregate all API routers by functional domain."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.api.deps import require_auth
 
 # ── Auth ─────────────────────────────────────────────────────
 from app.api.auth import router as auth_router
@@ -57,22 +59,22 @@ api_router.include_router(agent_tasks_router)
 api_router.include_router(function_calling_router)
 api_router.include_router(supervisor_router)
 
-# Diagnostics
-api_router.include_router(logs_router)
-api_router.include_router(parser_router)
-api_router.include_router(parsing_router)
-api_router.include_router(analyses_router)
-api_router.include_router(reports_router)
+# Diagnostics（日志/解析/分析/报告均需登录）
+api_router.include_router(logs_router, dependencies=[Depends(require_auth)])
+api_router.include_router(parser_router, dependencies=[Depends(require_auth)])
+api_router.include_router(parsing_router, dependencies=[Depends(require_auth)])
+api_router.include_router(analyses_router, dependencies=[Depends(require_auth)])
+api_router.include_router(reports_router, dependencies=[Depends(require_auth)])
 
 # Knowledge
 api_router.include_router(knowledge_router)
 api_router.include_router(vector_router)
 
-# System
-api_router.include_router(organizations_router)
-api_router.include_router(projects_router)
-api_router.include_router(rules_router)
-api_router.include_router(bug_cases_router)
+# System（client_logs 供前端错误上报，登录前后都可能调用，保持开放）
+api_router.include_router(organizations_router, dependencies=[Depends(require_auth)])
+api_router.include_router(projects_router, dependencies=[Depends(require_auth)])
+api_router.include_router(rules_router, dependencies=[Depends(require_auth)])
+api_router.include_router(bug_cases_router, dependencies=[Depends(require_auth)])
 api_router.include_router(client_logs_router)
-api_router.include_router(dashboard_router)
-api_router.include_router(search_router)
+api_router.include_router(dashboard_router, dependencies=[Depends(require_auth)])
+api_router.include_router(search_router, dependencies=[Depends(require_auth)])

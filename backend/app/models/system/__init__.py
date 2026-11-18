@@ -2,5 +2,9 @@ from app.models.system.organization import Organization, OrganizationMember
 from app.models.system.project import Project
 from app.models.system.bug_case import BugCase
 from app.models.system.client_log import ClientLogEntry
+from app.models.system.admin_audit import AdminAuditLog
 
-__all__ = ["Organization", "OrganizationMember", "Project", "BugCase", "ClientLogEntry"]
+__all__ = [
+    "Organization", "OrganizationMember", "Project", "BugCase", "ClientLogEntry",
+    "AdminAuditLog",
+]

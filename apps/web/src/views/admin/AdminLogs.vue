@@ -54,7 +54,7 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="showEvents" title="日志解析事件" width="900px">
+    <el-dialog v-model="showEvents" class="admin-dialog" title="日志解析事件" width="900px">
       <div class="event-filter">
         <el-input v-model="eventKeyword" placeholder="关键字过滤" size="small" style="width:220px" clearable />
         <el-checkbox v-model="eventOnlyError">仅错误</el-checkbox>
@@ -78,7 +78,7 @@
       />
     </el-dialog>
 
-    <el-dialog v-model="showResult" title="诊断结果" width="760px">
+    <el-dialog v-model="showResult" class="admin-dialog" title="诊断结果" width="760px">
       <pre class="result-pre">{{ resultText }}</pre>
     </el-dialog>
   </div>
@@ -263,6 +263,10 @@ onUnmounted(stopPolling)
 
 <style>
 /* 深色主题：事件/结果弹窗 teleport 到 body，scoped 规则不保证命中，此处兜底覆盖 */
-[data-theme='dark'] .event-total { color: var(--chat-source-muted); }
-[data-theme='dark'] .empty-hint { color: var(--chat-copy-text); }
+[data-theme='dark'] .result-pre {
+  color: var(--chat-msg-text);
+  background: var(--chat-msg-pre-bg);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
 </style>

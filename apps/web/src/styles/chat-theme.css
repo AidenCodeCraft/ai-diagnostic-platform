@@ -191,7 +191,7 @@
   --chat-popup-text: #e7e9ee;
   --chat-popup-hover: #393a40;
   --chat-popup-danger-hover-bg: #3f2525;
-  --chat-popup-danger-hover-text: #ef4444;
+  --chat-popup-danger-hover-text: #f87171;
 
   --chat-float-btn-bg: #26272a;
   --chat-float-btn-border: #3b3c41;
@@ -354,4 +354,34 @@ html[data-theme='dark'] {
 [data-theme='dark'] .el-message-box,
 [data-theme='dark'] .el-popper {
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+/* ============================================================
+   管理后台主题令牌与深色适配
+   ============================================================ */
+:root {
+  --adm-page-bg: #f3f4f6;
+}
+
+[data-theme='dark'] {
+  --adm-page-bg: #171719;
+}
+
+/* 后台弹窗：显式 class，避免依赖 Element Plus 变量被其他页面覆盖 */
+[data-theme='dark'] .el-dialog.admin-dialog {
+  background: var(--chat-popup-bg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme='dark'] .el-dialog.admin-dialog .el-dialog__title {
+  color: var(--chat-layout-text);
+}
+
+[data-theme='dark'] .el-dialog.admin-dialog .el-dialog__body {
+  color: var(--chat-msg-text);
+}
+
+/* 深色表格斑马纹：默认 --el-fill-color-lighter 与行底色过于接近 */
+html[data-theme='dark'] .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background-color: #2c2d31;
 }

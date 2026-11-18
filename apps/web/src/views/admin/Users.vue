@@ -60,6 +60,7 @@
     <!-- 新增 / 编辑 弹窗（共用） -->
     <el-dialog
       v-model="dialogVisible"
+      class="admin-dialog"
       :title="dialogMode === 'create' ? '新增用户' : '编辑用户'"
       width="480px"
       :key="dialogMode + '-' + (editingUserId ?? 'new')"

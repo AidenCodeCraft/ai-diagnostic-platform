@@ -2,11 +2,11 @@
 
 
 class TestAdminAuth:
-    def test_admin_endpoints_require_auth(self, client):
-        assert client.get("/api/v1/admin/stats").status_code == 401
-        assert client.get("/api/v1/users").status_code == 401
-        assert client.get("/api/v1/admin/config/llm").status_code == 401
-        assert client.put("/api/v1/admin/config/llm", json={"models": []}).status_code == 401
+    def test_admin_endpoints_require_auth(self, anon_client):
+        assert anon_client.get("/api/v1/admin/stats").status_code == 401
+        assert anon_client.get("/api/v1/users").status_code == 401
+        assert anon_client.get("/api/v1/admin/config/llm").status_code == 401
+        assert anon_client.put("/api/v1/admin/config/llm", json={"models": []}).status_code == 401
 
     def test_non_admin_forbidden(self, client, engineer_headers):
         assert client.get("/api/v1/admin/stats", headers=engineer_headers).status_code == 403

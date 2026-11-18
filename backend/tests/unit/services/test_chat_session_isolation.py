@@ -91,14 +91,13 @@ class TestChatSessionIsolation:
         assert resp.status_code == 201, resp.text
         assert resp.json()["user_id"] == dev_id
 
-    def test_missing_or_invalid_token_rejected(self, client):
-        _register(client, "developer")
-        assert client.get("/api/v1/chat-sessions").status_code == 401
-        assert client.get(
+    def test_missing_or_invalid_token_rejected(self, anon_client):
+        assert anon_client.get("/api/v1/chat-sessions").status_code == 401
+        assert anon_client.get(
             "/api/v1/chat-sessions",
             headers={"Authorization": "Bearer not-a-jwt"},
         ).status_code == 401
-        assert client.post(
+        assert anon_client.post(
             "/api/v1/chat-sessions", json={"title": "x"},
         ).status_code == 401
 

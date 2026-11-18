@@ -35,6 +35,7 @@ const router = createRouter({
         { path: 'users', name: 'AdminUsers', component: () => import('@/views/admin/Users.vue'), meta: { title: '用户管理' } },
         { path: 'logs', name: 'AdminLogs', component: () => import('@/views/admin/AdminLogs.vue'), meta: { title: '日志分析' } },
         { path: 'audit', name: 'AdminAudit', component: () => import('@/views/admin/Audit.vue'), meta: { title: '审核监控' } },
+        { path: 'audit-logs', name: 'AdminOperationLogs', component: () => import('@/views/admin/OperationLogs.vue'), meta: { title: '操作审计' } },
         { path: 'settings', name: 'AdminSettings', component: () => import('@/views/admin/Settings.vue'), meta: { title: '系统配置' } },
       ],
     },

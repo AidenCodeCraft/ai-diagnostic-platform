@@ -197,10 +197,10 @@ class TestUserThemePreferences:
             == "light"
         )
 
-    def test_requires_token(self, client):
-        assert client.get("/api/v1/auth/preferences").status_code == 401
+    def test_requires_token(self, anon_client):
+        assert anon_client.get("/api/v1/auth/preferences").status_code == 401
         assert (
-            client.put(
+            anon_client.put(
                 "/api/v1/auth/preferences", json={"theme": "dark"}
             ).status_code
             == 401
