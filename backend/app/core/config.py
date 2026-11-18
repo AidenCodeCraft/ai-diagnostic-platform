@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     EMBEDDING_HASH_FALLBACK: bool = True  # 无 BGE/API 时使用确定性哈希嵌入兜底
     EMBEDDING_LOAD_TIMEOUT: float = 30.0  # BGE 模型加载超时（秒），超时回退
 
+    # ── Reranker（Cross-Encoder 精排）──────────────────────────
+    RERANKER_ENABLED: bool = True                     # 无 sentence-transformers 时自动跳过
+    RERANKER_MODEL: str = "BAAI/bge-reranker-base"    # 278M，CPU 单批 30 条约 300~500ms
+    RERANKER_TOP_N: int = 30                          # 参与精排的候选数
+    RERANKER_SCORE_THRESHOLD: float = 0.0             # 归一化后低于该分的候选不展示
+
     # ── MinIO (Object Storage) ──────────────────────────────
     MINIO_ENABLED: bool = False
     MINIO_ENDPOINT: str = "localhost:9000"

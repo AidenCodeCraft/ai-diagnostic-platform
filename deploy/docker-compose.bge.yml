@@ -95,6 +95,9 @@ services:
       MILVUS_DIM: "1024"
       # 生产必须硬失败：不允许静默回退到哈希假向量
       EMBEDDING_HASH_FALLBACK: "false"
+      # ML 镜像内含 sentence-transformers：开启 Cross-Encoder 精排
+      RERANKER_ENABLED: "true"
+      RERANKER_MODEL: "${RERANKER_MODEL:-BAAI/bge-reranker-base}"
       # CPU 冷加载实测 15s+（容器冷启动更慢），bge-large 更慢，给足时间
       EMBEDDING_LOAD_TIMEOUT: "${EMBEDDING_LOAD_TIMEOUT:-180}"
       # 只读本地缓存，完全离线（避免 huggingface.co 被墙时 adapter 探测挂起）
@@ -128,6 +131,9 @@ services:
       EMBEDDING_DIM: "1024"
       MILVUS_DIM: "1024"
       EMBEDDING_HASH_FALLBACK: "false"
+      # ML 镜像内含 sentence-transformers：开启 Cross-Encoder 精排
+      RERANKER_ENABLED: "true"
+      RERANKER_MODEL: "${RERANKER_MODEL:-BAAI/bge-reranker-base}"
       EMBEDDING_LOAD_TIMEOUT: "${EMBEDDING_LOAD_TIMEOUT:-180}"
       HF_HOME: /root/.cache/huggingface
       HF_HUB_OFFLINE: "1"

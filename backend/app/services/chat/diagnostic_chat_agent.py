@@ -471,6 +471,15 @@ class DiagnosticChatAgent:
                 except Exception:
                     pass
 
+        # 精排：向量+BM25 的融合分只反映「接近」，不判断「是否真的回答了问题」；
+        # Cross-Encoder 在这里把 (问题, 章节) 成对打分。缺依赖/推理失败一律跳过。
+        try:
+            from app.services.knowledge.rerank_service import rerank_items
+
+            items = rerank_items(text, items, keep=max_items)
+        except Exception:  # noqa: BLE001 - 精排异常绝不影响回答
+            logger.debug("[知识检索] 精排失败，保留召回顺序", exc_info=True)
+
         self.references = []
         lines = []
         for i, item in enumerate(items):
