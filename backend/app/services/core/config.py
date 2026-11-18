@@ -16,10 +16,11 @@ class ChunkingConfig:
 @dataclass
 class EmbeddingConfig:
     provider: str = "local"
-    model_name: str = "BAAI/bge-small-zh-v1.5"
+    # bge-large-zh-v1.5：1024 维，CPU 单条 80~150ms；无 GPU 部署的默认选择
+    model_name: str = "BAAI/bge-large-zh-v1.5"
     device: str = "cpu"
     batch_size: int = 32
-    dimension: int = 512
+    dimension: int = 1024
     normalize: bool = True
     api_url: str = ""
     api_key: str = ""

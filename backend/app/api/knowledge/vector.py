@@ -270,11 +270,16 @@ def vector_health():
 
         # 返回真实激活的嵌入 provider（HashingEmbedder / BGEEmbedder / APIEmbedder），
         # 而不是 EmbeddingService 包装类名（旧实现取 __class__.__name__ 会误导排障）。
+        embedder = get_embedder()
         return {
             "milvus_available": vector_svc.available,
             "milvus_enabled": vector_svc._connected,
             "collection": collection_info,
-            "embedding_provider": get_embedder().provider_name,
+            "embedding_provider": embedder.provider_name,
+            "embedding_dimension": embedder.dimension,
+            # 集合与配置不兼容时（维度/度量/字段）这里给出可执行的原因，而不是静默降级
+            "schema_error": getattr(vector_svc, "schema_error", None),
+            "is_semantic": not embedder.provider_name.startswith("Hashing"),
         }
     except Exception as exc:
         return {
