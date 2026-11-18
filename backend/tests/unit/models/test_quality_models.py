@@ -7,7 +7,7 @@ import pytest
 from app.database.base import Base
 from app.models import (
     EXPECTED_CONCLUSIONS,
-    GOLDEN_SAMPLE_STATUSES,
+    SAMPLE_STATUSES,
     STATUS_TRANSITIONS,
     GoldenSample,
     RegressionRun,
@@ -24,19 +24,17 @@ def test_tables_registered_in_metadata():
 
 def test_status_transitions_are_consistent():
     """状态机必须覆盖所有状态，且目标状态合法、不跳级。"""
-    for status in GOLDEN_SAMPLE_STATUSES:
+    for status in SAMPLE_STATUSES:
         assert status in STATUS_TRANSITIONS, f"no transitions declared for {status}"
     for source, targets in STATUS_TRANSITIONS.items():
-        assert source in GOLDEN_SAMPLE_STATUSES
+        assert source in SAMPLE_STATUSES
         for target in targets:
-            assert target in GOLDEN_SAMPLE_STATUSES, f"{source} -> unknown {target}"
+            assert target in SAMPLE_STATUSES, f"{source} -> unknown {target}"
 
-    # 三级审核不可跳级：初审只能到复审，复审只能到终审
-    assert STATUS_TRANSITIONS["pending_test"] == ("pending_dev", "rejected")
-    assert STATUS_TRANSITIONS["pending_dev"] == ("pending_admin", "rejected")
-    assert STATUS_TRANSITIONS["pending_admin"] == ("approved", "rejected")
-    # approved 不能被直接编辑回草稿，只能打回重审（回到 pending_test）或标记失效
-    assert set(STATUS_TRANSITIONS["approved"]) == {"pending_test", "superseded"}
+    # 审核中只能「继续审 / 通过 / 驳回」；驳回后只能重新提交或标失效
+    assert set(STATUS_TRANSITIONS["in_review"]) == {"in_review", "approved", "rejected"}
+    # approved 不能被直接编辑回草稿，只能打回重审或标记失效
+    assert set(STATUS_TRANSITIONS["approved"]) == {"in_review", "superseded"}
 
 
 def test_expected_conclusions_cover_negative_cases():
@@ -69,7 +67,9 @@ def test_trace_and_sample_roundtrip(db_session):
         expected_conclusion="answered",
         category="定位异常",
         device_model="L10",
-        status="pending_test",
+        status="in_review",
+        review_chain=["engineer", "developer", "admin"],
+        review_step=1,
         submitted_by=None,
         trace_id=trace.id,
     )
@@ -96,6 +96,10 @@ def test_trace_and_sample_roundtrip(db_session):
     stored = db_session.query(RetrievalTrace).one()
     assert stored.slots["city"] == "深圳"
     assert stored.log_patterns["patterns"][0]["pattern"] == "NMEA"
+
+    sample_row = db_session.query(GoldenSample).one()
+    assert sample_row.review_chain == ["engineer", "developer", "admin"]
+    assert sample_row.review_step == 1
 
 
 def test_sample_version_defaults_to_one(db_session):

@@ -57,6 +57,8 @@ def upgrade() -> None:
         sa.Column("device_model", sa.String(64), nullable=True),
         sa.Column("status", sa.String(24), nullable=False, server_default="draft"),
         sa.Column("sample_version", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column("review_chain", sa.JSON(), nullable=True),
+        sa.Column("review_step", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("submitted_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("submitted_at", sa.DateTime(), nullable=True),
         sa.Column("approved_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),

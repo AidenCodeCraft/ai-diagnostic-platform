@@ -1,13 +1,15 @@
 """回归黄金集 — 检索与问答质量的唯一标尺。
 
-流程（三级审核，防污染）：
-    提交(draft) → 测试初审(pending_test) → 开发复审(pending_dev)
-    → 管理员终审(pending_admin) → approved（进入 CI）→ superseded（文档/日志失效）
+审核链按「提交人角色」决定（见 services/quality/review_policy.py）：
+    管理员提交   → 直接生效
+    开发提交     → 管理员终审
+    测试提交     → 开发复审 → 管理员终审
+    用户(售后/产品)提交 → 测试初审 → 开发复审 → 管理员终审
 
 硬规则：
-  - 提交人不得担任该样本的任一审核人；
-  - approved 样本不可原地修改，只能打回重审或标记 superseded；
-  - 每次内容变更 sample_version +1，旧版本经 SampleReview 留痕。
+  - 链上角色不等于提交人角色，「提交人不得自审」自动成立；
+  - approved 样本不可原地修改，只能打回重审（回到 in_review 第 0 步）或标记 superseded；
+  - 每次内容变更 sample_version +1，审核轨迹经 SampleReview 留痕。
 """
 
 from datetime import datetime, timezone
@@ -16,25 +18,15 @@ from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
 
 from app.database.base import Base
 
-# 审核状态（顺序即流转顺序，不允许跳级）
-GOLDEN_SAMPLE_STATUSES = (
-    "draft",           # 提交人填写中
-    "pending_test",    # 待测试初审
-    "pending_dev",     # 待开发复审
-    "pending_admin",   # 待管理员终审
-    "approved",        # 进入 CI 回归
-    "rejected",        # 任一环节驳回，退回提交人
-    "superseded",      # 文档改版 / 日志失效，保留但跳过
-)
+# 样本状态：draft 填写中 / in_review 审核中（层级由 review_step 指出）/ approved 生效
+SAMPLE_STATUSES = ("draft", "in_review", "approved", "rejected", "superseded")
 
 STATUS_TRANSITIONS = {
-    "draft": ("pending_test",),
-    "pending_test": ("pending_dev", "rejected"),
-    "pending_dev": ("pending_admin", "rejected"),
-    "pending_admin": ("approved", "rejected"),
-    "approved": ("pending_test", "superseded"),   # 打回重审 / 标记失效
-    "rejected": ("pending_test",),
-    "superseded": ("pending_test",),
+    "draft": ("in_review", "approved"),      # 管理员提交直接 approved
+    "in_review": ("in_review", "approved", "rejected"),
+    "approved": ("in_review", "superseded"),  # 打回重审 / 文档失效
+    "rejected": ("in_review", "superseded"),
+    "superseded": ("in_review",),
 }
 
 # 期望结论四类 —— 负样本必须覆盖，否则只测正样本会严重偏乐观
@@ -62,6 +54,9 @@ class GoldenSample(Base):
 
     status = Column(String(24), nullable=False, default="draft", index=True)
     sample_version = Column(Integer, nullable=False, default=1)
+    # 审核链由提交人角色决定（管理员提交为空链）；review_step = 已通过的级数
+    review_chain = Column(JSON, nullable=True)
+    review_step = Column(Integer, nullable=False, default=0)
 
     submitted_by = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     submitted_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

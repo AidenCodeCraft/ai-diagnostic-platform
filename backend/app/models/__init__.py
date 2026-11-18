@@ -12,7 +12,7 @@ from app.models.system import (
 )
 from app.models.quality import (
     GoldenSample, SampleReview, RegressionRun,
-    GOLDEN_SAMPLE_STATUSES, STATUS_TRANSITIONS, EXPECTED_CONCLUSIONS,
+    SAMPLE_STATUSES, STATUS_TRANSITIONS, EXPECTED_CONCLUSIONS,
 )
 
 __all__ = [
@@ -25,5 +25,5 @@ __all__ = [
     "Organization", "OrganizationMember", "Project", "BugCase", "ClientLogEntry",
     "AdminAuditLog",
     "GoldenSample", "SampleReview", "RegressionRun",
-    "GOLDEN_SAMPLE_STATUSES", "STATUS_TRANSITIONS", "EXPECTED_CONCLUSIONS",
+    "SAMPLE_STATUSES", "STATUS_TRANSITIONS", "EXPECTED_CONCLUSIONS",
 ]

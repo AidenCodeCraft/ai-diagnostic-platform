@@ -1,0 +1,94 @@
+name: golden-regression
+
+# 黄金集检索回归。
+#
+# 与 backend-tests 的区别：这套需要真实依赖（Milvus、BGE embedding 服务、DeepSeek key），
+# 因此只能跑在自托管 runner 上（labels: self-hosted, ai-diag），不在 PR 门禁里阻塞。
+# 真正接入"每次提交触发"的前置条件是：该 runner 已就绪且已注册 lab 标签。
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "回归套件：fast=确定性断言（不调 LLM）/ full=含 LLM 判分"
+        type: choice
+        options: ["fast", "full"]
+        default: "fast"
+  schedule:
+    # 每日 18:00 UTC = 次日 02:00 北京时间，跑全量判分
+    - cron: "0 18 * * *"
+
+concurrency:
+  group: golden-regression
+  cancel-in-progress: false
+
+jobs:
+  regression:
+    runs-on: [self-hosted, ai-diag]
+    timeout-minutes: 60
+    env:
+      MILVUS_ENABLED: "true"
+      MILVUS_HOST: ${{ vars.MILVUS_HOST || '127.0.0.1' }}
+      MILVUS_PORT: ${{ vars.MILVUS_PORT || '19530' }}
+      MILVUS_COLLECTION: ${{ vars.MILVUS_COLLECTION || 'knowledge_chunks_v2' }}
+      MILVUS_DIM: "1024"
+      EMBEDDING_PROVIDER: "api"          # 指向自托管 BGE 服务
+      EMBEDDING_API_URL: ${{ vars.EMBEDDING_API_URL }}
+      EMBEDDING_DIM: "1024"
+      EMBEDDING_HASH_FALLBACK: "false"   # 回归里绝不允许哈希兜底
+      MINIO_ENABLED: "true"
+      MINIO_ENDPOINT: ${{ vars.MINIO_ENDPOINT }}
+      MINIO_BUCKET: ${{ vars.MINIO_BUCKET || 'diagnostic-logs' }}
+      LLM_PROVIDER: "deepseek"
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      GOLDEN_SUITE: ${{ github.event.inputs.suite || 'full' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Preflight checks
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os, sys
+          problems = []
+          if os.getenv("EMBEDDING_HASH_FALLBACK", "").lower() != "false":
+              problems.append("EMBEDDING_HASH_FALLBACK must be false in regression")
+          if not os.getenv("EMBEDDING_API_URL"):
+              problems.append("EMBEDDING_API_URL (self-hosted BGE) is not configured")
+          if os.getenv("GOLDEN_SUITE") == "full" and not os.getenv("DEEPSEEK_API_KEY"):
+              problems.append("DEEPSEEK_API_KEY is required for full suite")
+          if problems:
+              print("::error::回归环境不完整:\n- " + "\n- ".join(problems))
+              sys.exit(1)
+          print("::notice::preflight ok, suite=" + os.getenv("GOLDEN_SUITE", "fast"))
+          PY
+
+      - name: Golden set harness
+        working-directory: backend
+        run: |
+          if [ ! -d tests/regression ]; then
+            echo "::notice::tests/regression 尚未落地，跳过（等 harness 提交后再启用本 job 为门禁）"
+            exit 0
+          fi
+          python -m pytest tests/regression -m golden -q --maxfail=50
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-regression-${{ github.run_id }}
+          path: |
+            backend/reports/
+            backend/.pytest_cache/v/cache/lastfailed
+          if-no-files-found: ignore
+          retention-days: 30
