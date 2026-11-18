@@ -75,6 +75,7 @@ export interface KnowledgeDoc {
   category: string | null
   doc_type: string
   status: string
+  project_id?: number | null
   images?: KnowledgeImage[]
   quality_score?: number | null
   issues?: KnowledgeIssue[]
@@ -83,7 +84,7 @@ export interface KnowledgeDoc {
 }
 
 export const knowledgeApi = {
-  create(data: { title: string; content: string; category?: string; doc_type?: string; parent_id?: number }) {
+  create(data: { title: string; content: string; category?: string; doc_type?: string; source?: string; project_id?: number; parent_id?: number }) {
     return client.post<KnowledgeDoc>('/knowledge', data)
   },
   list(params?: { page?: number; page_size?: number; category?: string; doc_type?: string; parent_id?: number; sort?: 'updated_asc' | 'updated_desc' }) {

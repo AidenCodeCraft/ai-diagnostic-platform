@@ -113,6 +113,7 @@
                     <el-dropdown-item v-if="row.doc_type !== 'folder'" command="edit">✏️ 编辑</el-dropdown-item>
                     <el-dropdown-item command="rename">✏️ 重命名</el-dropdown-item>
                     <el-dropdown-item command="pin">📌 置顶</el-dropdown-item>
+                    <el-dropdown-item v-if="row.doc_type !== 'folder'" command="copy">📄 复制</el-dropdown-item>
                     <el-dropdown-item command="delete" divided style="color:var(--chat-popup-danger-hover-text)">🗑️ 删除</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
@@ -1234,8 +1235,50 @@ async function handleRowAction(cmd: string, row: any) {
       await fetch()
     } catch { ElMessage.error('操作失败') }
   }
+  else if (cmd === 'copy') { await copyDocument(row) }
   else if (cmd === 'delete') { remove(row.id) }
 }
+
+/** 复制文档：内容一致，标题按「原名 (n)」递增编号，生成到当前目录 */
+async function copyDocument(row: any) {
+  try {
+    const { data: doc } = await knowledgeApi.get(row.id)
+    const baseTitle = String(doc.title || row.title || '').replace(/\s*\(\d+\)$/, '').trim()
+    if (!baseTitle) { ElMessage.error('文档标题为空，无法复制'); return }
+
+    // 扫描目录树中同名副本，取最大序号 +1
+    let maxIndex = 0
+    try {
+      const { data: treeData } = await knowledgeApi.tree()
+      const escaped = baseTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const pattern = new RegExp(`^${escaped}\\s*\\((\\d+)\\)$`)
+      const walk = (nodes: any[]) => {
+        for (const node of nodes || []) {
+          const matched = pattern.exec(String(node.title || ''))
+          if (matched) maxIndex = Math.max(maxIndex, Number(matched[1]))
+          if (node.children?.length) walk(node.children)
+        }
+      }
+      walk(treeData?.tree || [])
+    } catch { /* 树接口不可用时按首份副本处理 */ }
+
+    const suffix = ` (${maxIndex + 1})`
+    const title = baseTitle.slice(0, Math.max(1, 200 - suffix.length)) + suffix
+    await knowledgeApi.create({
+      title,
+      content: doc.content || '',
+      doc_type: doc.doc_type || 'note',
+      category: doc.category ?? undefined,
+      project_id: doc.project_id ?? undefined,
+      parent_id: currentFolder.value?.id ?? undefined,
+    })
+    ElMessage.success(`已复制为「${title}」`)
+    await fetch()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '复制失败')
+  }
+}
+
 async function doRename() { if (!renameName.value.trim() || !renameId.value) return; try { await knowledgeApi.update(renameId.value, { title: renameName.value }); ElMessage.success('已重命名'); showRename.value = false; await fetch() } catch { ElMessage.error('重命名失败') } }
 
 // ============================================================
@@ -2167,7 +2210,7 @@ html[data-theme='dark'] .validation-body {
   --kb-success: #34d399;
   --kb-zebra: #26272a;
   --kb-code-block-bg: #242528;
-  --kb-code-block-text: #e5e7eb;
+  --kb-code-block-text: #f3f4f6;
   --kb-overlay-bg: rgba(23, 23, 25, 0.88);
   --kb-spinner-head: #6688fa;
   --kb-shadow-accent: rgba(0, 0, 0, 0.4);
@@ -2284,5 +2327,119 @@ html[data-theme='dark'] .kb-container .CodeMirror-selected {
 
 html[data-theme='dark'] .kb-container .CodeMirror-empty {
   color: var(--kb-text-dim);
+}
+
+/* ==========================================================================
+   深色主题 — 编辑器输入区
+   textarea 模式默认使用 #2c3e50 深色字，深色底上几乎不可读
+   ========================================================================== */
+html[data-theme='dark'] .kb-container .v-md-textarea-editor,
+html[data-theme='dark'] .kb-container .v-md-textarea-editor pre,
+html[data-theme='dark'] .kb-container .v-md-textarea-editor textarea {
+  background-color: var(--kb-surface);
+  color: var(--kb-text);
+  caret-color: #ffffff;
+}
+
+html[data-theme='dark'] .kb-container .v-md-textarea-editor textarea::placeholder {
+  color: var(--kb-text-muted);
+}
+
+/* ==========================================================================
+   深色主题 — Markdown 目录导航（悬浮目录 + 编辑器内置目录面板）
+   ========================================================================== */
+html[data-theme='dark'] .kb-container .toc-float-title {
+  color: #b9bec8;
+}
+
+html[data-theme='dark'] .kb-container .toc-item {
+  color: #dfe2e8;
+}
+
+html[data-theme='dark'] .kb-container .toc-level-1 {
+  color: #eef0f4;
+}
+
+html[data-theme='dark'] .kb-container .toc-level-3 {
+  color: #c9ced8;
+}
+
+html[data-theme='dark'] .kb-container .toc-item:hover {
+  background: var(--kb-hover-bg);
+  color: #ffffff;
+}
+
+html[data-theme='dark'] .kb-container .toc-active,
+html[data-theme='dark'] .kb-container .toc-active:hover {
+  color: #cdd7ff;
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__toc-nav {
+  background-color: var(--kb-surface);
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__toc-nav-item {
+  color: var(--kb-text-2);
+}
+
+html[data-theme='dark'] .kb-container .v-md-editor__toc-nav-item:hover {
+  color: #ffffff;
+}
+
+/* ==========================================================================
+   深色主题 — 预览表格
+   覆盖 vuepress 主题的浅色边框、浅色斑马纹（#f6f8fa）与表头
+   ========================================================================== */
+html[data-theme='dark'] .kb-container .vuepress-markdown-body table,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body table {
+  background-color: transparent;
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body tr,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body tr {
+  border-top-color: var(--kb-border-2);
+  background-color: transparent;
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body tr:nth-child(2n),
+html[data-theme='dark'] .guide-body .vuepress-markdown-body tr:nth-child(2n) {
+  background-color: var(--kb-zebra);
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body :is(th, td),
+html[data-theme='dark'] .guide-body .vuepress-markdown-body :is(th, td) {
+  border-color: var(--kb-border-2);
+  color: var(--kb-text-2);
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body th,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body th {
+  background-color: var(--kb-surface-3);
+  color: var(--kb-text);
+}
+
+/* ==========================================================================
+   深色主题 — 代码块（提升文字对比度）
+   ========================================================================== */
+html[data-theme='dark'] .kb-container .vuepress-markdown-body pre,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body pre,
+html[data-theme='dark'] .kb-container .vuepress-markdown-body pre[class*='v-md-prism-'],
+html[data-theme='dark'] .guide-body .vuepress-markdown-body pre[class*='v-md-prism-'] {
+  background-color: var(--kb-code-block-bg);
+  color: var(--kb-code-block-text);
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body pre code,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body pre code,
+html[data-theme='dark'] .kb-container .vuepress-markdown-body pre[class*='v-md-prism-'] code,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body pre[class*='v-md-prism-'] code {
+  background-color: transparent;
+  color: var(--kb-code-block-text);
+}
+
+html[data-theme='dark'] .kb-container .vuepress-markdown-body :not(pre) > code,
+html[data-theme='dark'] .guide-body .vuepress-markdown-body :not(pre) > code {
+  background-color: #3a3b40;
+  color: var(--kb-code-block-text);
 }
 </style>
