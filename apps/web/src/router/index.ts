@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getLogger } from '@/logger'
+import { applyTheme } from '@/composables/useTheme'
 
 let tokenVerified = false
 
@@ -59,6 +60,9 @@ function clearAuth() {
 }
 
 router.beforeEach(async (to, from, next) => {
+  // 登录页始终浅色（直接访问、退出登录、系统深色偏好下均强制覆盖）
+  if (to.meta.guest) applyTheme('light')
+
   const token = sessionStorage.getItem('token')
   const userStr = sessionStorage.getItem('user')
   let user: { role?: string } | null = null

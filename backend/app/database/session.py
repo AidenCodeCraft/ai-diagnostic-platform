@@ -47,24 +47,29 @@ def _apply_compat_migrations() -> None:
     """
     from sqlalchemy import inspect, text
 
+    # (表名, 列名, 列定义) —— 与 migrations/versions 的增量迁移保持同步
+    patches = [
+        ("chat_sessions", "project_id", "INTEGER REFERENCES projects(id)"),
+        ("chat_messages", "versions", "JSON"),
+        ("chat_messages", "active_version", "INTEGER"),
+        ("users", "theme", "VARCHAR(20)"),
+    ]
+
     try:
         inspector = inspect(engine)
         tables = set(inspector.get_table_names())
-        if "chat_sessions" in tables:
-            columns = {column["name"] for column in inspector.get_columns("chat_sessions")}
-            if "project_id" not in columns:
-                with engine.begin() as conn:
-                    if engine.dialect.name == "postgresql":
-                        conn.execute(text(
-                            "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS "
-                            "project_id INTEGER REFERENCES projects(id)"
-                        ))
-                    else:
-                        conn.execute(text(
-                            "ALTER TABLE chat_sessions ADD COLUMN project_id "
-                            "INTEGER REFERENCES projects(id)"
-                        ))
-                logger.info("Applied compatibility migration: chat_sessions.project_id")
+        for table, column, ddl in patches:
+            if table not in tables:
+                continue
+            columns = {c["name"] for c in inspector.get_columns(table)}
+            if column in columns:
+                continue
+            with engine.begin() as conn:
+                if engine.dialect.name == "postgresql":
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl}"))
+                else:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+            logger.info("Applied compatibility migration: %s.%s", table, column)
     except Exception as exc:  # noqa: BLE001 - 补列失败不阻断启动
         logger.warning("Compatibility migration failed: %s", exc)
 

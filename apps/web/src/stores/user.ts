@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
 import { getLogger } from '@/logger'
-import { syncUserTheme, getSavedTheme, applyTheme } from '@/composables/useTheme'
+import { syncUserTheme, applyTheme } from '@/composables/useTheme'
 
 // 使用 sessionStorage → 浏览器关闭后自动清除
 const store = sessionStorage
@@ -69,8 +69,8 @@ export const useUserStore = defineStore('user', () => {
     user.value = null
     store.removeItem('token')
     store.removeItem('user')
-    // 退出登录后回退到本地默认主题
-    applyTheme(getSavedTheme(null))
+    // 退出登录后登录页强制浅色（下次登录再按用户偏好恢复）
+    applyTheme('light')
   }
 
   return { token, user, isLoggedIn, isAdmin, userName, setAuth, login, logout }

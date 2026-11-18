@@ -85,12 +85,17 @@ export async function syncUserTheme(username?: string | null): Promise<ThemePref
   return local
 }
 
+/** 登录页强制浅色：不跟随用户偏好或系统暗色 */
+function isLoginPage(): boolean {
+  return window.location.pathname === '/login'
+}
+
 export function initTheme() {
-  applyTheme(getSavedTheme())
+  applyTheme(isLoginPage() ? 'light' : getSavedTheme())
 
   const media = window.matchMedia('(prefers-color-scheme: dark)')
   const onSystemChange = () => {
-    if (getSavedTheme() === 'system') {
+    if (!isLoginPage() && getSavedTheme() === 'system') {
       applyTheme('system')
     }
   }
