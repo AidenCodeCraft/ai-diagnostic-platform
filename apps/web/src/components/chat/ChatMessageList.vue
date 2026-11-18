@@ -822,7 +822,7 @@ function scrollToBottom() {
 .message-bubble {
   padding: 0;
   border-radius: 14px;
-  line-height: 1.2;
+  line-height: 1.7;
   font-size: 15px;
   color: var(--chat-msg-text);
 }
@@ -836,13 +836,24 @@ function scrollToBottom() {
   border-bottom-right-radius: 6px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   transition: background 0.15s, border-color 0.15s;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.message-row.user .msg-content :deep(p) {
+  margin: 0;
+  padding: 5px 8px;
+}
+
+.message-row.user .msg-content :deep(ul),
+.message-row.user .msg-content :deep(ol) {
+  margin: 0;
 }
 
 .message-row.user .message-bubble:hover {
   border-color: var(--chat-msg-user-border);
 }
 
-/* 编辑态：去掉气泡外壳，避免与编辑卡片形成双层边框 */
 .message-row.user .message-bubble.is-editing {
   max-width: 100%;
   width: 100%;
@@ -853,6 +864,11 @@ function scrollToBottom() {
 }
 
 .message-row.user .msg-content {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.message-row.user .msg-content :deep(p) {
   white-space: pre-wrap;
   word-break: break-word;
 }
