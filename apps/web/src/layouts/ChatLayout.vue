@@ -55,6 +55,11 @@
 
     <!-- 帮助与反馈弹窗 -->
     <HelpDialog :visible="showHelp" @close="showHelp = false" />
+    <GoldenSampleDialog
+      v-model="annotateVisible"
+      :question="annotateQuestion"
+      :session-id="currentChatId"
+    />
 
     <!-- 下载客户端弹窗 -->
     <DownloadDialog :visible="showDownload" @close="showDownload = false" />
@@ -90,6 +95,7 @@
             :chatId="currentChatId"
             @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editSend="handleEditSend"
             @switchVersion="handleSwitchVersion"
+            @annotate="handleAnnotate"
             @selectClarification="onSelectClarification" />
           <div class="input-wrapper">
             <ChatInputArea v-model="inputText" :files="attachedFiles" :selectedModel="selectedModel"
@@ -135,6 +141,7 @@ import ChatInputArea from '@/components/chat/ChatInputArea.vue'
 import UserMenu from '@/components/common/UserMenu.vue'
 import SettingsDialog from '@/components/common/SettingsDialog.vue'
 import HelpDialog from '@/components/common/HelpDialog.vue'
+import GoldenSampleDialog from '@/components/common/GoldenSampleDialog.vue'
 import DownloadDialog from '@/components/common/DownloadDialog.vue'
 import ReportDialog from '@/components/common/ReportDialog.vue'
 import BranchPanel from '@/components/common/BranchPanel.vue'
@@ -1143,6 +1150,24 @@ function addMessage(role: string, content: string, files?: MsgAttachment[], chat
 }
 
 // ── Regenerate / Edit ────────────────────────────────────────
+
+// ── 标注为回归样本 ───────────────────────────────────────────
+const annotateVisible = ref(false)
+const annotateQuestion = ref('')
+
+/** 找到该回答对应的提问，打开标注弹窗（预填该提问当时的检索轨迹） */
+function handleAnnotate(assistantMsg: any) {
+  const idx = messages.value.findIndex((m: any) => m.id === assistantMsg.id)
+  const userMsg = idx >= 0
+    ? [...messages.value].slice(0, idx).reverse().find((m: any) => m.role === 'user')
+    : null
+  if (!userMsg) {
+    ElMessage.warning('未找到对应的提问，无法标注')
+    return
+  }
+  annotateQuestion.value = String(userMsg.content || '')
+  annotateVisible.value = true
+}
 
 async function handleRegenerate(assistantMsg: any) {
   const chatId = currentChatId.value

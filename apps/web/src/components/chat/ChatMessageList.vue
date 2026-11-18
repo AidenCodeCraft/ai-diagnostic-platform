@@ -94,6 +94,13 @@
                 </svg>
               </button>
             </el-tooltip>
+            <el-tooltip content="标注为回归样本" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
+              <button class="action-btn" @click="emit('annotate', msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                </svg>
+              </button>
+            </el-tooltip>
             <el-tooltip content="有帮助" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" :class="{ active: msg._liked }" @click="likeMessage(msg)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -216,6 +223,8 @@ const emit = defineEmits<{
   /** 切换消息版本（编辑重发历史） */
   (e: 'switchVersion', msg: any, index: number): void
   (e: 'selectClarification', text: string): void
+  /** 标注为回归样本（携带被标注的 assistant 消息） */
+  (e: 'annotate', msg: any): void
 }>()
 
 // ── 引用文档 Tooltip ──────────────────────────────────────────
