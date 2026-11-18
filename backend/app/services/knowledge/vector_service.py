@@ -65,54 +65,6 @@ def build_search_params() -> Dict[str, Any]:
 
 REQUIRED_FIELDS = ("id", "doc_id", "chunk_index", "content", "title", "section", "embedding")
 
-# 章节切分（本地实现，待 master 上的 sections.py 合入后改为共用）
-_SECTION_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
-_SECTION_MAX_CHARS = 1200
-_SECTION_WINDOW_CHARS = 1000
-
-
-def _split_long_section(heading: str, body: str) -> List[Tuple[str, str]]:
-    if len(body) <= _SECTION_MAX_CHARS:
-        return [(heading, body)]
-    chunks: List[str] = []
-    buf = ""
-    for para in re.split(r"\n{2,}", body):
-        para = para.strip()
-        if not para:
-            continue
-        if buf and len(buf) + len(para) + 2 > _SECTION_WINDOW_CHARS:
-            chunks.append(buf)
-            buf = para
-        else:
-            buf = f"{buf}\n\n{para}" if buf else para
-    if buf:
-        chunks.append(buf)
-    return [(heading, chunk) for chunk in chunks] or [(heading, body[:_SECTION_MAX_CHARS])]
-
-
-def _split_markdown_sections(content: str) -> List[Tuple[str, str]]:
-    """按 `#` 标题切分文档，返回 [(heading, body), ...]。"""
-    text = content or ""
-    if not text.strip():
-        return [("", "")]
-
-    matches = list(_SECTION_HEADING_RE.finditer(text))
-    if not matches:
-        return _split_long_section("", text.strip())
-
-    sections: List[Tuple[str, str]] = []
-    preamble = text[: matches[0].start()].strip()
-    if preamble:
-        sections.extend(_split_long_section("", preamble))
-
-    for i, match in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        heading = match.group(2).strip()
-        body = text[match.end():end].strip()
-        sections.extend(_split_long_section(heading, body))
-
-    return sections or [("", text.strip())]
-
 # Milvus 相关导入
 _milvus_available = False
 try:
@@ -526,6 +478,11 @@ class VectorService:
         索引文本 = 标题 + 章节标题 + 正文：标题前缀对「问的是哪个知识点」贡献最大，
         也是此前 BM25 结构提权想做但做歪了的事。
         """
+        from app.services.knowledge.sections import (
+            content_hash as section_content_hash,
+            split_markdown_sections,
+        )
+
         title = (doc_title or "").strip()
         if not title:
             for line in (content or "").splitlines():
@@ -536,7 +493,7 @@ class VectorService:
                 break
 
         chunks: List[Dict[str, Any]] = []
-        for heading, body in _split_markdown_sections(content or ""):
+        for heading, body in split_markdown_sections(content or ""):
             body = (body or "").strip()
             if not body:
                 continue
@@ -545,9 +502,7 @@ class VectorService:
                 "section": (heading or "").strip(),
                 "content": body,
                 "index_text": f"{title}\n{heading}\n{body}".strip(),
-                "content_hash": hashlib.sha1(
-                    f"{title}\n{heading}\n{body}".encode("utf-8")
-                ).hexdigest(),
+                "content_hash": section_content_hash(title, heading or "", body),
             })
         return title, chunks
 

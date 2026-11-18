@@ -425,6 +425,9 @@ class DiagnosticChatAgent:
             def search_fn(term: str, page_size: int) -> dict:
                 return self.knowledge.search(
                     term, page=1, page_size=page_size, project_id=self.project_id,
+                    # 对话回答按章节返回：模型需要精确到「哪一节」，
+                    # 文档级去重会把正确章节挤掉（长文档尤甚）
+                    sections=True,
                 )
 
             search_result = process_multi_query(

@@ -53,8 +53,9 @@ class BM25Retriever(IRetriever):
         self._corpus = [d[1] for d in docs]
         self._tokenized = [self._tokenize(t) for t in self._corpus]
         try:
-            from rank_bm25 import BM25Okapi
-            self._bm25 = BM25Okapi(self._tokenized)
+            # BM25Plus：IDF 恒为正，避免小语料下 Okapi 把所有分数算成 0
+            from rank_bm25 import BM25Plus
+            self._bm25 = BM25Plus(self._tokenized)
             logger.info("[BM25] Indexed %d documents", len(docs))
         except ImportError:
             logger.warning("[BM25] rank-bm25 not installed. Install: pip install rank-bm25")
