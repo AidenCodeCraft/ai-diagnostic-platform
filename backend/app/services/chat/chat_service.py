@@ -254,6 +254,26 @@ class ChatService:
             first_user = user_messages[0].get("content", "")[:20].strip()
             return first_user if first_user else "新对话"
 
+    def _record_retrieval_trace(
+        self, session_id: int, content: str, agent, direct_reply: Optional[str],
+    ) -> None:
+        """把本次检索轨迹落库（失败不影响对话）。"""
+        try:
+            from app.services.quality.trace_service import record_trace, resolve_conclusion
+
+            clarification = getattr(agent, "clarification_questions", None)
+            record_trace(
+                self.db,
+                session_id=session_id,
+                question=content,
+                references=getattr(agent, "references", None),
+                clarification=clarification,
+                conclusion=resolve_conclusion(direct_reply, clarification),
+                log_id=getattr(agent, "log_id", None),
+            )
+        except Exception:  # noqa: BLE001 - 观测附产物，绝不影响主流程
+            logger.debug("[chat] record retrieval trace failed", exc_info=True)
+
     def send_message(
         self,
         session_id: int,
@@ -279,6 +299,7 @@ class ChatService:
             self.db, provider_name, project_id=getattr(session, "project_id", None),
         )
         messages, direct_reply = agent.enrich_messages(session_id, content, messages, resolved_analysis)
+        self._record_retrieval_trace(session_id, content, agent, direct_reply)
 
         if direct_reply is not None:
             reply = direct_reply
@@ -322,6 +343,7 @@ class ChatService:
                 self.db, provider_name, project_id=getattr(session, "project_id", None),
             )
             messages, direct_reply = agent.enrich_messages(session_id, content, messages, resolved_analysis)
+            self._record_retrieval_trace(session_id, content, agent, direct_reply)
             if agent.references:
                 yield f"data: {json.dumps({'sources': agent.references}, ensure_ascii=False)}\n\n"
             if getattr(agent, "clarification_questions", None):
