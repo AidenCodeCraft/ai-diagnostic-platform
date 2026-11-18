@@ -1,3 +1,7 @@
+from app.services.quality.golden_sample_service import (
+    GoldenSampleError,
+    GoldenSampleService,
+)
 from app.services.quality.review_policy import (
     REVIEW_CHAINS,
     STATUS_APPROVED,
@@ -15,6 +19,7 @@ from app.services.quality.review_policy import (
 )
 
 __all__ = [
+    "GoldenSampleService", "GoldenSampleError",
     "REVIEW_CHAINS", "STATUS_DRAFT", "STATUS_IN_REVIEW", "STATUS_APPROVED",
     "STATUS_REJECTED", "STATUS_SUPERSEDED",
     "normalize_role", "required_review_roles", "initial_status",
