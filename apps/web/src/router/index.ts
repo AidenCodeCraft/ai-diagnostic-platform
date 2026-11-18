@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getLogger } from '@/logger'
 import { applyTheme } from '@/composables/useTheme'
+import { clearSessionState } from '@/utils/sessionState'
 
 let tokenVerified = false
 
@@ -54,8 +55,7 @@ async function verifyToken(): Promise<boolean> {
 }
 
 function clearAuth() {
-  sessionStorage.removeItem('token')
-  sessionStorage.removeItem('user')
+  clearSessionState()
   tokenVerified = false
 }
 

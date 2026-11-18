@@ -127,6 +127,7 @@ import { useUserStore } from '@/stores/user'
 import { exportChat as exportChatUtil } from '@/utils/export'
 import { pollAnalysis } from '@/utils/analysisPoll'
 import type { ExportMessage } from '@/utils/export'
+import { getActiveChatId, setActiveChatId, removeActiveChatId } from '@/utils/sessionState'
 
 import ChatSidebar from '@/components/chat/ChatSidebar.vue'
 import ChatMessageList from '@/components/chat/ChatMessageList.vue'
@@ -348,13 +349,16 @@ async function clearData() {
 
 const sessionsLoading = ref(false)
 
-async function loadSessions() {
+/** 加载侧栏会话列表；返回是否成功（失败不代表会话不存在，不可据此清理恢复状态） */
+async function loadSessions(): Promise<boolean> {
   sessionsLoading.value = true
   try {
     const { data } = await chatApi.listSessions()
     recentChats.value = (data.items || []).map((s: any) => ({ id: s.id, title: s.title || '新对话', model: s.model, updatedAt: s.updated_at || s.created_at }))
+    return true
   } catch {
     recentChats.value = []
+    return false
   } finally {
     sessionsLoading.value = false
   }
@@ -362,7 +366,7 @@ async function loadSessions() {
 
 async function newChat() {
   currentChatId.value = 0
-  sessionStorage.removeItem('activeChatId')
+  removeActiveChatId()
   canGenerateReport.value = false
   inputText.value = ''
   attachedFiles.value = []
@@ -370,10 +374,11 @@ async function newChat() {
   router.push('/chat')
 }
 
-async function selectChat(id: number, options: { navigate?: boolean } = {}) {
+async function selectChat(id: number, options: { navigate?: boolean; silent?: boolean } = {}) {
   // navigate=false：仅恢复消息（刷新页面时），不改变当前路由——
   // 否则在知识库/诊断报告页刷新会被强制跳回 /chat。
-  const { navigate = true } = options
+  // silent=true：自动恢复场景，失败时不打断用户。
+  const { navigate = true, silent = false } = options
   // 已有完整本地消息时跳过；刷新后 messages 为空，必须重新拉取。
   if (id === currentChatId.value && messages.value.length > 0) {
     if (navigate) router.push('/chat')
@@ -382,7 +387,7 @@ async function selectChat(id: number, options: { navigate?: boolean } = {}) {
   // 该对话已有本地消息（含正在后台流式输出的）：直接切换，保留进行中的输出
   if (messagesByChat.has(id)) {
     currentChatId.value = id
-    sessionStorage.setItem('activeChatId', String(id))
+    setActiveChatId(id)
     if (navigate) router.push('/chat')
     await nextTick()
     setTimeout(() => msgListRef.value?.scrollToBottom(), 150)
@@ -430,7 +435,7 @@ async function selectChat(id: number, options: { navigate?: boolean } = {}) {
       return msg
     }))
     msgs.forEach((m: any) => messageIds.add(m.id.toString()))
-    sessionStorage.setItem('activeChatId', String(id))
+    setActiveChatId(id)
     
     // 检查是否有日志分析结果，如果有则可以生成报告
     const hasAnalysis = msgs.some((m: any) => 
@@ -446,6 +451,20 @@ async function selectChat(id: number, options: { navigate?: boolean } = {}) {
     setTimeout(() => msgListRef.value?.scrollToBottom(), 150)
   } catch (err: any) {
     console.error('[selectChat] error:', err)
+    if (err?.response?.status === 404) {
+      // 会话已被删除或不属于当前用户：清理失效状态并回退到新对话，不打扰用户
+      messagesByChat.delete(id)
+      pendingClarificationByChat.delete(id)
+      removeActiveChatId()
+      if (currentChatId.value === id) {
+        currentChatId.value = 0
+        canGenerateReport.value = false
+      }
+      setLoadingPhase(id, 'idle')
+      loadSessions().catch(() => {})
+      if (!silent) ElMessage.warning('上次对话已不存在，已为你开启新对话')
+      return
+    }
     ElMessage.error('加载对话失败: ' + (err.response?.data?.detail || err.message))
     setLoadingPhase(id, 'idle')
   }
@@ -551,7 +570,7 @@ async function deleteChat() {
     pendingClarificationByChat.delete(chatMenu.chatId)
     if (currentChatId.value === chatMenu.chatId) {
       currentChatId.value = 0
-      sessionStorage.removeItem('activeChatId')
+      removeActiveChatId()
     }
   } catch { /* cancelled */ }
   closeChatMenu()
@@ -642,7 +661,7 @@ async function sendMessage() {
         setSending(chatId, true)
         ensureChatMessages(s.id)
         currentChatId.value = s.id
-        sessionStorage.setItem('activeChatId', String(s.id))
+        setActiveChatId(s.id)
         recentChats.value.unshift({ id: s.id, title: s.title || text.slice(0, 30), model: s.model || undefined, updatedAt: s.updated_at || s.created_at })
       } catch (e: any) {
         console.error('[sendMessage] create session failed:', e?.response?.data?.detail || e?.message || e)
@@ -1269,18 +1288,21 @@ function onReportGenerate(selectedIds: Set<string>, format: 'markdown' | 'pdf' =
   showReportDialog.value = false
 }
 
-onMounted(() => {
+onMounted(async () => {
   selectedModel.value = localStorage.getItem('selectedModel') || 'deepseek-v4-flash'
-  const savedChatId = sessionStorage.getItem('activeChatId')
-  if (savedChatId) {
-    const id = parseInt(savedChatId, 10)
-    if (!isNaN(id) && id > 0) {
-      // 只恢复消息，不跳转路由：刷新时停留在当前页面（知识库/诊断报告等）
-      selectChat(id, { navigate: false }).catch(() => { currentChatId.value = 0 })
-    }
-  }
-  loadSessions()  // 始终加载侧边栏列表，不与自动恢复互斥
   loadChatConcurrencyConfig()  // 多对话并行提问配置（管理后台系统参数）
+
+  const savedChatId = getActiveChatId()
+  // 先加载列表再恢复：避免用已删除/不属于当前用户的 id 发起注定 404 的请求
+  const loaded = await loadSessions()
+  if (!savedChatId || !loaded) return
+  if (recentChats.value.some(c => c.id === savedChatId)) {
+    // 只恢复消息，不跳转路由：刷新时停留在当前页面（知识库/诊断报告等）
+    await selectChat(savedChatId, { navigate: false, silent: true })
+  } else {
+    // 列表里已没有该会话：静默清理恢复状态
+    removeActiveChatId()
+  }
 })
 </script>
 

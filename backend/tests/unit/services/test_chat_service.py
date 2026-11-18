@@ -35,10 +35,13 @@ class TestChatService:
         assert result["deleted"] is True
         assert result["id"] == 42
 
-    def test_get_nonexistent_session_returns_404(self):
-        """Getting a nonexistent session returns 404."""
-        error = {"status": 404, "detail": "会话不存在"}
-        assert error["status"] == 404
+    def test_get_nonexistent_session_returns_404(self, db_session):
+        """获取不存在的会话应抛出 ValueError（API 层映射为 404「会话不存在」）。"""
+        from app.services.chat.chat_service import ChatService
+
+        service = ChatService(db_session)
+        with pytest.raises(ValueError):
+            service.get_session(999999, user_id=1)
 
     # ── Message Handling ────────────────────────────────────
 

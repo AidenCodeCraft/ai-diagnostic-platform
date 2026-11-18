@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.deps import require_admin, require_developer
 from app.database import session as session_module
 from app.models import User
 from app.schemas import UserCreate, UserResponse, UserListResponse
@@ -21,7 +22,7 @@ def get_db_session():
         db.close()
 
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/users", tags=["users"], dependencies=[Depends(require_admin)])
 
 
 WEAK_PASSWORDS = {
@@ -127,7 +128,7 @@ def update_user(
     return user
 
 
-@router.delete("/{user_id}", status_code=204)
+@router.delete("/{user_id}", status_code=204, dependencies=[Depends(require_developer)])
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db_session),

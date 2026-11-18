@@ -161,12 +161,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--chat-source-muted);
   margin-bottom: 8px;
 }
 .gallery-count {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--chat-copy-text);
   font-weight: 500;
 }
 .gallery-grid {
@@ -184,10 +184,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
-  background: #f3f4f6;
+  background: var(--chat-source-bg);
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--chat-source-border);
 }
 .gallery-thumb img {
   width: 100%;
@@ -202,7 +202,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .gallery-skeleton {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+  background: linear-gradient(90deg, var(--chat-upload-area-bg) 25%, var(--chat-upload-area-border) 50%, var(--chat-upload-area-bg) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.2s infinite;
 }
@@ -217,13 +217,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   align-items: center;
   justify-content: center;
   gap: 6px;
-  color: #9ca3af;
+  color: var(--chat-copy-text);
   font-size: 12px;
 }
 .gallery-broken button {
-  border: 1px solid #d1d5db;
-  background: #fff;
-  color: #374151;
+  border: 1px solid var(--chat-popup-border);
+  background: var(--chat-popup-bg);
+  color: var(--chat-popup-text);
   border-radius: 4px;
   padding: 2px 8px;
   font-size: 11px;
@@ -233,9 +233,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   position: absolute;
   top: 6px;
   right: 6px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: rgba(255, 255, 255, 0.92);
-  color: #6b7280;
+  border: 1px solid var(--chat-popup-border);
+  background: var(--chat-popup-bg);
+  color: var(--chat-source-muted);
   border-radius: 4px;
   padding: 2px 8px;
   font-size: 11px;
@@ -244,21 +244,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   transition: opacity 0.15s;
 }
 .gallery-item:hover .gallery-feedback-btn { opacity: 1; }
-.gallery-feedback-btn:hover { color: #dc2626; border-color: #fecaca; }
+.gallery-feedback-btn:hover { color: var(--chat-popup-danger-hover-text); border-color: var(--chat-popup-border); }
 .gallery-feedbacked {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #9ca3af;
+  color: var(--chat-copy-text);
   font-size: 12px;
-  background: #f9fafb;
+  background: var(--chat-source-bg);
 }
 .gallery-caption {
   margin-top: 4px;
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--chat-copy-text);
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;

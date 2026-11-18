@@ -73,3 +73,19 @@ def db_session(tmp_path):
     finally:
         session.close()
 
+
+@pytest.fixture(scope="function")
+def admin_headers(client):
+    """Default seeded admin (admin/admin123) JWT headers."""
+    resp = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
+@pytest.fixture(scope="function")
+def engineer_headers(client):
+    """Default seeded engineer (non-admin) JWT headers."""
+    resp = client.post("/api/v1/auth/login", json={"username": "engineer", "password": "engineer123"})
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+

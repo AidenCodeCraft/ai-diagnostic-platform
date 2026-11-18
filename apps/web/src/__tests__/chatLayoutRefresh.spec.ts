@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createPinia } from 'pinia'
 
+import { ElMessage } from 'element-plus'
 import ChatLayout from '@/layouts/ChatLayout.vue'
 
 /** 无 UI 组件桩：提供 scrollToBottom 等 ChatLayout 会调用的方法 */
@@ -88,13 +89,16 @@ async function mountAt(path: string) {
     global: { plugins: [router, pinia] },
   })
   await flushPromises()
+  await flushPromises()
   return { wrapper, router }
 }
 
 describe('ChatLayout 刷新恢复会话', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     sessionStorage.clear()
-    sessionStorage.setItem('activeChatId', '42')
+    sessionStorage.setItem('user', JSON.stringify({ username: '测试用户' }))
+    sessionStorage.setItem('activeChatId:测试用户', '42')
     chatApiMock.listSessions.mockResolvedValue({
       data: { items: [{ id: 42, title: '测试对话', model: 'mock' }] },
     })
@@ -124,5 +128,25 @@ describe('ChatLayout 刷新恢复会话', () => {
 
     expect(chatApiMock.getMessages).toHaveBeenCalledWith(42)
     expect(router.currentRoute.value.path).toBe('/chat')
+  })
+
+  it('上次会话已不在列表中：不发起消息请求，并清除恢复状态', async () => {
+    chatApiMock.listSessions.mockResolvedValue({ data: { items: [] } })
+
+    await mountAt('/chat')
+
+    expect(chatApiMock.getMessages).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('activeChatId:测试用户')).toBeNull()
+  })
+
+  it('会话存在但消息接口 404：静默清理，不弹错误提示', async () => {
+    chatApiMock.getMessages.mockRejectedValue({
+      response: { status: 404, data: { detail: '会话不存在' } },
+    })
+
+    await mountAt('/chat')
+
+    expect(sessionStorage.getItem('activeChatId:测试用户')).toBeNull()
+    expect(ElMessage.error).not.toHaveBeenCalled()
   })
 })

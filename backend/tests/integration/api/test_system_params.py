@@ -55,7 +55,7 @@ class TestSystemConfig:
         assert cfg["max_online_users"] == 200  # 非法值回退默认
         assert cfg["parallel_chat_enabled"] is False  # bool("") == False
 
-    def test_round_trip_via_admin_api(self, client, isolated_config):
+    def test_round_trip_via_admin_api(self, client, admin_headers, isolated_config):
         body = {
             "max_upload_mb": 120,
             "timeout_seconds": 240,
@@ -64,16 +64,18 @@ class TestSystemConfig:
             "max_parallel_chats": 5,
             "max_online_users": 800,
         }
-        resp = client.put("/api/v1/admin/config/system", json=body)
+        resp = client.put("/api/v1/admin/config/system", json=body, headers=admin_headers)
         assert resp.status_code == 200
-        got = client.get("/api/v1/admin/config/system").json()
+        got = client.get("/api/v1/admin/config/system", headers=admin_headers).json()
         for key, value in body.items():
             assert got[key] == value
 
-    def test_save_tolerates_camelcase(self, client, isolated_config):
-        resp = client.put("/api/v1/admin/config/system", json={"maxOnlineUsers": 300})
+    def test_save_tolerates_camelcase(self, client, admin_headers, isolated_config):
+        resp = client.put(
+            "/api/v1/admin/config/system", json={"maxOnlineUsers": 300}, headers=admin_headers,
+        )
         assert resp.status_code == 200
-        got = client.get("/api/v1/admin/config/system").json()
+        got = client.get("/api/v1/admin/config/system", headers=admin_headers).json()
         assert got["max_online_users"] == 300
         assert got["max_upload_mb"] == 100  # 未提交字段保持默认
 
@@ -99,12 +101,15 @@ class TestConcurrencyGate:
 
 
 class TestChatConcurrencyLimit:
-    def test_stream_rejected_when_full(self, client, isolated_config):
+    def test_stream_rejected_when_full(self, client, admin_headers, isolated_config):
         headers = _chat_headers(client)
         session = client.post(
             "/api/v1/chat-sessions", json={"title": "t", "model": "mock"}, headers=headers,
         ).json()
-        client.put("/api/v1/admin/config/system", json={"max_online_users": 1})
+        client.put(
+            "/api/v1/admin/config/system",
+            json={"max_online_users": 1}, headers=admin_headers,
+        )
         from app.services.system.concurrency import chat_gate
 
         assert chat_gate.acquire(1) is True
@@ -118,12 +123,15 @@ class TestChatConcurrencyLimit:
         finally:
             chat_gate.release()
 
-    def test_chat_rejected_when_full(self, client, isolated_config):
+    def test_chat_rejected_when_full(self, client, admin_headers, isolated_config):
         headers = _chat_headers(client)
         session = client.post(
             "/api/v1/chat-sessions", json={"title": "t", "model": "mock"}, headers=headers,
         ).json()
-        client.put("/api/v1/admin/config/system", json={"max_online_users": 1})
+        client.put(
+            "/api/v1/admin/config/system",
+            json={"max_online_users": 1}, headers=admin_headers,
+        )
         from app.services.system.concurrency import chat_gate
 
         assert chat_gate.acquire(1) is True
@@ -152,8 +160,8 @@ class TestChatConcurrencyLimit:
         assert '"done"' in resp.text
         assert chat_gate.inflight == 0
 
-    def test_stats_exposes_active_chat_streams(self, client, isolated_config):
-        resp = client.get("/api/v1/admin/stats")
+    def test_stats_exposes_active_chat_streams(self, client, admin_headers, isolated_config):
+        resp = client.get("/api/v1/admin/stats", headers=admin_headers)
         assert resp.status_code == 200
         assert "active_chat_streams" in resp.json()
         assert resp.json()["active_chat_streams"] == 0

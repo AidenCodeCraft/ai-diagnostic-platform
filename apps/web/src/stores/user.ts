@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import axios from 'axios'
 import { getLogger } from '@/logger'
 import { syncUserTheme, applyTheme } from '@/composables/useTheme'
+import { clearSessionState } from '@/utils/sessionState'
 
 // 使用 sessionStorage → 浏览器关闭后自动清除
 const store = sessionStorage
@@ -67,8 +68,8 @@ export const useUserStore = defineStore('user', () => {
     getLogger().info('User logged out', 'user', { action: 'logout', extra: { username: user.value?.username } })
     token.value = ''
     user.value = null
-    store.removeItem('token')
-    store.removeItem('user')
+    // 统一清理 token / user / activeChatId，避免下次登录继承失效会话
+    clearSessionState()
     // 退出登录后登录页强制浅色（下次登录再按用户偏好恢复）
     applyTheme('light')
   }

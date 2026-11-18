@@ -1144,9 +1144,9 @@ function scrollToBottom() {
 .doc-panel-content :deep(.img-missing-inline) {
   display: inline-block;
   padding: 2px 8px;
-  border: 1px dashed #d1d5db;
+  border: 1px dashed var(--chat-popup-border);
   border-radius: 4px;
-  color: #9ca3af;
+  color: var(--chat-copy-text);
   font-size: 12px;
 }
 
@@ -1213,7 +1213,7 @@ function scrollToBottom() {
   font-size: 15px;
   font-weight: 600;
   line-height: 1;
-  color: #2563eb;
+  color: var(--chat-source-link);
   text-decoration: none;
   cursor: pointer;
   vertical-align: baseline;
@@ -1227,7 +1227,7 @@ function scrollToBottom() {
 .msg-sources {
   margin-top: 8px;
   padding-top: 6px;
-  border-top: 1px dashed #e5e7eb;
+  border-top: 1px dashed var(--chat-source-border);
 }
 
 /* ── 参考来源行（管道符包裹的灰色文本） ────────────────────── */
@@ -1237,18 +1237,18 @@ function scrollToBottom() {
   margin: 2px 0;
   font-size: 13px;
   line-height: 1.5;
-  color: #9ca3af;
+  color: var(--chat-source-muted);
 }
 .msg-content :deep(.ref-source-line .ref-link.ref-source-doc),
 .msg-content :deep(.ref-source-line .ref-link.ref-source-section),
 .msg-sources :deep(.ref-source-line .ref-link.ref-source-doc),
 .msg-sources :deep(.ref-source-line .ref-link.ref-source-section) {
   display: inline;
-  color: #6b7280;
+  color: var(--chat-source-text);
   font-size: inherit;
   font-weight: 500;
   text-decoration: none;
-  border-bottom: 1px dashed #6b7280;
+  border-bottom: 1px dashed var(--chat-source-muted);
   cursor: pointer;
   padding: 1px 0;
   transition: all 0.15s;
@@ -1257,10 +1257,10 @@ function scrollToBottom() {
 .msg-content :deep(.ref-source-line .ref-link.ref-source-section:hover),
 .msg-sources :deep(.ref-source-line .ref-link.ref-source-doc:hover),
 .msg-sources :deep(.ref-source-line .ref-link.ref-source-section:hover) {
-  color: #2563eb;
-  background: #eff6ff;
+  color: var(--chat-source-link);
+  background: var(--chat-citation-hover-bg);
   border-radius: 3px;
-  border-bottom-color: #2563eb;
+  border-bottom-color: var(--chat-source-link);
 }
 
 /* ── 参考来源行的 ①②③ 序号 ─────────────────────────────── */
@@ -1278,8 +1278,8 @@ function scrollToBottom() {
   z-index: 9999;
   max-width: 360px;
   padding: 12px 14px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--chat-popup-bg);
+  border: 1px solid var(--chat-popup-border);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   transform: translate(-50%, -100%);
@@ -1293,17 +1293,17 @@ function scrollToBottom() {
 .ref-tooltip-title {
   font-size: 13px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--chat-popup-text);
   margin-bottom: 4px;
 }
 .ref-tooltip-source {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--chat-source-muted);
   margin-bottom: 6px;
 }
 .ref-tooltip-excerpt {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--chat-source-text);
   line-height: 1.55;
   max-height: 160px;
   overflow-y: auto;
@@ -1311,8 +1311,8 @@ function scrollToBottom() {
 .ref-tooltip-excerpt :deep(p) { margin: 3px 0; }
 .ref-tooltip-excerpt :deep(ul),
 .ref-tooltip-excerpt :deep(ol) { padding-left: 16px; margin: 3px 0; }
-.ref-tooltip-excerpt :deep(strong) { font-weight: 600; color: #4b5563; }
-.ref-tooltip-excerpt :deep(code) { background: #f3f4f6; padding: 1px 4px; border-radius: 2px; font-size: 11px; }
+.ref-tooltip-excerpt :deep(strong) { font-weight: 600; color: var(--chat-popup-text); }
+.ref-tooltip-excerpt :deep(code) { background: var(--chat-msg-code-bg); color: var(--chat-msg-text); padding: 1px 4px; border-radius: 2px; font-size: 11px; }
 
 /* ── 右侧文档预览面板 ──────────────────────────────────────── */
 .doc-panel-overlay {
@@ -1335,8 +1335,8 @@ function scrollToBottom() {
   max-width: 600px;
   height: 100vh;
   z-index: 9991;
-  background: #fff;
-  border-left: 1px solid #e5e7eb;
+  background: var(--chat-popup-bg);
+  border-left: 1px solid var(--chat-popup-border);
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
@@ -1351,13 +1351,13 @@ function scrollToBottom() {
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--chat-popup-border);
   flex-shrink: 0;
 }
 .doc-panel-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--chat-popup-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1372,15 +1372,15 @@ function scrollToBottom() {
   height: 32px;
   border: 0;
   background: transparent;
-  color: #9ca3af;
+  color: var(--chat-copy-text);
   border-radius: 6px;
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.15s;
 }
 .doc-panel-close:hover {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--chat-copy-hover-bg);
+  color: var(--chat-copy-hover-text);
 }
 .doc-panel-body {
   flex: 1;
@@ -1396,8 +1396,8 @@ function scrollToBottom() {
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid #e5e7eb;
-  border-top-color: #2563eb;
+  border: 3px solid var(--chat-popup-border);
+  border-top-color: var(--chat-input-focus-border);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -1405,7 +1405,7 @@ function scrollToBottom() {
   to { transform: rotate(360deg); }
 }
 .doc-panel-error {
-  color: #ef4444;
+  color: var(--chat-popup-danger-hover-text);
   font-size: 13px;
   padding: 16px;
   text-align: center;
@@ -1413,14 +1413,14 @@ function scrollToBottom() {
 .doc-panel-content {
   font-size: 14px;
   line-height: 1.75;
-  color: #374151;
+  color: var(--chat-msg-text);
 }
 .doc-panel-content :deep(h1),
 .doc-panel-content :deep(h2),
 .doc-panel-content :deep(h3) {
   margin: 16px 0 8px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--chat-msg-text);
 }
 .doc-panel-content :deep(h1) { font-size: 18px; }
 .doc-panel-content :deep(h2) { font-size: 16px; }
@@ -1436,24 +1436,26 @@ function scrollToBottom() {
 }
 .doc-panel-content :deep(th),
 .doc-panel-content :deep(td) {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--chat-msg-table-border);
   padding: 8px 10px;
   text-align: left;
 }
 .doc-panel-content :deep(th) {
-  background: #f9fafb;
+  background: var(--chat-msg-table-head-bg);
   font-weight: 600;
 }
 .doc-panel-content :deep(pre) {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--chat-msg-pre-bg);
+  border: 1px solid var(--chat-msg-pre-border);
+  color: var(--chat-msg-pre-text);
   border-radius: 6px;
   padding: 12px;
   overflow-x: auto;
   font-size: 12px;
 }
 .doc-panel-content :deep(code) {
-  background: #f3f4f6;
+  background: var(--chat-msg-code-bg);
+  color: var(--chat-msg-text);
   padding: 1px 5px;
   border-radius: 3px;
   font-size: 12px;
@@ -1469,7 +1471,23 @@ function scrollToBottom() {
 }
 @keyframes anchorFlash {
   0%, 100% { background: transparent; }
-  30% { background: #fef3c7; }
+  30% { background: var(--chat-citation-hover-bg); }
+}
+
+/* ── 深色模式适配 ─────────────────────────────────────────────
+   组件通过 Teleport 挂载到 body，无法继承局部变量；
+   --chat-* token 定义在 :root / [data-theme='dark'] 上，可直接复用。*/
+[data-theme='dark'] .ref-tooltip {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+[data-theme='dark'] .doc-panel-overlay {
+  background: rgba(0, 0, 0, 0.55);
+}
+[data-theme='dark'] .doc-panel {
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.45);
+}
+[data-theme='dark'] .doc-panel-error {
+  color: #f87171;
 }
 
 /* 消息操作按钮 */

@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { getLogger } from '@/logger'
+import { clearSessionState } from '@/utils/sessionState'
 
 const client = axios.create({
   baseURL: '/api/v1',
@@ -44,8 +45,7 @@ client.interceptors.response.use(
       getLogger().warn('Token expired — redirecting to login', 'api', {
         url: path, duration, extra: { status: 401 },
       })
-      sessionStorage.removeItem('token')
-      sessionStorage.removeItem('user')
+      clearSessionState()
       // 使用 location.replace 避免历史污染（不可回退到受保护页面）
       if (window.location.pathname !== '/login') {
         window.location.replace('/login')
