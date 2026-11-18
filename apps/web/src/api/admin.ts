@@ -69,6 +69,36 @@ export interface AdminStats {
 /** 管理员统计信息（从后端 /admin/stats 返回） */
 export interface AdminStatsResponse extends AdminStats {}
 
+/** 组织 */
+export interface OrganizationInfo {
+  id: number
+  name: string
+  owner_id?: number | null
+  created_at?: string | null
+}
+
+/** 组织成员 */
+export interface OrganizationMemberInfo {
+  id: number
+  organization_id: number
+  user_id: number
+  role: string
+  joined_at?: string | null
+}
+
+/** 项目 */
+export interface ProjectInfo {
+  id: number
+  name: string
+  chip?: string | null
+  firmware?: string | null
+  device_type?: string | null
+  description?: string | null
+  owner_id?: number | null
+  created_at?: string | null
+  updated_at?: string | null
+}
+
 /** 管理后台操作审计记录 */
 export interface AdminAuditLog {
   id: number
@@ -140,6 +170,54 @@ export const adminApi = {
     return client.post<{ created: number; skipped: number; deleted: number }>(
       '/admin/knowledge/seed', null, { params: { reset } },
     )
+  },
+
+  // ── 组织管理 ──────────────────────────────────────────────
+  listOrganizations() {
+    return client.get<OrganizationInfo[]>('/organizations')
+  },
+
+  createOrganization(data: { name: string; owner_id: number }) {
+    return client.post<OrganizationInfo>('/organizations', data)
+  },
+
+  listOrganizationMembers(orgId: number) {
+    return client.get<OrganizationMemberInfo[]>(`/organizations/${orgId}/members`)
+  },
+
+  addOrganizationMember(orgId: number, data: { user_id: number; role?: string }) {
+    return client.post<OrganizationMemberInfo>(`/organizations/${orgId}/members`, data)
+  },
+
+  // ── 项目管理 ──────────────────────────────────────────────
+  listProjects(params?: { page?: number; page_size?: number }) {
+    return client.get<{ items: ProjectInfo[]; total: number; page: number; page_size: number }>(
+      '/projects', { params },
+    )
+  },
+
+  createProject(data: {
+    name: string
+    chip?: string
+    firmware?: string
+    device_type?: string
+    description?: string
+  }) {
+    return client.post<ProjectInfo>('/projects', data)
+  },
+
+  updateProject(projectId: number, data: {
+    name?: string
+    chip?: string
+    firmware?: string
+    device_type?: string
+    description?: string
+  }) {
+    return client.put<ProjectInfo>(`/projects/${projectId}`, data)
+  },
+
+  deleteProject(projectId: number) {
+    return client.delete(`/projects/${projectId}`)
   },
 
   // ── 用户管理 ──────────────────────────────────────────────

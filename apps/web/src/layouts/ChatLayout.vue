@@ -364,6 +364,16 @@ async function loadSessions(): Promise<boolean> {
   }
 }
 
+/** 会话有新消息后刷新更新时间并重排（最近对话：最新在前） */
+function touchChat(chatId: number) {
+  const chat = recentChats.value.find(c => c.id === chatId)
+  if (!chat) return
+  chat.updatedAt = new Date().toISOString()
+  recentChats.value = [...recentChats.value].sort(
+    (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime(),
+  )
+}
+
 async function newChat() {
   currentChatId.value = 0
   removeActiveChatId()
@@ -690,6 +700,7 @@ async function sendMessage() {
       } catch {
         ElMessage.warning('用户消息保存失败，刷新后可能无法恢复')
       }
+      touchChat(chatId)
     }
 
     if (files.length > 0) {
@@ -1008,6 +1019,10 @@ async function streamChat(text: string, chatId: number, reuseMsg?: any) {
     (questions: any[]) => { replyMsg.clarification = questions },
     () => { stopped = true },
     controller.signal,
+    () => {
+      if (replyMsg.content.includes('回答已达到模型输出长度上限')) return
+      replyMsg.content += '\n\n> ⚠️ 回答已达到模型输出长度上限，内容可能不完整。'
+    },
   )
 
   activeStreams.delete(chatId)
@@ -1041,6 +1056,7 @@ async function persistReplyMessage(chatId: number, replyMsg: any, versioned: boo
     } catch (e) {
       console.warn('[persistReplyMessage] versioned update failed:', e)
     }
+    touchChat(chatId)
     return
   }
   try {
@@ -1052,6 +1068,7 @@ async function persistReplyMessage(chatId: number, replyMsg: any, versioned: boo
   } catch (e) {
     console.warn('[persistReplyMessage] save message failed:', e)
   }
+  touchChat(chatId)
 }
 
 /** 供澄清选项芯片点击：把选项填入输入框，由用户确认后发送 */

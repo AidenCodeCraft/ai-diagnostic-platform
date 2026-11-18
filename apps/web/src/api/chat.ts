@@ -104,6 +104,7 @@ export const chatApi = {
     onClarification?: (questions: any[]) => void,
     onStopped?: () => void,
     signal?: AbortSignal,
+    onTruncated?: () => void,
   ) {
     const token = sessionStorage.getItem('token')
     let resp: Response
@@ -140,6 +141,7 @@ export const chatApi = {
         if (data.reasoning) onReasoning?.(data.reasoning)
         if (data.sources) onSources?.(data.sources)
         if (data.clarification) onClarification?.(data.clarification)
+        if (data.truncated) onTruncated?.()
         if (data.done) onDone?.(data.model)
       } catch { /* ignore incomplete or invalid SSE payloads */ }
     }

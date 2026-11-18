@@ -37,7 +37,7 @@
               <span class="msg-file-size">{{ formatSize(f.size) }}</span>
             </div>
           </div>
-          <div class="message-bubble">
+          <div class="message-bubble" :class="{ 'is-editing': editingId === msg.id }">
             <div v-if="editingId === msg.id" class="msg-edit">
               <textarea
                 ref="editTextarea"
@@ -50,6 +50,7 @@
                 @keydown.escape="cancelEdit"
               ></textarea>
               <div class="msg-edit-actions">
+                <span class="msg-edit-hint">Enter 发送 · Esc 取消</span>
                 <button class="msg-edit-btn" @click="cancelEdit">取消</button>
                 <button class="msg-edit-btn primary" :disabled="!editText.trim()" @click="submitEdit(msg)">发送</button>
               </div>
@@ -101,29 +102,43 @@
               @click="switchVersion(msg, 1)">›</button>
           </div>
           <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active && !loading" class="message-actions">
-            <button class="action-btn" :class="{ active: copiedId === msg.id }" @click="copyMessage(msg)" :title="copiedId === msg.id ? '已复制' : '复制回复'">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            </button>
-            <button class="action-btn" @click="regenerateMessage(msg)" title="重新生成">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            </button>
-            <button v-if="msg._persisted" class="action-btn" :class="{ active: msg._resolved }" @click="resolveMessage(msg)" :title="msg._resolved ? '已标记解决' : '标记已解决并沉淀知识'">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-            </button>
-            <button class="action-btn" :class="{ active: msg._liked }" @click="likeMessage(msg)" title="有帮助">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
-            </button>
-            <button class="action-btn" :class="{ active: msg._disliked }" @click="dislikeMessage(msg)" title="无帮助">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
-            </button>
+            <el-tooltip :content="copiedId === msg.id ? '已复制' : '复制'" placement="top" :show-after="0">
+              <button class="action-btn" :class="{ active: copiedId === msg.id }" @click="copyMessage(msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </el-tooltip>
+            <el-tooltip content="重新生成" placement="top" :show-after="0">
+              <button class="action-btn" @click="regenerateMessage(msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              </button>
+            </el-tooltip>
+            <el-tooltip v-if="msg._persisted" :content="msg._resolved ? '已标记解决' : '标记已解决并沉淀知识'" placement="top" :show-after="0">
+              <button class="action-btn" :class="{ active: msg._resolved }" @click="resolveMessage(msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              </button>
+            </el-tooltip>
+            <el-tooltip content="有帮助" placement="top" :show-after="0">
+              <button class="action-btn" :class="{ active: msg._liked }" @click="likeMessage(msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+              </button>
+            </el-tooltip>
+            <el-tooltip content="无帮助" placement="top" :show-after="0">
+              <button class="action-btn" :class="{ active: msg._disliked }" @click="dislikeMessage(msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
+              </button>
+            </el-tooltip>
           </div>
           <div v-else-if="msg.role === 'user' && msg.content && editingId !== msg.id" class="message-actions">
-            <button class="action-btn" @click="startEdit(msg)" title="修改">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-            </button>
-            <button class="action-btn" @click="copyMessage(msg)" title="复制">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            </button>
+            <el-tooltip content="编辑" placement="top" :show-after="0">
+              <button class="action-btn" @click="startEdit(msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+              </button>
+            </el-tooltip>
+            <el-tooltip content="复制" placement="top" :show-after="0">
+              <button class="action-btn" @click="copyMessage(msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </el-tooltip>
           </div>
         </div>
       </div>
@@ -822,11 +837,38 @@ function scrollToBottom() {
 }
 
 .message-row.user .message-bubble {
-  max-width: 85%;
-  padding: 11px 16px;
+  max-width: 72%;
+  padding: 10px 16px;
   background: var(--chat-msg-user-bg);
-  border: 1px solid var(--chat-msg-user-border);
-  border-bottom-right-radius: 5px;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  border-bottom-right-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.message-row.user .message-bubble:hover {
+  border-color: var(--chat-msg-user-border);
+}
+
+/* 编辑态：去掉气泡外壳，避免与编辑卡片形成双层边框 */
+.message-row.user .message-bubble.is-editing {
+  max-width: 100%;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.message-row.user .msg-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-row.user .message-actions {
+  justify-content: flex-end;
+  margin-top: 6px;
 }
 
 .message-row.assistant .message-bubble {
@@ -1490,33 +1532,47 @@ function scrollToBottom() {
   color: #f87171;
 }
 
+/* 深色：输入卡片与气泡阴影 */
+[data-theme='dark'] .msg-edit {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+[data-theme='dark'] .message-row.user .message-bubble {
+  box-shadow: none;
+}
+
 /* 消息操作按钮 */
 .message-actions { display: flex; gap: 4px; margin-top: 10px; opacity: 0.7; transition: opacity 0.2s; }
 .message-row:hover .message-actions { opacity: 1; }
 .action-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--chat-copy-text); background: transparent; border: 0; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
 .action-btn:hover { background: var(--chat-copy-hover-bg); color: var(--chat-copy-hover-text); }
-.action-btn.active { color: #2563eb; background: #eff6ff; }
+.action-btn.active { color: var(--chat-source-link); background: var(--chat-citation-hover-bg); }
 .action-btn svg { flex-shrink: 0; }
 
 /* ── 消息内联编辑（编辑框覆盖在原气泡上，参照 DeepSeek） ──── */
 .msg-edit {
   width: 100%;
-  min-width: 240px;
+  min-width: 320px;
   background: var(--chat-input-bg);
-  border: 1px solid var(--chat-input-focus-border);
-  border-radius: 14px;
-  padding: 10px 14px;
+  border: 1px solid var(--chat-input-border);
+  border-radius: 16px;
+  padding: 12px 14px 10px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.msg-edit:focus-within {
+  border-color: var(--chat-input-focus-border);
   box-shadow: 0 0 0 3px var(--chat-input-focus-ring);
 }
 .msg-edit-textarea {
   width: 100%;
+  min-height: 44px;
   border: none;
   outline: none;
   resize: none;
   background: transparent;
   color: var(--chat-input-text);
-  font-size: 14px;
-  line-height: 1.8;
+  font-size: 15px;
+  line-height: 1.75;
   font-family: inherit;
   max-height: 40vh;
   overflow-y: auto;
@@ -1524,12 +1580,18 @@ function scrollToBottom() {
 .msg-edit-textarea::placeholder { color: var(--chat-input-placeholder); }
 .msg-edit-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 8px;
 }
+.msg-edit-hint {
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--chat-copy-text);
+}
 .msg-edit-btn {
-  padding: 6px 16px;
+  padding: 5px 14px;
   border-radius: 8px;
   border: 1px solid var(--chat-input-action-border);
   background: var(--chat-input-action-bg);

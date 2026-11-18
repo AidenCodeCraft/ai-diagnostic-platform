@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin, require_auth
 
 # ── Auth ─────────────────────────────────────────────────────
 from app.api.auth import router as auth_router
@@ -70,11 +70,11 @@ api_router.include_router(reports_router, dependencies=[Depends(require_auth)])
 api_router.include_router(knowledge_router)
 api_router.include_router(vector_router)
 
-# System（client_logs 供前端错误上报，登录前后都可能调用，保持开放）
-api_router.include_router(organizations_router, dependencies=[Depends(require_auth)])
-api_router.include_router(projects_router, dependencies=[Depends(require_auth)])
-api_router.include_router(rules_router, dependencies=[Depends(require_auth)])
-api_router.include_router(bug_cases_router, dependencies=[Depends(require_auth)])
-api_router.include_router(client_logs_router)
-api_router.include_router(dashboard_router, dependencies=[Depends(require_auth)])
-api_router.include_router(search_router, dependencies=[Depends(require_auth)])
+# System（管理域：仅 admin / developer）
+api_router.include_router(organizations_router, dependencies=[Depends(require_admin)])
+api_router.include_router(projects_router, dependencies=[Depends(require_admin)])
+api_router.include_router(rules_router, dependencies=[Depends(require_admin)])
+api_router.include_router(bug_cases_router, dependencies=[Depends(require_admin)])
+api_router.include_router(client_logs_router, dependencies=[Depends(require_admin)])
+api_router.include_router(dashboard_router, dependencies=[Depends(require_admin)])
+api_router.include_router(search_router, dependencies=[Depends(require_admin)])

@@ -121,6 +121,8 @@ async function mountChat() {
     global: { plugins: [router, pinia] },
   })
   await flushPromises()
+  // onMounted 先 loadSessions 再校验恢复会话，需额外一轮微任务
+  await flushPromises()
   return wrapper
 }
 
@@ -178,8 +180,12 @@ describe('多对话并行提问', () => {
     await sendInCurrentChat(wrapper)
     expect(chatApiMock.sendMessageStream.mock.calls.map(c => c[0])).toEqual([1])
 
+    // 侧栏按最近活跃排序，点击时按标题定位（不依赖索引）
+    const sideByTitle = (title: string) => wrapper.findAll('.side')
+      .find(btn => btn.text().includes(title))!
+
     // 切换到对话2 再发起提问（并行开启）
-    await wrapper.findAll('.side')[1].trigger('click')
+    await sideByTitle('对话二').trigger('click')
     await flushPromises()
     await sendInCurrentChat(wrapper)
     expect(chatApiMock.sendMessageStream.mock.calls.map(c => c[0])).toEqual([1, 2])
@@ -192,7 +198,7 @@ describe('多对话并行提问', () => {
     expect(wrapper.find('.mlist').text()).not.toContain('回复一')
 
     // 切回对话1：流式输出仍在（不被打断），且继续增长
-    await wrapper.findAll('.side')[0].trigger('click')
+    await sideByTitle('对话一').trigger('click')
     await flushPromises()
     expect(wrapper.find('.mlist').text()).toContain('回复一')
     streams.get(1)!.onToken('继续一')

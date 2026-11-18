@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Respon
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin, require_auth
 from app.core.config import settings
 from app.database import session as session_module
 from app.schemas import (
@@ -171,7 +171,7 @@ def upload_document(
 # ------------------------------------------------------------------
 
 
-@router.get("", response_model=KnowledgeListResponse)
+@router.get("", response_model=KnowledgeListResponse, dependencies=[Depends(require_admin)])
 def list_documents(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -211,7 +211,7 @@ def polish_document(
     return service.polish(body.content, body.doc_type, body.title or "")
 
 
-@router.get("/search")
+@router.get("/search", dependencies=[Depends(require_admin)])
 def search_documents(
     q: str = Query(..., min_length=1),
     page: int = Query(default=1, ge=1),
@@ -235,7 +235,7 @@ def search_documents(
     )
 
 
-@router.get("/categories")
+@router.get("/categories", dependencies=[Depends(require_admin)])
 def list_categories(
     db: Session = Depends(get_db_session),
 ) -> List[str]:
@@ -243,7 +243,7 @@ def list_categories(
     return KnowledgeService(db).list_categories()
 
 
-@router.get("/tree", response_model=KnowledgeTreeResponse)
+@router.get("/tree", response_model=KnowledgeTreeResponse, dependencies=[Depends(require_admin)])
 def get_tree(
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
@@ -311,13 +311,13 @@ def feedback_image(
     return {"ok": True, "image_id": image_id, "feedback": feedback}
 
 
-@router.get("/templates")
+@router.get("/templates", dependencies=[Depends(require_admin)])
 def get_templates() -> Dict[str, Any]:
     """返回全部知识模板契约（含用户自定义的格式说明/结构项/骨架/示例）。"""
     return {"templates": list_templates()}
 
 
-@router.put("/templates/{doc_type}", dependencies=[Depends(require_auth)])
+@router.put("/templates/{doc_type}", dependencies=[Depends(require_admin)])
 def update_template(doc_type: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """编辑某文档类型的格式说明（说明/结构项/骨架/示例均可自定义）。"""
     from app.services.knowledge.template_store import upsert_override
@@ -333,7 +333,7 @@ def update_template(doc_type: str, body: Dict[str, Any]) -> Dict[str, Any]:
     return template_to_dict(template, customized=True)
 
 
-@router.delete("/templates/{doc_type}", dependencies=[Depends(require_auth)])
+@router.delete("/templates/{doc_type}", dependencies=[Depends(require_admin)])
 def reset_template(doc_type: str) -> Dict[str, Any]:
     """删除自定义覆盖，恢复内置格式说明。"""
     from app.services.knowledge.template_store import reset_override
@@ -346,7 +346,7 @@ def reset_template(doc_type: str) -> Dict[str, Any]:
     return template_to_dict(template, customized=False)
 
 
-@router.get("/{doc_id}/sections")
+@router.get("/{doc_id}/sections", dependencies=[Depends(require_admin)])
 def get_sections(
     doc_id: int,
     db: Session = Depends(get_db_session),
@@ -370,7 +370,7 @@ def format_preview(body: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-@router.get("/{doc_id}", response_model=KnowledgeResponse)
+@router.get("/{doc_id}", response_model=KnowledgeResponse, dependencies=[Depends(require_admin)])
 def get_document(
     doc_id: int,
     db: Session = Depends(get_db_session),

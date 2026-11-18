@@ -64,6 +64,22 @@ class DeepSeekProvider(BaseProvider):
         self.model = model or os.getenv("DEEPSEEK_MODEL", file_cfg.get("model") or self.default_model)
         self.timeout = max(timeout, 60.0)  # 至少 60 秒，确保长思维链不会超时
         self.max_retries = max_retries
+        # 输出上限：优先使用管理后台为该模型配置的 max_tokens，否则用安全默认值
+        self.max_tokens = self._resolve_max_tokens(self.model, file_cfg)
+
+    @staticmethod
+    def _resolve_max_tokens(model: str, llm_cfg: Dict[str, Any]) -> int:
+        """读取管理后台为当前模型配置的输出上限；缺省 8192。"""
+        for item in llm_cfg.get("models") or []:
+            if item.get("model") != model:
+                continue
+            try:
+                value = int(item.get("max_tokens") or 0)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                return value
+        return 8192
 
     # ------------------------------------------------------------------
     # Public API
@@ -188,7 +204,7 @@ class DeepSeekProvider(BaseProvider):
                     "model": self.model,
                     "messages": messages,
                     "temperature": 0.7,
-                    "max_tokens": 4096,
+                    "max_tokens": self.max_tokens,
                     "stream": True,
                 },
             ) as response:
@@ -200,7 +216,8 @@ class DeepSeekProvider(BaseProvider):
                             return
                         try:
                             chunk = json.loads(data)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            choice = (chunk.get("choices") or [{}])[0]
+                            delta = choice.get("delta", {})
                             # Reasoning-capable DeepSeek models return their
                             # thinking separately from the answer.  Preserve
                             # that boundary so callers never display the
@@ -211,6 +228,9 @@ class DeepSeekProvider(BaseProvider):
                             content = delta.get("content", "")
                             if content:
                                 yield content
+                            # 输出达到上限：显式告知调用方，避免用户误以为回答完整
+                            if choice.get("finish_reason") == "length":
+                                yield {"truncated": True}
                         except json.JSONDecodeError:
                             pass
 
@@ -227,7 +247,7 @@ class DeepSeekProvider(BaseProvider):
                     "model": self.model,
                     "messages": messages,
                     "temperature": 0.7,
-                    "max_tokens": 4096,
+                    "max_tokens": self.max_tokens,
                 },
             )
             response.raise_for_status()
@@ -258,7 +278,7 @@ class DeepSeekProvider(BaseProvider):
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.2,
-                    "max_tokens": 4096,
+                    "max_tokens": self.max_tokens,
                 },
             )
             response.raise_for_status()

@@ -119,7 +119,7 @@ class OpenAICompatibleProvider(BaseProvider):
             resp = client.post(
                 self.base_url,
                 headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={"model": self.model, "messages": messages, "temperature": 0.7, "max_tokens": 4096},
+                json={"model": self.model, "messages": messages, "temperature": 0.7, "max_tokens": 8192},
             )
             resp.raise_for_status()
             return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
@@ -129,7 +129,7 @@ class OpenAICompatibleProvider(BaseProvider):
             with client.stream(
                 "POST", self.base_url,
                 headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={"model": self.model, "messages": messages, "temperature": 0.7, "max_tokens": 4096, "stream": True},
+                json={"model": self.model, "messages": messages, "temperature": 0.7, "max_tokens": 8192, "stream": True},
             ) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
@@ -139,13 +139,16 @@ class OpenAICompatibleProvider(BaseProvider):
                             return
                         try:
                             chunk = json.loads(data)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            choice = (chunk.get("choices") or [{}])[0]
+                            delta = choice.get("delta", {})
                             reasoning = delta.get("reasoning_content", "")
                             if reasoning:
                                 yield {"reasoning": reasoning}
                             content = delta.get("content", "")
                             if content:
                                 yield content
+                            if choice.get("finish_reason") == "length":
+                                yield {"truncated": True}
                         except (json.JSONDecodeError, KeyError):
                             pass
 
@@ -154,7 +157,7 @@ class OpenAICompatibleProvider(BaseProvider):
             resp = client.post(
                 self.base_url,
                 headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={"model": self.model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.2, "max_tokens": 4096},
+                json={"model": self.model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.2, "max_tokens": 8192},
             )
             resp.raise_for_status()
             return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import traceback
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -90,13 +91,15 @@ class ChatService:
         versions: Optional[List[Dict[str, Any]]] = None,
         active_version: Optional[int] = None,
     ) -> ChatMessage:
-        self.get_session(session_id, user_id)  # 归属校验
+        session = self.get_session(session_id, user_id)  # 归属校验
         msg = ChatMessage(
             session_id=session_id, role=role, content=content,
             sources=sources, thinking=thinking,
             versions=versions, active_version=active_version,
         )
         self.db.add(msg)
+        # 会话更新时间随消息刷新，侧栏「最近对话」按此倒序排列
+        session.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         self.db.refresh(msg)
         return msg
@@ -118,6 +121,8 @@ class ChatService:
         for key, value in (fields or {}).items():
             if key in allowed and value is not None:
                 setattr(msg, key, value)
+        session = self.get_session(session_id, user_id)
+        session.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         self.db.refresh(msg)
         return msg
@@ -351,6 +356,8 @@ class ChatService:
                     reasoning = chunk.get("reasoning", "")
                     if reasoning:
                         yield f"data: {json.dumps({'reasoning': reasoning}, ensure_ascii=False)}\n\n"
+                    if chunk.get("truncated"):
+                        yield f"data: {json.dumps({'truncated': True}, ensure_ascii=False)}\n\n"
                     continue
                 full_reply += chunk
                 yield f"data: {json.dumps({'token': chunk}, ensure_ascii=False)}\n\n"
