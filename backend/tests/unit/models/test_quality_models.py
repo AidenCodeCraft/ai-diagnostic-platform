@@ -33,8 +33,10 @@ def test_status_transitions_are_consistent():
 
     # 审核中只能「继续审 / 通过 / 驳回」；驳回后只能重新提交或标失效
     assert set(STATUS_TRANSITIONS["in_review"]) == {"in_review", "approved", "rejected"}
-    # approved 不能被直接编辑回草稿，只能打回重审或标记失效
-    assert set(STATUS_TRANSITIONS["approved"]) == {"in_review", "superseded"}
+    # approved 不能被直接编辑回草稿，只能打回重审、标记失效，或因知识条目变更进入待复核
+    assert set(STATUS_TRANSITIONS["approved"]) == {"in_review", "superseded", "needs_recheck"}
+    # 待复核只能确认通过、打回重审或标失效
+    assert set(STATUS_TRANSITIONS["needs_recheck"]) == {"approved", "in_review", "superseded"}
 
 
 def test_expected_conclusions_cover_negative_cases():

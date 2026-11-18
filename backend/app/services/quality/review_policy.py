@@ -52,6 +52,8 @@ STATUS_IN_REVIEW = "in_review"
 STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
 STATUS_SUPERSEDED = "superseded"
+# 知识条目上线/改版后，依赖它的 approved 样本需要人工确认期望是否仍成立
+STATUS_NEEDS_RECHECK = "needs_recheck"
 
 
 def normalize_role(role: str | None) -> str:

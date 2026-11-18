@@ -53,7 +53,7 @@ api_router.include_router(api_keys_router)
 # Admin
 api_router.include_router(admin_router)
 api_router.include_router(users_router)
-api_router.include_router(knowledge_review_router)
+api_router.include_router(knowledge_review_router, dependencies=[Depends(require_admin)])
 
 # Chat
 api_router.include_router(chat_sessions_router)

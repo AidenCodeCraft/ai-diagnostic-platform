@@ -126,6 +126,29 @@ def export_approved(
     return {"total": len(rows), "items": rows}
 
 
+@router.post("/recheck")
+def flag_documents_changed(
+    body: Dict[str, Any],
+    db: Session = Depends(get_db_session),
+    user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """知识条目上线/改版后，把依赖它的 approved 样本标记为待复核。
+
+    由知识审核通过时自动调用；也开放给管理员手动触发（批量整改场景）。
+    """
+    if user.role not in ("admin", "developer"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    doc_ids = body.get("doc_ids") or []
+    if not isinstance(doc_ids, list) or not doc_ids:
+        raise HTTPException(status_code=400, detail="doc_ids 不能为空")
+    reason = (body.get("reason") or "知识条目变更").strip()
+    affected = GoldenSampleService(db).flag_documents_changed(
+        doc_ids, reason=reason, actor_id=user.id, actor_role=user.role,
+        actor_name=user.username,
+    )
+    return {"affected": affected}
+
+
 @router.get("/{sample_id}")
 def get_sample(
     sample_id: int,
@@ -217,6 +240,25 @@ def review_sample(
             sample_id,
             actor_id=user.id, actor_role=user.role, actor_name=user.username,
             approve=bool(body["approve"]), reason=body.get("reason"),
+        )
+    except GoldenSampleError as exc:
+        raise _handle(exc) from exc
+    return _serialize(sample)
+
+
+@router.post("/{sample_id}/confirm")
+def confirm_still_valid(
+    sample_id: int,
+    body: Optional[Dict[str, Any]] = None,
+    db: Session = Depends(get_db_session),
+    user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """复核确认：期望仍成立，样本回到 approved 继续参与回归。"""
+    try:
+        sample = GoldenSampleService(db).confirm_still_valid(
+            sample_id,
+            actor_id=user.id, actor_role=user.role, actor_name=user.username,
+            reason=(body or {}).get("reason"),
         )
     except GoldenSampleError as exc:
         raise _handle(exc) from exc

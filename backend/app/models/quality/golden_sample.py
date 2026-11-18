@@ -19,14 +19,16 @@ from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
 from app.database.base import Base
 
 # 样本状态：draft 填写中 / in_review 审核中（层级由 review_step 指出）/ approved 生效
-SAMPLE_STATUSES = ("draft", "in_review", "approved", "rejected", "superseded")
+# needs_recheck：其依赖的知识条目已上线或改版，期望可能失效，需人工确认后才回到 approved
+SAMPLE_STATUSES = ("draft", "in_review", "approved", "rejected", "superseded", "needs_recheck")
 
 STATUS_TRANSITIONS = {
     "draft": ("in_review", "approved"),      # 管理员提交直接 approved
     "in_review": ("in_review", "approved", "rejected"),
-    "approved": ("in_review", "superseded"),  # 打回重审 / 文档失效
+    "approved": ("in_review", "superseded", "needs_recheck"),  # 打回重审 / 文档失效 / 知识条目变更
     "rejected": ("in_review", "superseded"),
     "superseded": ("in_review",),
+    "needs_recheck": ("approved", "in_review", "superseded"),
 }
 
 # 期望结论四类 —— 负样本必须覆盖，否则只测正样本会严重偏乐观

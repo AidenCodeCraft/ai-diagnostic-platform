@@ -27,6 +27,7 @@ from app.models.quality.golden_sample import (
 from app.services.quality.review_policy import (
     STATUS_APPROVED,
     STATUS_IN_REVIEW,
+    STATUS_NEEDS_RECHECK,
     STATUS_SUPERSEDED,
     apply_review,
     can_review,
@@ -254,6 +255,73 @@ class GoldenSampleService:
         self._assert_transition(sample.status, STATUS_SUPERSEDED)
         sample.status = STATUS_SUPERSEDED
         self._audit(sample, actor_id, actor_name, "admin", "supersede", reason=reason)
+        self.db.commit()
+        self.db.refresh(sample)
+        return sample
+
+    def flag_documents_changed(
+        self,
+        doc_ids: List[int],
+        *,
+        reason: str,
+        actor_id: Optional[int] = None,
+        actor_role: Optional[str] = "admin",
+        actor_name: Optional[str] = None,
+    ) -> int:
+        """知识条目上线/改版 → 依赖它的 approved 样本标记 needs_recheck。
+
+        为什么不是直接 superseded：期望值可能仍然正确，只是需要人确认；
+        直接作废会让黄金集无声缩水。标记后 CI 不再使用该样本
+        （export_approved 只取 approved），避免出现「知识库改对了、回归反而变红」。
+        """
+        ids = {int(d) for d in (doc_ids or []) if d is not None}
+        if not ids:
+            return 0
+
+        rows = self.db.query(GoldenSample).filter(GoldenSample.status == STATUS_APPROVED).all()
+        hit: List[GoldenSample] = []
+        for sample in rows:
+            expected_docs = {
+                int(entry.get("doc_id"))
+                for entry in (sample.kb_expected or [])
+                if isinstance(entry, dict) and entry.get("doc_id") is not None
+            }
+            if expected_docs & ids:
+                hit.append(sample)
+
+        for sample in hit:
+            self._assert_transition(sample.status, STATUS_NEEDS_RECHECK)
+            sample.status = STATUS_NEEDS_RECHECK
+            self._audit(
+                sample, actor_id, actor_name, normalize_role(actor_role),
+                "recheck", reason=reason,
+            )
+        if hit:
+            self.db.commit()
+        return len(hit)
+
+    def confirm_still_valid(
+        self,
+        sample_id: int,
+        *,
+        actor_id: Optional[int],
+        actor_role: Optional[str],
+        actor_name: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> GoldenSample:
+        """复核确认期望仍成立 → 直接回到 approved（内容未变，不走审核链）。"""
+        sample = self.get(sample_id)
+        if normalize_role(actor_role) != "admin":
+            raise GoldenSampleError("只有管理员可以确认复核结果", status_code=403)
+        if sample.status != STATUS_NEEDS_RECHECK:
+            raise GoldenSampleError(f"当前状态 {sample.status} 不是待复核")
+        self._assert_transition(sample.status, STATUS_APPROVED)
+        sample.status = STATUS_APPROVED
+        sample.approved_by = actor_id
+        sample.approved_at = datetime.now(timezone.utc)
+        self._audit(
+            sample, actor_id, actor_name, "admin", "recheck_confirmed", reason=reason,
+        )
         self.db.commit()
         self.db.refresh(sample)
         return sample
