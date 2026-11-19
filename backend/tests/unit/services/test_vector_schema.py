@@ -40,7 +40,10 @@ def test_collection_fields_cover_required_and_support_sections():
     by_name = {field.name: field for field in fields}
     assert by_name["embedding"].params["dim"] == 1024
     assert by_name["content"].params["max_length"] == MAX_CONTENT_LENGTH >= 8192
-    assert COLLECTION_SCHEMA_VERSION == "v2"
+    assert COLLECTION_SCHEMA_VERSION == "v3"
+    # 同集合混放知识章节与日志证据块，靠 chunk_type 过滤，字段必须存在
+    assert by_name["chunk_type"].params["max_length"] >= 16
+    assert by_name["source"].params["max_length"] >= 64
 
 
 def _service_with_collection(field_names, dim_field=1024, indexes=None):

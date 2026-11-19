@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # ── Milvus (Vector Database) ────────────────────────────
     MILVUS_HOST: str = "localhost"
     MILVUS_PORT: int = 19530
-    MILVUS_COLLECTION: str = "knowledge_sections_v2"  # 章节级 schema；旧集合（整篇文档/512 维）需重建后回填
+    MILVUS_COLLECTION: str = "knowledge_chunks_v3"  # v3：章节 + chunk_type/source/ts；旧集合需重建后回填
     MILVUS_DIM: int = 1024  # embedding dimension（需与 EMBEDDING 模型维度一致）
     MILVUS_ENABLED: bool = False  # 启用 Milvus（未部署时自动回退到关键词搜索）
     MILVUS_USER: str = ""
@@ -86,6 +86,11 @@ class Settings(BaseSettings):
     # ── Worker (Celery) ─────────────────────────────────────
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+    CELERY_TASK_TIME_LIMIT: int = 900        # 单任务硬超时（秒）
+    CELERY_VISIBILITY_TIMEOUT: int = 3600    # ≥ 单步最长耗时×2，Redis 队列必设
+    CELERY_MAX_TASKS_PER_CHILD: int = 50     # worker 子进程回收阈值
+    # 上传后是否投递异步预处理链；broker 不可用时仅记日志，不影响上传
+    CELERY_ASYNC_INGEST: bool = True
 
     # ── Security ─────────────────────────────────────────────
     SECRET_KEY: str = "CHANGE_ME_IN_PRODUCTION_GENERATE_RANDOM_64_CHAR"

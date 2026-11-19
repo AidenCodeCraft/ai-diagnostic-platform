@@ -234,7 +234,11 @@ class DocumentIndexer:
         from app.services.knowledge.knowledge_service import KnowledgeService
 
         # 向量搜索
-        vector_results = self.vector_service.search(query, top_k=vector_top_k)
+        from app.services.knowledge.vector_service import KNOWLEDGE_CHUNK_TYPES
+
+        vector_results = self.vector_service.search(
+            query, top_k=vector_top_k, chunk_types=list(KNOWLEDGE_CHUNK_TYPES),
+        )
 
         # 关键词搜索（纯关键词通路，不走向量——避免与上面的向量结果重复）
         ks = KnowledgeService(self.db)

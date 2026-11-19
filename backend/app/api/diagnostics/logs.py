@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy.orm import Session
@@ -62,6 +62,14 @@ def list_logs(
 ) -> List[Log]:
     """List uploaded logs (optionally filtered by project)."""
     return LogService(db).list_logs(project_id=project_id)
+
+
+@router.get("/{log_id}/ingest-status")
+def ingest_status(log_id: int, db: Session = Depends(get_db_session)) -> Dict[str, Any]:
+    """异步预处理链进度（P2）：按 stage 汇总 succeeded/failed/running。"""
+    from app.worker.task_state import TaskStateStore
+
+    return TaskStateStore(db).summary(log_id)
 
 
 @router.get("/{log_id}", response_model=LogResponse)
