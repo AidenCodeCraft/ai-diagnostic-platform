@@ -27,10 +27,24 @@
       </div>
     </div>
 
+    <!-- 截图列表（识别结果作为现场证据参与诊断） -->
+    <div v-if="images.length > 0" class="image-area">
+      <div v-for="img in images" :key="img.id" class="image-card">
+        <img :src="img.previewUrl" :alt="img.name" class="image-thumb" />
+        <div class="image-meta">
+          <span class="image-name">{{ img.name }}</span>
+          <span class="image-status" :class="img.status">{{ imageStatusText(img) }}</span>
+          <span v-if="img.error" class="ufc-error">{{ img.error }}</span>
+        </div>
+        <button class="ufc-remove" :disabled="img.status === 'uploading'"
+          @click="emit('removeImage', img.id)">&times;</button>
+      </div>
+    </div>
+
     <!-- 输入框 -->
-    <div class="input-box" :class="{ 'has-uploads': files.length > 0 }">
-      <textarea ref="textareaRef" v-model="model" placeholder="输入问题..." class="msg-textarea" :rows="1"
-        @keydown.enter.exact.prevent="$emit('send')" @input="autoResize"></textarea>
+    <div class="input-box" :class="{ 'has-uploads': files.length > 0 || images.length > 0 }">
+      <textarea ref="textareaRef" v-model="model" placeholder="输入问题...（可直接粘贴截图）" class="msg-textarea" :rows="1"
+        @keydown.enter.exact.prevent="$emit('send')" @input="autoResize" @paste="onPaste"></textarea>
       <div class="input-actions">
         <div class="actions-left">
           <el-select :model-value="selectedModel" size="small" class="model-select" popper-class="model-select-popper"
@@ -46,6 +60,14 @@
           </button>
         </div>
         <div class="actions-right">
+          <label class="action-btn attach-btn" title="上传截图（PNG/JPG/WebP，可粘贴）">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <path d="m21 15-5-5L5 21" />
+            </svg>
+            <input type="file" accept="image/png,image/jpeg,image/webp" multiple @change="onImageChange" hidden />
+          </label>
           <label class="action-btn attach-btn" title="上传文件 (最大 200MB)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path
@@ -59,8 +81,8 @@
             </svg>
             <span>停止</span>
           </button>
-          <button v-else class="action-btn send-btn" :disabled="!model.trim() || isUploading"
-            :class="{ active: model.trim() && !isUploading }" @click="$emit('send')">
+          <button v-else class="action-btn send-btn" :disabled="!model.trim() || isUploading || imagesBusy"
+            :class="{ active: model.trim() && !isUploading && !imagesBusy }" @click="$emit('send')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
               <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
             </svg>
@@ -75,13 +97,14 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useFormat } from '@/composables/useFormat'
 import { adminApi, type ModelOption } from '@/api/admin'
-import type { FileAttachment } from './types'
+import type { FileAttachment, ImageAttachment } from './types'
 
 const { formatFileSize } = useFormat()
 
 const props = defineProps<{
   modelValue: string
   files: FileAttachment[]
+  images?: ImageAttachment[]
   selectedModel: string
   isUploading: boolean
   canReport: boolean
@@ -95,6 +118,8 @@ const emit = defineEmits<{
   (e: 'send'): void
   (e: 'stop'): void
   (e: 'fileInput', event: Event): void
+  (e: 'imageInput', files: File[]): void
+  (e: 'removeImage', id: string): void
   (e: 'removeFile', id: string): void
   (e: 'modelChange', model: string): void
   (e: 'generateReport'): void
@@ -113,6 +138,44 @@ const availableModels = ref<ModelOption[]>([
 ])
 
 const MAX_FILE_SIZE = 200 * 1024 * 1024  // 200MB
+
+const images = computed(() => props.images || [])
+
+/** 截图是否还在识别：识别未完成不允许发送，避免证据缺失 */
+const imagesBusy = computed(() => images.value.some(i => i.status === 'uploading'))
+
+function imageStatusText(img: ImageAttachment): string {
+  if (img.status === 'uploading') return '识别中…'
+  if (img.status === 'error') return '识别失败（可移除后重试）'
+  const label = img.path === 'vision' ? '图像理解' : img.path === 'ocr+vision' ? 'OCR+图像理解' : 'OCR 识别'
+  const lines = (img.text || '').split('\n').filter(Boolean).length
+  return lines ? `${label} · ${lines} 行` : label
+}
+
+function onImageChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (input.files && input.files.length) {
+    emit('imageInput', Array.from(input.files))
+  }
+  input.value = ''
+}
+
+/** 直接粘贴截图（Ctrl+V）：剪贴板里是文件而不是文本时才拦截默认行为 */
+function onPaste(e: ClipboardEvent) {
+  const items = e.clipboardData?.items
+  if (!items) return
+  const files: File[] = []
+  for (const item of Array.from(items)) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const file = item.getAsFile()
+      if (file) files.push(file)
+    }
+  }
+  if (files.length) {
+    e.preventDefault()
+    emit('imageInput', files)
+  }
+}
 
 async function loadAvailableModels() {
   modelsLoading.value = true
@@ -170,6 +233,54 @@ function statusText(fa: FileAttachment): string {
   max-width: var(--chat-content-width);
   margin: 0 auto;
 }
+
+.image-area {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+
+.image-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--chat-upload-area-border, #e5e7eb);
+  background: var(--chat-upload-card-bg, #fff);
+}
+
+.image-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex: none;
+}
+
+.image-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.image-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-status {
+  font-size: 11px;
+  color: var(--chat-upload-icon, #6b7280);
+}
+
+.image-status.done { color: #16a34a; }
+.image-status.error { color: #dc2626; }
 
 .upload-area {
   display: flex;

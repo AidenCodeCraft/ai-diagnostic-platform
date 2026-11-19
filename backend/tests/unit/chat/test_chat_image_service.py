@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.models import ChatImageUpload
 from app.services.providers.vision import VisionProviderError
 from app.services.vision.image_service import ChatImageError, ChatImageService, sniff_mime
 from app.services.vision.routing import PATH_OCR, PATH_OCR_VISION, PATH_VISION, analyze_text, decide_path
@@ -165,3 +166,25 @@ def test_texts_for_session_returns_succeeded_only(db_session):
     assert len(texts) == 1
     assert texts[0]["image_id"] == ok.id
     assert "register failed" in texts[0]["text"]
+
+
+def test_bind_to_session_links_images_for_send(db_session):
+    service = build_service(db_session, FakeProvider(ocr_text=LOG_TEXT))
+    first = service.upload(PNG, "a.png", user_id=1)
+    second = service.upload(JPG, "b.png", user_id=1)
+
+    bound = service.bind_to_session([first.id, second.id], 9, user_id=1)
+
+    assert bound == 2
+    assert db_session.query(ChatImageUpload).filter_by(session_id=9).count() == 2
+    assert len(ChatImageService(db_session).texts_for_session(9)) == 2
+
+
+def test_bind_ignores_other_users_images(db_session):
+    service = build_service(db_session, FakeProvider(ocr_text=LOG_TEXT))
+    record = service.upload(PNG, "a.png", user_id=1)
+
+    bound = service.bind_to_session([record.id], 9, user_id=2)
+
+    assert bound == 0
+    assert db_session.query(ChatImageUpload).filter_by(session_id=9).count() == 0

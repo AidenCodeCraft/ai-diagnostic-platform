@@ -138,6 +138,21 @@ def get_messages(
         raise HTTPException(status_code=404, detail="会话不存在") from exc
 
 
+def _bind_images(db: Session, body: Dict[str, Any], session_id: int, user_id: int) -> None:
+    """把本次提问附带的截图绑定到会话（上传时可能还没有会话）。"""
+    image_ids = body.get("image_ids") or []
+    if not image_ids:
+        return
+    try:
+        from app.services.vision.image_service import ChatImageService
+
+        ChatImageService(db).bind_to_session(
+            [int(value) for value in image_ids], session_id, user_id,
+        )
+    except Exception:  # noqa: BLE001 - 绑定失败不影响提问
+        logger.debug("[chat] bind image ids failed", exc_info=True)
+
+
 # AI Chat
 @router.post("/{session_id}/chat")
 def chat(
@@ -161,6 +176,7 @@ def chat(
             detail=f"当前同时在线人数已达上限（{limit}），请稍后再试",
         )
     try:
+        _bind_images(db, body, session_id, user_id)
         return ChatService(db).send_message(
             session_id=session_id,
             content=body["content"],
@@ -187,6 +203,8 @@ def chat_stream(
         ChatService(db).get_session(session_id, user_id=user_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="会话不存在") from exc
+
+    _bind_images(db, body, session_id, user_id)
 
     def generate():
         # Send an initial heartbeat immediately. Without this, Nginx/Vite may

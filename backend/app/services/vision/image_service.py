@@ -188,6 +188,27 @@ class ChatImageService:
     # 查询
     # ------------------------------------------------------------------
 
+    def bind_to_session(
+        self, image_ids: List[int], session_id: int, user_id: Optional[int] = None,
+    ) -> int:
+        """把前端上传的截图绑定到当前会话（发送消息时调用）。
+
+        为什么不在上传时就绑定：用户可能先粘图、再新建会话提问；
+        以上传时的 session_id 为准会导致证据丢失。发送时绑定是唯一可靠时机。
+        """
+        if not image_ids:
+            return 0
+        query = self.db.query(ChatImageUpload).filter(ChatImageUpload.id.in_(image_ids))
+        if user_id is not None:
+            query = query.filter(ChatImageUpload.user_id == user_id)
+        bound = 0
+        for record in query.all():
+            record.session_id = session_id
+            bound += 1
+        if bound:
+            self.db.commit()
+        return bound
+
     def get(self, image_id: int) -> Optional[ChatImageUpload]:
         return self.db.query(ChatImageUpload).filter(ChatImageUpload.id == image_id).first()
 

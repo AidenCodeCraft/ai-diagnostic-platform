@@ -105,6 +105,7 @@ export const chatApi = {
     onStopped?: () => void,
     signal?: AbortSignal,
     onTruncated?: () => void,
+    imageIds?: number[],
   ) {
     const token = sessionStorage.getItem('token')
     let resp: Response
@@ -112,7 +113,7 @@ export const chatApi = {
       resp = await fetch(`/api/v1/chat-sessions/${sessionId}/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ content, model, log_analysis: logAnalysis }),
+        body: JSON.stringify({ content, model, log_analysis: logAnalysis, image_ids: imageIds }),
         signal,
       })
     } catch (e: any) {
@@ -189,12 +190,30 @@ export const chatApi = {
   getAnalysisResult(analysisId: number) {
     return client.get(`/analyses/${analysisId}/result`, { timeout: 30000 })
   },
+  /** 上传对话截图并同步识别（OCR 主路径 + 视觉兜底） */
+  uploadChatImage(file: File, sessionId?: number) {
+    const form = new FormData()
+    form.append('file', file)
+    if (sessionId) form.append('session_id', String(sessionId))
+    return client.post<ChatImageUpload>('/chat/images', form, { timeout: 120000 })
+  },
+
   searchKnowledge(q: string) {
     return client.get('/knowledge/search', { params: { q } })
   },
   generateReport(logId: number) {
     return client.post(`/reports/${logId}`)
   },
+}
+
+export interface ChatImageUpload {
+  id: number
+  filename?: string
+  status: 'pending' | 'recognizing' | 'succeeded' | 'failed'
+  recognize_path?: string | null
+  text: string
+  text_preview: string
+  error_message?: string | null
 }
 
 export interface ChatImage {

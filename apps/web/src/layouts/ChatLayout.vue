@@ -98,10 +98,12 @@
             @annotate="handleAnnotate"
             @selectClarification="onSelectClarification" />
           <div class="input-wrapper">
-            <ChatInputArea v-model="inputText" :files="attachedFiles" :selectedModel="selectedModel"
+            <ChatInputArea v-model="inputText" :files="attachedFiles" :images="attachedImages"
+              :selectedModel="selectedModel"
               :isUploading="isUploading" :canReport="canGenerateReport" :hasMessages="messages.length > 0"
               :isStreaming="loadingPhase === 'streaming'"
               @send="sendMessage" @stop="stopChatStream(currentChatId)" @fileInput="onFileInput"
+              @imageInput="onImageInput" @removeImage="removeImage"
               @removeFile="removeFile" @modelChange="onModelChange"
               @generateReport="generateDiagnosticReport" />
           </div>
@@ -145,7 +147,7 @@ import GoldenSampleDialog from '@/components/common/GoldenSampleDialog.vue'
 import DownloadDialog from '@/components/common/DownloadDialog.vue'
 import ReportDialog from '@/components/common/ReportDialog.vue'
 import BranchPanel from '@/components/common/BranchPanel.vue'
-import type { ChatRecord, FileAttachment, MsgAttachment } from '@/components/chat/types'
+import type { ChatRecord, FileAttachment, ImageAttachment, MsgAttachment } from '@/components/chat/types'
 import { useChatBranch } from '@/composables/useChatBranch'
 
 // ── State ──────────────────────────────────────────────────────
@@ -236,6 +238,7 @@ const displayMessages = computed(() => {
 const messageIds = new Set<string>()
 
 const attachedFiles = ref<FileAttachment[]>([])
+const attachedImages = ref<ImageAttachment[]>([])
 const showUserMenu = ref(false)
 const showSettings = ref(false)
 const showHelp = ref(false)
@@ -628,6 +631,50 @@ async function deleteChat() {
 
 const MAX_FILE_SIZE = 200 * 1024 * 1024  // 200MB
 
+/** 截图上传 + 识别：识别文本落到后端 chat_images，发送时按 id 绑定会话 */
+async function onImageInput(files: File[]) {
+  const MAX_IMAGES = 5
+  const room = MAX_IMAGES - attachedImages.value.length
+  if (room <= 0) {
+    ElMessage.warning(`一次最多附带 ${MAX_IMAGES} 张截图`)
+    return
+  }
+  for (const file of files.slice(0, room)) {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    attachedImages.value.push({
+      id,
+      file,
+      name: file.name || '截图',
+      previewUrl: URL.createObjectURL(file),
+      status: 'uploading',
+    })
+    const target = () => attachedImages.value.find(i => i.id === id)
+    try {
+      const { data } = await chatApi.uploadChatImage(file, currentChatId.value || undefined)
+      const item = target()
+      if (!item) continue
+      item.imageId = data.id
+      item.path = data.recognize_path || undefined
+      item.text = data.text || ''
+      item.status = data.status === 'succeeded' ? 'done' : 'error'
+      if (data.status !== 'succeeded') item.error = data.error_message || '识别失败'
+    } catch (e: any) {
+      const item = target()
+      if (item) {
+        item.status = 'error'
+        item.error = formatApiError(e)
+      }
+    }
+  }
+}
+
+function removeImage(id: string) {
+  const idx = attachedImages.value.findIndex(i => i.id === id)
+  if (idx < 0) return
+  URL.revokeObjectURL(attachedImages.value[idx].previewUrl)
+  attachedImages.value.splice(idx, 1)
+}
+
 function onFileInput(e: Event) {
   const t = e.target as HTMLInputElement
   if (t.files) {
@@ -697,8 +744,13 @@ async function sendMessage() {
   setSending(chatId, true)
 
   const isNewChat = !chatId
+  const imageIds = attachedImages.value
+    .filter(i => i.status === 'done' && i.imageId)
+    .map(i => i.imageId as number)
   inputText.value = ''
   attachedFiles.value = []
+  attachedImages.value.forEach(i => URL.revokeObjectURL(i.previewUrl))
+  attachedImages.value = []
 
   try {
     if (isNewChat) {
@@ -749,7 +801,7 @@ async function sendMessage() {
       await reanalyzeWithClarification(userMsg, chatId)
     } else if (userMsg) {
       setLoadingPhase(chatId, 'streaming')
-      await streamChat(userMsg, chatId)
+      await streamChat(userMsg, chatId, undefined, imageIds)
     }
   } catch (e: any) {
     addMessage('assistant', `❌ 失败：${formatApiError(e)}`, undefined, chatId)
@@ -980,7 +1032,7 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
   )
 }
 
-async function streamChat(text: string, chatId: number, reuseMsg?: any) {
+async function streamChat(text: string, chatId: number, reuseMsg?: any, imageIds?: number[]) {
   const thinkStart = Date.now()
   const aId = thinkStart.toString()
   messageIds.add(aId)
