@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     # ── Worker (Celery) ─────────────────────────────────────
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+    CELERY_TASK_TIME_LIMIT: int = 900        # 单任务硬超时（秒）
+    CELERY_VISIBILITY_TIMEOUT: int = 3600    # ≥ 单步最长耗时×2，Redis 队列必设
+    CELERY_MAX_TASKS_PER_CHILD: int = 50     # worker 子进程回收阈值
 
     # ── Security ─────────────────────────────────────────────
     SECRET_KEY: str = "CHANGE_ME_IN_PRODUCTION_GENERATE_RANDOM_64_CHAR"

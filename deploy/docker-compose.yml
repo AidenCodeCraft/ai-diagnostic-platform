@@ -267,8 +267,8 @@ services:
         INSTALL_ML: "${INSTALL_ML:-false}"
     container_name: ai-diagnostic-worker
     restart: always
-    # 运行简单的 keep-alive 进程（Celery 集成将在后续版本添加）
-    command: python -c "import time; print('Worker ready (Celery pending)'); [time.sleep(3600) for _ in iter(int, 1)]"
+    # Celery worker：ingest 队列跑日志预处理链，embed 队列限并发避免打爆 embedding 服务
+    command: celery -A app.worker.celery_app:celery_app worker -Q ingest,embed -c 2 --loglevel=INFO
     # 镜像 Dockerfile 的 HEALTHCHECK 是 HTTP /health，仅适用于 backend；
     # worker 为 keep-alive 占位进程，禁用容器级 healthcheck 避免长期 unhealthy 误报。
     healthcheck:
