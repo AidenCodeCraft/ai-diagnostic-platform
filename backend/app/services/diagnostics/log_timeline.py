@@ -59,6 +59,26 @@ class TimelineManifest:
             "size_bytes": self.size_bytes,
         }
 
+    @classmethod
+    def from_dict(cls, payload: Optional[Dict[str, Any]]) -> "TimelineManifest":
+        """从会话上下文/任务参数里恢复（JSON 会把 tuple 变成 list）。"""
+        payload = payload or {}
+        return cls(
+            total_lines=int(payload.get("total_lines") or 0),
+            parsed_lines=int(payload.get("parsed_lines") or 0),
+            unparsed_lines=int(payload.get("unparsed_lines") or 0),
+            min_ts=payload.get("min_ts"),
+            max_ts=payload.get("max_ts"),
+            hour_offsets={
+                str(key): [int(value[0]), int(value[1])]
+                for key, value in (payload.get("hour_offsets") or {}).items()
+                if isinstance(value, (list, tuple)) and len(value) >= 2
+            },
+            module_stats={str(k): int(v) for k, v in (payload.get("module_stats") or {}).items()},
+            encoding=str(payload.get("encoding") or "utf-8"),
+            size_bytes=int(payload.get("size_bytes") or 0),
+        )
+
     @property
     def coverage(self) -> Tuple[Optional[datetime], Optional[datetime]]:
         def _parse(value: Optional[str]) -> Optional[datetime]:

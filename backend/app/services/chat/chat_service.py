@@ -182,6 +182,44 @@ class ChatService:
         )
         return None
 
+    def _check_time_window(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """时间点是否落在日志覆盖范围内（P1 步骤 3）。
+
+        不在范围内时返回 {reply, options}，并把候选时段暂存到上下文，
+        供下一轮「用户选时段」时续跑。
+        """
+        from app.services.chat.time_gate import check_time_window
+
+        session = self.get_session(session_id)
+        context = session.context or {}
+        result = check_time_window(
+            context.get("active_slots") or {},
+            context.get("last_analysis") or {},
+        )
+        if result:
+            self.update_session(session_id, context={
+                "pending_time_choice": result.get("options"),
+                "asked_time": result.get("asked"),
+            })
+        return result
+
+    def _record_time_mismatch_trace(self, session_id: int, content: str) -> None:
+        """时间不在日志范围的轨迹（conclusion=time_mismatch）。"""
+        try:
+            from app.services.quality.trace_service import (
+                CONCLUSION_TIME_MISMATCH, record_trace,
+            )
+
+            record_trace(
+                self.db,
+                session_id=session_id,
+                question=content,
+                clarification=[{"slot": "time_range"}],
+                conclusion=CONCLUSION_TIME_MISMATCH,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[chat] record time-mismatch trace failed", exc_info=True)
+
     def _record_gate_trace(self, session_id: int, content: str) -> None:
         """槽位缺失追问的轨迹（结论分支 ask_slot），便于黄金集统计负样本。"""
         try:
@@ -348,6 +386,15 @@ class ChatService:
                 self._record_gate_trace(session_id, content)
                 return {"reply": gate_reply, "model": provider_name}
 
+            mismatch = self._check_time_window(session_id)
+            if mismatch:
+                self.add_message(session_id, "assistant", mismatch["reply"], user_id=user_id)
+                self._record_time_mismatch_trace(session_id, content)
+                return {
+                    "reply": mismatch["reply"], "model": provider_name,
+                    "time_options": mismatch.get("options") or [],
+                }
+
         # Enrich with diagnostic context（按会话所属项目过滤知识）
         agent = DiagnosticChatAgent(
             self.db, provider_name, project_id=getattr(session, "project_id", None),
@@ -397,6 +444,15 @@ class ChatService:
             if gate_reply:
                 self._record_gate_trace(session_id, content)
                 for char in gate_reply:
+                    yield f"data: {json.dumps({'token': char}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'done': True, 'model': provider_name})}\n\n"
+                return
+
+            mismatch = self._check_time_window(session_id)
+            if mismatch:
+                self._record_time_mismatch_trace(session_id, content)
+                yield f"data: {json.dumps({'time_options': mismatch.get('options') or []}, ensure_ascii=False)}\n\n"
+                for char in mismatch["reply"]:
                     yield f"data: {json.dumps({'token': char}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'done': True, 'model': provider_name})}\n\n"
                 return
