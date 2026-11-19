@@ -221,16 +221,29 @@ class ChatService:
             logger.debug("[chat] record time-mismatch trace failed", exc_info=True)
 
     def _build_log_context(self, session_id: int) -> Optional[Dict[str, Any]]:
-        """为本次提问装配日志时间窗与片段（无日志/无时间窗时返回 None）。"""
+        """为本次提问装配日志时间窗与片段（无日志/无时间窗时返回 None）。
+
+        日志引用优先取分析结果里的字段；分析结果通常不含存储引用，
+        因此回退到会话绑定的 Log.file_path（上传时写入的 minio:// 或本地路径）。
+        """
         try:
             from app.services.chat.log_context import build_log_context
 
             session = self.get_session(session_id)
             context = session.context or {}
+            analysis = dict(context.get("last_analysis") or {})
+
+            if not any(analysis.get(key) for key in ("reference", "file_path", "stored_path")):
+                log_id = getattr(session, "log_id", None)
+                if log_id:
+                    from app.models import Log
+
+                    log = self.db.query(Log).filter(Log.id == log_id).first()
+                    if log and log.file_path:
+                        analysis["reference"] = str(log.file_path)
+
             log_context = build_log_context(
-                context.get("active_slots") or {},
-                context.get("last_analysis") or {},
-                context,
+                context.get("active_slots") or {}, analysis, context,
             )
             return log_context.to_dict() if log_context else None
         except Exception:  # noqa: BLE001
