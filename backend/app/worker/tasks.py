@@ -229,8 +229,12 @@ def ingest_finalize(self, log_id: int) -> Dict[str, Any]:
 
 
 def enqueue_pipeline(log_id: int) -> Dict[str, str]:
-    """入口：上传完成后调用，启动整条链。"""
-    result = ingest_prepare.apply_async(args=[log_id], queue="ingest")
+    """入口：上传完成后调用，启动整条链。
+
+    `retry=False`：broker 不可用时立刻失败（由调用方降级为「仅上传成功」），
+    绝不能让上传请求卡在队列连接重试上。
+    """
+    result = ingest_prepare.apply_async(args=[log_id], queue="ingest", retry=False)
     return {"task_id": str(getattr(result, "id", "")), "log_id": str(log_id), "queue": "ingest"}
 
 

@@ -27,7 +27,10 @@ def captured(monkeypatch):
     return calls
 
 
-def test_upload_enqueues_ingest_pipeline(db_session, captured):
+def test_upload_enqueues_ingest_pipeline(db_session, captured, monkeypatch):
+    # 测试环境默认关闭异步投递（避免连 broker），这里显式打开验证接线
+    monkeypatch.setattr(settings, "CELERY_ASYNC_INGEST", True)
+
     log = _upload(db_session)
 
     assert captured == [log.id]
@@ -50,6 +53,26 @@ def test_async_ingest_can_be_disabled(db_session, captured, monkeypatch):
 
     assert log.id is not None
     assert captured == []
+
+
+def test_enqueue_pipeline_does_not_retry_on_broker_failure(monkeypatch):
+    """broker 连不上时必须立刻失败，不能重试把上传请求拖住。"""
+    captured = {}
+
+    class FakeAsyncResult:
+        id = "task-1"
+
+    def fake_apply_async(*args, **kwargs):
+        captured.update(kwargs)
+        return FakeAsyncResult()
+
+    monkeypatch.setattr(worker_tasks.ingest_prepare, "apply_async", fake_apply_async)
+
+    result = worker_tasks.enqueue_pipeline(42)
+
+    assert captured["retry"] is False
+    assert captured["queue"] == "ingest"
+    assert result["task_id"] == "task-1"
 
 
 def test_ingest_status_endpoint(client, admin_headers):

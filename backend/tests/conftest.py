@@ -12,6 +12,8 @@ import os
 # 测试环境强制使用确定性哈希嵌入：避免下载 BGE 模型导致离线/CI 阻塞
 os.environ.setdefault("EMBEDDING_PROVIDER", "hash")
 os.environ.setdefault("EMBEDDING_HASH_FALLBACK", "true")
+# 测试环境不连 broker：上传时才不会因 Redis 不可用而重试等待（会拖慢整条测试套件）
+os.environ.setdefault("CELERY_ASYNC_INGEST", "false")
 
 import pytest
 from fastapi.testclient import TestClient

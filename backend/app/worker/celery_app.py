@@ -33,7 +33,14 @@ def create_celery_app() -> Celery:
         task_track_started=True,
         task_time_limit=time_limit,
         task_soft_time_limit=max(30, time_limit - 60),
-        broker_transport_options={"visibility_timeout": visibility_timeout},
+        broker_transport_options={
+            "visibility_timeout": visibility_timeout,
+            # broker 不可用时快速失败：上传接口不能被队列连接卡住
+            "socket_connect_timeout": 3,
+            "socket_timeout": 3,
+        },
+        broker_connection_timeout=3,
+        broker_connection_retry_on_startup=False,
         task_default_queue=DEFAULT_QUEUE,
         task_queues=(Queue(DEFAULT_QUEUE), Queue(EMBED_QUEUE)),
         task_default_exchange=DEFAULT_QUEUE,
