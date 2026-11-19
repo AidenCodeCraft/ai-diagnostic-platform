@@ -4,7 +4,7 @@
 > 图片识别全部通过 DeepSeek 官方能力完成（视觉理解 + OCR API），
 > 飞书侧只负责"把图拿到手"。
 
-- 状态：方案定稿；**S1 已实现**（回调骨架、验签/解密、事件幂等、图片记录落库）；S2~S5 未开始
+- 状态：方案定稿，未实现
 - 最后核对的官方文档：2026-11（DeepSeek 图像理解 / OCR、飞书获取消息资源文件）
 - 相关代码位置：`backend/app/api/integrations/`、`backend/app/services/integrations/feishu/`、
   `backend/app/services/providers/`、`backend/app/worker/tasks.py`
@@ -274,32 +274,9 @@ UNIQUE (message_id, image_key)
 
 ---
 
-## 11. 已定稿决策（2026-11，按建议默认通过）
+## 11. 未决项（需拍板）
 
-| 编号 | 决策 |
-| --- | --- |
-| F1 | **多图消息**：全部识别，合并成一个证据包，按图片在消息中的出现顺序排列 |
-| F2 | **图片 + 文字混合**：拼成一次提问，图片识别文本作为附件证据 |
-| F3 | **机器人回复**：只回"已识别 + 关键行摘要"；诊断结论仍由主对话流程生成，避免两条链路口径不一致 |
-| F4 | **迟到事件**（`image_key` 已过期）：明确回复"资源已过期，请重新发送"，不做静默失败 |
-
-## 12. S1 实现说明（已完成）
-
-| 能力 | 位置 |
-| --- | --- |
-| 回调入口 + 握手 | `app/api/integrations/feishu.py`（`POST /api/v1/integrations/feishu/events`） |
-| 验签 + AES-256-CBC 解密 | `services/integrations/feishu/security.py` |
-| 事件解析（image / post 抽 image_key） | `services/integrations/feishu/events.py` |
-| 事件幂等 + 图片记录落库 | `services/integrations/feishu/event_service.py` |
-| 表结构 | `feishu_events`、`feishu_attachments`（迁移 `a1b2c3d4e5f7`） |
-| 状态查询 | `GET /api/v1/integrations/feishu/attachments/{id}`（需登录） |
-
-安全红线（实现时已固化）：
-
-- 未配置 `FEISHU_ENCRYPT_KEY` 或 `FEISHU_VERIFICATION_TOKEN` 时，回调返回 **503**，
-  绝不开放无校验的入口；
-- 配置了 Encrypt Key 时必须验签 + 解密，签名不符返回 403，不落库；
-- 事件幂等靠 `event_id` 唯一索引，并发重投按 duplicate 处理而不是 500。
-
-字段级差异说明：`feishu_attachments.status` 默认 `pending`，S2 下载时才流转到
-`downloading → recognizing → succeeded/failed`；`recognize_path` 由 S4 的路由判定写入。
+1. **多图消息**：同一 `message_id` 发 3 张图，是各自独立识别后合并成一个证据包，还是只取第一张？（建议：全部识别，合并成一个证据包，按图片顺序排列）
+2. **图片 + 文字混合消息**：文字里的现象描述 + 图片是否自动拼成一次提问？（建议：拼成一次，图片文本作为附件）
+3. **机器人回复内容**：只回复"已识别 + 关键行摘要"，还是直接给出排查建议？（建议：先给识别摘要，诊断仍由主对话流程生成，避免两条链路结论不一致）
+4. **历史图片补偿**：`image_key` 会过期，迟到的事件（如服务重启期间）无法补下载，是否需要告知用户"请重新发送"？（建议：明确告知，不做静默失败）
