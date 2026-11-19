@@ -14,6 +14,11 @@ on:
         type: choice
         options: ["fast", "full"]
         default: "fast"
+  push:
+    # 每次提交触发（文档 P3.5）。runner 未就绪时由 job 级 if 直接跳过，
+    # 不会卡在「等待一个不存在的 runner」——把仓库变量 GOLDEN_RUNNER_READY
+    # 设为 'true' 即自动生效，无需再改工作流。
+    branches: [master, "feat/**"]
   schedule:
     # 每日 18:00 UTC = 次日 02:00 北京时间，跑全量判分
     - cron: "0 18 * * *"
@@ -24,13 +29,15 @@ concurrency:
 
 jobs:
   regression:
+    # 手动/定时始终尝试；push 只在 runner 就绪（变量 GOLDEN_RUNNER_READY=true）时执行
+    if: github.event_name != 'push' || vars.GOLDEN_RUNNER_READY == 'true'
     runs-on: [self-hosted, ai-diag]
     timeout-minutes: 60
     env:
       MILVUS_ENABLED: "true"
       MILVUS_HOST: ${{ vars.MILVUS_HOST || '127.0.0.1' }}
       MILVUS_PORT: ${{ vars.MILVUS_PORT || '19530' }}
-      MILVUS_COLLECTION: ${{ vars.MILVUS_COLLECTION || 'knowledge_chunks_v2' }}
+      MILVUS_COLLECTION: ${{ vars.MILVUS_COLLECTION || 'knowledge_chunks_v3' }}
       MILVUS_DIM: "1024"
       EMBEDDING_PROVIDER: "api"          # 指向自托管 BGE 服务
       EMBEDDING_API_URL: ${{ vars.EMBEDDING_API_URL }}

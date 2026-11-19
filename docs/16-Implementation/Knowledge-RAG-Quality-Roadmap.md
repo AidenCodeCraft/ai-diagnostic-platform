@@ -188,7 +188,7 @@ Status: P0 已完成，P1~P3 按本文执行
 | 5.4 存储布局与预签名 | ✅ | `LogStorage.save(project_id=)` → `logs/p{pid}/{yyyymmdd}/`、`presigned_get()` TTL 900s |
 | 5.1 BM25 外置 | ⏳ | 需 Milvus 2.5 内置 BM25 或外部索引，待部署环境确认版本 |
 | 5.2 阈值校准 | ⏳ | 依赖真实黄金集与 A/B 数据（见 Deployment-Verification-Checklist V5） |
-| 5.5 回归 CI push 触发 | ⏳ | 需自托管 runner（标签 `ai-diag`）就绪 |
+| 5.5 回归 CI push 触发 | ✅（待 runner） | 已加 `push` 触发 + `GOLDEN_RUNNER_READY` 变量闸门；runner 就绪后设变量即生效 |
 
 > 部署环境需要人工验证的项统一列在 [`Deployment-Verification-Checklist.md`](./Deployment-Verification-Checklist.md)，含命令、期望结果与回填模板。
 
@@ -220,7 +220,7 @@ Status: P0 已完成，P1~P3 按本文执行
 - CI 快检（每次提交）：确定性断言（recall@5 ≥0.85、hit@30 ≥0.90、结论类别一致 ≥0.95），不调 LLM
 - 夜间全量：LLM 判分抽样 20%
 - 门槛：任一项低于门槛或单次下降 >2pp → 阻断；**只允许改代码或标 `superseded`，不允许下调阈值**
-- 自托管 runner 就绪后，把 `golden-regression.yml` 的触发加上 `push`
+- 自托管 runner 就绪后，把仓库变量 `GOLDEN_RUNNER_READY` 设为 `true` 即启用 push 触发（工作流已加 `push`，runner 未就绪时 job 级 `if` 会直接跳过，不会排队等待）
 
 ---
 

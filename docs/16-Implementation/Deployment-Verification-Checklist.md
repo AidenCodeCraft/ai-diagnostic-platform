@@ -173,7 +173,7 @@ PY
 | --- | --- |
 | runner 在线 | GitHub → Settings → Actions → Runners 显示 Idle |
 | 手动触发 | `workflow_dispatch` 跑通，报告 artifact 可下载 |
-| push 触发 | 文档 P3.5 要求加上 `push`；runner 就绪后取消注释 |
+| push 触发 | 工作流已加 `push`；runner 就绪后把仓库变量 `GOLDEN_RUNNER_READY` 设为 `true` |
 | 门槛 | recall@5 ≥0.85、hit@30 ≥0.90；**不通过时改代码或标 superseded，不允许调阈值** |
 
 ---
