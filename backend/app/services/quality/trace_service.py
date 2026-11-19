@@ -18,7 +18,9 @@ from app.models import RetrievalTrace
 logger = logging.getLogger(__name__)
 
 # 与 golden sample / 回归报告绑定的流水线版本，改动检索链路时升级
-PIPELINE_VERSION = "p1-quality-2026-11"
+# 2026-11-b：回答上下文加入「日志证据块」（P1 步骤 5），会影响命中与引用，
+# 因此必须升版本，否则回归结果无法与旧轨迹归因区分。
+PIPELINE_VERSION = "p1.5-quality-2026-11"
 
 CONCLUSION_ANSWERED = "answered"
 CONCLUSION_REFUSED = "refused"
