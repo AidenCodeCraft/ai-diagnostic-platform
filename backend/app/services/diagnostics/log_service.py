@@ -96,7 +96,24 @@ class LogService:
             "Log uploaded: id=%d file=%s size=%d bytes user=%s",
             log.id, filename, bytes_written, upload_user_id or "anon",
         )
+
+        # 异步预处理链（P2）：投递失败绝不影响上传本身的成功
+        self._enqueue_ingest(log)
         return log
+
+    @staticmethod
+    def _enqueue_ingest(log: Log) -> None:
+        """把日志投递到异步预处理链（prepare → parse → … → finalize）。"""
+        try:
+            if not bool(getattr(settings, "CELERY_ASYNC_INGEST", True)):
+                return
+            from app.worker.tasks import enqueue_pipeline
+
+            enqueue_pipeline(int(log.id))
+        except Exception:  # noqa: BLE001 - broker 不可用时上传仍须成功
+            logger.warning(
+                "[upload] enqueue ingest failed for log %s (上传已成功)", log.id, exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Queries

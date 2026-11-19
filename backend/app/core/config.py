@@ -89,6 +89,8 @@ class Settings(BaseSettings):
     CELERY_TASK_TIME_LIMIT: int = 900        # 单任务硬超时（秒）
     CELERY_VISIBILITY_TIMEOUT: int = 3600    # ≥ 单步最长耗时×2，Redis 队列必设
     CELERY_MAX_TASKS_PER_CHILD: int = 50     # worker 子进程回收阈值
+    # 上传后是否投递异步预处理链；broker 不可用时仅记日志，不影响上传
+    CELERY_ASYNC_INGEST: bool = True
 
     # ── Security ─────────────────────────────────────────────
     SECRET_KEY: str = "CHANGE_ME_IN_PRODUCTION_GENERATE_RANDOM_64_CHAR"

@@ -130,6 +130,17 @@ Status: P0 已完成，P1~P3 按本文执行
 
 目标：首答不等深度处理，但追问、聚合、审计需要完整产物。
 
+## 4.0 进度
+
+| 项 | 状态 | 落地位置 |
+| --- | --- | --- |
+| 队列骨架（可靠性四参数 + 双队列） | ✅ | `worker/celery_app.py` |
+| 任务状态机 / 幂等 | ✅ | `worker/task_state.py` |
+| 处理链路 prepare→parse→template→compress→finalize | ✅ | `worker/tasks.py` |
+| 上传接线 + 进度查询 | ✅ | `LogService._enqueue_ingest`、`GET /logs/{id}/ingest-status` |
+| Drain3 真实依赖与模板库持久化 | ⏳ | 目前 `fallback-hash`（`template_source()` 可查） |
+| 分块入 Milvus（`chunk_type=error/template`） | ⏳ | 待做 |
+
 ## 4.1 队列骨架
 
 - Celery + Redis（`CELERY_BROKER_URL`/`RESULT_BACKEND` 已配置，`worker` 容器当前是 keep-alive 占位）
