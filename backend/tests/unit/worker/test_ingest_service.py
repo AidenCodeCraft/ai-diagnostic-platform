@@ -87,3 +87,53 @@ def test_stage_progress_percentages():
     assert stage_progress("parse", 3, 4)["percent"] == 75
     assert stage_progress("parse", 0, 0)["percent"] == 0
     assert stage_progress("parse", 10, 4)["percent"] == 100
+
+
+def test_drain3_assigns_cluster_ids(tmp_path, monkeypatch):
+    from app.worker import ingest_service as svc
+
+    monkeypatch.setattr(svc.settings, "UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(svc, "_DRAIN_MINER", None)
+
+    assert svc.template_source() == "drain3"
+    first = svc.template_id("[APP] Volume:27, 20, 20")
+    second = svc.template_id("[APP] Volume:11, 5, 5")
+    other = svc.template_id("[NET] register failed 1078")
+
+    assert first.startswith("d"), "Drain3 生效时不应退化为哈希模板"
+    assert first == second
+    assert first != other
+    assert (tmp_path / "_ingest" / "drain3_state.bin").exists(), "模板库必须落盘"
+
+
+def test_drain3_state_survives_restart(tmp_path, monkeypatch):
+    from app.worker import ingest_service as svc
+
+    monkeypatch.setattr(svc.settings, "UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(svc, "_DRAIN_MINER", None)
+
+    before = svc.template_id("[APP] Volume:1, 2, 3")
+    svc.reset_drain_miner()          # 模拟 worker 进程重启
+    after = svc.template_id("[APP] Volume:7, 8, 9")
+
+    assert before == after, "重启后模板 id 必须保持不变，否则跨文件聚合失效"
+
+
+def test_fallback_when_drain3_missing(tmp_path, monkeypatch):
+    import builtins
+
+    from app.worker import ingest_service as svc
+
+    monkeypatch.setattr(svc.settings, "UPLOAD_DIR", str(tmp_path))
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name.startswith("drain3"):
+            raise ImportError("no drain3")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(svc, "_DRAIN_MINER", None)
+
+    assert svc.template_id("[APP] Volume:1").startswith("h:")
+    assert svc.template_source() == "fallback-hash"

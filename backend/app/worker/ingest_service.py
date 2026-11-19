@@ -11,10 +11,18 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.core.config import settings
+from app.core.logging_config import get_logger
 from app.services.diagnostics.log_timeline import extract_module, extract_timestamp
+
+logger = get_logger(__name__)
+
+_DRAIN_LOCK = threading.Lock()
 
 STAGE_ORDER = ("prepare", "parse", "template", "compress", "finalize")
 
@@ -83,39 +91,73 @@ def normalize_line(line: str) -> Optional[Dict[str, Any]]:
 
 
 def template_id(line: str) -> str:
-    """模板标识：优先 Drain3，缺依赖时退化为「打码后文本的稳定哈希」。
+    """模板标识：Drain3 可用时用聚类 id（`d<cluster_id>`），否则退化为稳定哈希。
 
     Drain3 不可用不是错误——模板聚合是增强项；但降级必须留痕（`template_source`），
     否则以后没人知道这些 template_id 是怎么来的。
     """
     masked = mask_variables(line)
-    drain = _drain_template(masked)
-    if drain is not None:
-        return drain
+    if template_source() == "drain3":
+        with _DRAIN_LOCK:
+            cluster = _drain_template(masked)
+        if cluster is not None:
+            return f"d{cluster}"
     digest = hashlib.sha1(masked.strip().encode("utf-8")).hexdigest()[:16]
     return f"h:{digest}"
 
 
-def _drain_template(masked: str) -> Optional[str]:
-    try:
-        from drain3 import TemplateMiner  # type: ignore
-        from drain3.template_miner_config import TemplateMinerConfig  # type: ignore
-    except ImportError:
-        return None
+def _drain_state_path() -> Path:
+    """模板库快照路径（跨文件、跨批次共用）。"""
+    base = Path(str(getattr(settings, "UPLOAD_DIR", "data/raw"))) / "_ingest"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "drain3_state.bin"
 
+
+def _get_drain_miner():
     global _DRAIN_MINER
-    if _DRAIN_MINER is None:  # pragma: no cover - 需要真实 drain3 依赖
-        config = TemplateMinerConfig()
-        config.drain_depth = 4
-        config.drain_sim_th = 0.4
-        config.drain_max_children = 100
-        config.drain_max_clusters = 1024
-        _DRAIN_MINER = TemplateMiner(config=config)
-    result = _DRAIN_MINER.add_log_message(masked)  # pragma: no cover
-    return str(result.get("cluster_id")) if isinstance(result, dict) else None  # pragma: no cover
+    if _DRAIN_MINER is not None:
+        return _DRAIN_MINER
+    from drain3 import TemplateMiner
+    from drain3.file_persistence import FilePersistence
+    from drain3.template_miner_config import TemplateMinerConfig
+
+    config = TemplateMinerConfig()
+    config.drain_depth = 4
+    config.drain_sim_th = 0.4
+    config.drain_max_children = 100
+    config.drain_max_clusters = 1024
+    # 关键：持久化。不落盘的模板库每次进程重启都从零学，template_id 跨文件对不上，
+    # 「同类错误按模板聚合」直接失效。
+    handler = FilePersistence(str(_drain_state_path()))
+    _DRAIN_MINER = TemplateMiner(persistence_handler=handler, config=config)
+    return _DRAIN_MINER
+
+
+def _drain_template(masked: str) -> Optional[int]:
+    global _DRAIN_WARNED
+    try:
+        miner = _get_drain_miner()
+    except Exception:  # noqa: BLE001 - 依赖/状态文件异常一律退化到哈希
+        # 必须留一条 warning：静默降级会让「模板 id 全是哈希」这件事几个月没人发现
+        if not _DRAIN_WARNED:
+            _DRAIN_WARNED = True
+            logger.warning("[template] Drain3 不可用，退化为哈希模板（只提示一次）", exc_info=True)
+        return None
+    result = miner.add_log_message(masked)
+    if isinstance(result, dict):
+        cluster_id = result.get("cluster_id")
+        return int(cluster_id) if cluster_id is not None else None
+    return None
 
 
 _DRAIN_MINER = None
+_DRAIN_WARNED = False
+
+
+def reset_drain_miner() -> None:
+    """测试用：丢弃进程内模板库实例（状态文件仍在磁盘上）。"""
+    global _DRAIN_MINER
+    _DRAIN_MINER = None
 
 
 def template_source() -> str:
