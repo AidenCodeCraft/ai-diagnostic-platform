@@ -4,11 +4,36 @@
 下面这些只能在真实环境验证。每项都给了命令、期望结果和"不通过时记录什么"，
 验证完请把结果贴回对应条目。
 
+> **V1/V2 已在 2026-11-19 确认**（详见下方「V1/V2 已确认前提」）。
+>
 > 共同前提：`backend/.env` 已按 `.env.example` 配置；
 > `MILVUS_ENABLED=true`、`REDIS_URL` 可用、`MINIO_ENABLED=true`（如涉及存储项）。
 > 所有命令在 `backend/` 目录下执行，使用部署环境的 Python 解释器。
 
 ---
+
+## V1/V2 已确认前提（2026-11-19）
+
+| 项 | 结论 |
+| --- | --- |
+| 现有数据 | 开发阶段，全部为测试数据，可删除重建 |
+| 集合策略 | **不并行保留旧集合**，直接重建 `knowledge_chunks_v3` |
+| Milvus 版本 | **v2.4.0**，支持 `chunk_type in [...]`，无需单值降级 |
+| Embedding | 先用**本地 BGE**（`bge-large-zh-v1.5`，1024 维，CPU） |
+| 知识库形态 | AI 润色的标准 Markdown；按标题切章、超长小节按段落切窗、过滤目录/前言 |
+| 停服窗口 | 不需要；提问只使用「提问前已入库」的知识，增量不影响在途提问 |
+| 部署现状 | 部署机尚未安装依赖/MinIO/Milvus；**测试环境可操作，生产改动需再确认** |
+| 验收用例 | 提问「进出站日志中搜索什么」→ 应召回《FAQ》第 5 节（旧实现只召回《线路》第 1 节） |
+
+### 一条命令跑完 V1+V2
+
+```bash
+cd backend
+python -m scripts.verify_v3_cutover   --question "进出站日志中搜索什么"   --expect-doc FAQ --expect-section "第 5 节"
+```
+
+输出 `reports/v3_cutover.json`，`verdict` 为 `ready` 才可切流量；脚本会断言：
+所有命中 `chunk_type=section` 且 `source=knowledge`，并且验收用例命中《FAQ》第 5 节。
 
 ## V1 集合 v3 重建与回填（**破坏性，必须最先做**）
 
