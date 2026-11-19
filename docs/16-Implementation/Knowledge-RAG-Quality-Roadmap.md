@@ -44,7 +44,7 @@ Status: P0 已完成，P1~P3 按本文执行
 | 能力 | 实现位置 | 关键参数 |
 | --- | --- | --- |
 | 私有 BGE 语义嵌入 | `services/knowledge/embedding.py` | `bge-large-zh-v1.5`，1024 维，batch=32，CPU |
-| 章节级集合 | `services/knowledge/vector_service.py` | `knowledge_sections_v2`，`id/doc_id/chunk_index/content(8192)/title/section/content_hash/embedding` |
+| 章节级集合 | `services/knowledge/vector_service.py` | `knowledge_chunks_v3`，`id/doc_id/chunk_index/content(8192)/title/section/content_hash/chunk_type/source/ts/embedding` |
 | 索引与度量 | 同上 `build_index_params` | HNSW(M=32, efConstruction=256) + COSINE，查询 ef=64 |
 | 章节级混合检索 | `services/knowledge/section_search.py` | BM25Plus + 向量 → RRF(k=60)，统一 `SectionChunk.key` 口径 |
 | 精排 | `services/knowledge/rerank_service.py` | `bge-reranker-base`，候选取前 30，失败静默跳过 |
@@ -138,8 +138,8 @@ Status: P0 已完成，P1~P3 按本文执行
 | 任务状态机 / 幂等 | ✅ | `worker/task_state.py` |
 | 处理链路 prepare→parse→template→compress→finalize | ✅ | `worker/tasks.py` |
 | 上传接线 + 进度查询 | ✅ | `LogService._enqueue_ingest`、`GET /logs/{id}/ingest-status` |
-| Drain3 真实依赖与模板库持久化 | ⏳ | 目前 `fallback-hash`（`template_source()` 可查） |
-| 分块入 Milvus（`chunk_type=error/template`） | ⏳ | 待做 |
+| Drain3 真实依赖与模板库持久化 | ✅ | `ingest_service.py`（`FilePersistence` → `_ingest/drain3_state.bin`） |
+| 分块入 Milvus（`chunk_type=error/template`） | ✅ | `diagnostics/log_indexer.py` + `VectorService.index_log_chunks` |
 
 ## 4.1 队列骨架
 
@@ -229,6 +229,9 @@ Status: P0 已完成，P1~P3 按本文执行
 | D11 | 审核链按提交人角色：管理员直接生效；开发→管理员；测试→开发→管理员；用户→测试→开发→管理员 |
 | D12 | 知识条目上线 → 依赖它的 approved 样本标 `needs_recheck`，复核确认后恢复 |
 | D13 | 回归 CI 每次提交触发（确定性断言），LLM 判分夜间抽样 |
+| D14 | 知识章节与日志证据块同集合，schema v3 增加 `chunk_type/source/ts`；知识检索必须传 `chunk_types=("section",)`，不传即视为缺陷 |
+| D15 | 日志块主键取负数（`-(log_id*100000+i)`），与知识文档正数主键天然隔离，删除互不影响 |
+| D16 | 日志按「模板 + 1 分钟桶」聚合后入库；报错行必入，正常模板需重复 ≥2 次；单日志上限 2000 块 |
 
 ---
 

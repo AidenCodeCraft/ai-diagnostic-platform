@@ -25,13 +25,19 @@ from app.services.knowledge.embedding import get_embedder
 
 logger = get_logger(__name__)
 
-# ── 章节级向量库 schema（v2）────────────────────────────────────────
-# 一条记录 = 文档的一个章节（不是整篇文档）
+# ── 章节级向量库 schema（v3）────────────────────────────────────────
+# 一条记录 = 文档的一个章节 或 一条日志证据块（用 chunk_type 区分）
 # 变更 schema 必须重建集合：_ensure_collection 检测到不匹配会明确报错，
 # 不做静默兼容——维度或度量不一致时的相似度分数没有意义。
-COLLECTION_SCHEMA_VERSION = "v2"
+COLLECTION_SCHEMA_VERSION = "v3"
 MAX_CHUNKS_PER_DOC = 100000   # 主键 = doc_id * 100000 + chunk_index
 MAX_CONTENT_LENGTH = 8192
+
+# chunk_type 取值：知识库章节 / 日志错误事件 / 日志模板摘要
+CHUNK_TYPE_SECTION = "section"
+CHUNK_TYPE_ERROR = "error"
+CHUNK_TYPE_TEMPLATE = "template"
+KNOWLEDGE_CHUNK_TYPES = (CHUNK_TYPE_SECTION,)
 
 
 def build_collection_fields(dim: int):
@@ -46,6 +52,11 @@ def build_collection_fields(dim: int):
         FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=512),
         FieldSchema(name="section", dtype=DataType.VARCHAR, max_length=512),
         FieldSchema(name="content_hash", dtype=DataType.VARCHAR, max_length=64),
+        # 知识章节与日志证据块同集合存放，检索必须按 chunk_type 过滤，
+        # 否则日志里的报错文本会污染知识问答召回
+        FieldSchema(name="chunk_type", dtype=DataType.VARCHAR, max_length=16),
+        FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=128),
+        FieldSchema(name="ts", dtype=DataType.VARCHAR, max_length=32),
         FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
     ]
 
@@ -63,7 +74,10 @@ def build_search_params() -> Dict[str, Any]:
     return {"metric_type": "COSINE", "params": {"ef": 64}}
 
 
-REQUIRED_FIELDS = ("id", "doc_id", "chunk_index", "content", "title", "section", "embedding")
+REQUIRED_FIELDS = (
+    "id", "doc_id", "chunk_index", "content", "title", "section",
+    "content_hash", "chunk_type", "source", "ts", "embedding",
+)
 
 # Milvus 相关导入
 _milvus_available = False
@@ -386,12 +400,26 @@ class VectorService:
     # Public API
     # ==================================================================
 
+    @staticmethod
+    def _compose_filter(
+        filter_expr: Optional[str], chunk_types: Optional[List[str]],
+    ) -> Optional[str]:
+        """把 chunk_type 白名单合并进标量过滤表达式。"""
+        if not chunk_types:
+            return filter_expr
+        quoted = ", ".join(f'"{value}"' for value in chunk_types)
+        clause = f"chunk_type in [{quoted}]"
+        if not filter_expr:
+            return clause
+        return f"({filter_expr}) and ({clause})"
+
     def search(
         self,
         query: str,
         top_k: int = 5,
         _collection: Optional[str] = None,  # reserved for future multi-collection support
         filter_expr: Optional[str] = None,
+        chunk_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """向量相似度搜索。
 
@@ -400,6 +428,8 @@ class VectorService:
             top_k: 返回的最相关结果数
             collection: Milvus collection 名称
             filter_expr: 标量过滤表达式（如 "doc_id > 100"）
+            chunk_types: 只在这些 chunk_type 内检索；知识问答必须传 ("section",)，
+                否则日志证据块（error/template）会被当成知识召回
 
         Returns:
             [{"id": doc_id, "score": similarity, "content": "...", "doc_id": int}, ...]
@@ -439,8 +469,11 @@ class VectorService:
                 anns_field="embedding",
                 param=search_params,
                 limit=top_k,
-                expr=filter_expr,
-                output_fields=["doc_id", "content", "title", "section", "chunk_index"],
+                expr=self._compose_filter(filter_expr, chunk_types),
+                output_fields=[
+                    "doc_id", "content", "title", "section", "chunk_index",
+                    "chunk_type", "source", "ts",
+                ],
             )
 
             search_time = time.time() - start_time - embed_time
@@ -463,6 +496,9 @@ class VectorService:
                     "title": hit.entity.get("title") or "",
                     "section": hit.entity.get("section") or "",
                     "chunk_index": int(hit.entity.get("chunk_index") or 0),
+                    "chunk_type": hit.entity.get("chunk_type") or CHUNK_TYPE_SECTION,
+                    "source": hit.entity.get("source") or "",
+                    "ts": hit.entity.get("ts") or "",
                 }
                 for hit in results[0]
             ]
@@ -557,9 +593,13 @@ class VectorService:
                 return 0
 
             # 3. 构建插入数据（主键 = doc_id * MAX_CHUNKS_PER_DOC + chunk_index）
-            ids, doc_ids, indexes, contents, titles, sections, hashes, vectors = (
-                [], [], [], [], [], [], [], [],
+            ids, doc_ids, indexes, contents, titles, sections, hashes = (
+                [], [], [], [], [], [], [],
             )
+            chunk_types = [CHUNK_TYPE_SECTION] * len(chunks)
+            sources = ["knowledge"] * len(chunks)
+            timestamps = [""] * len(chunks)
+            vectors = []
             for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
                 ids.append(doc_id * MAX_CHUNKS_PER_DOC + i)
                 doc_ids.append(doc_id)
@@ -570,8 +610,11 @@ class VectorService:
                 hashes.append(chunk["content_hash"])
                 vectors.append(emb)
 
-            # 4. 插入 Milvus
-            self._collection.insert([ids, doc_ids, indexes, contents, titles, sections, hashes, vectors])
+            # 4. 插入 Milvus（列顺序必须与 build_collection_fields 一致）
+            self._collection.insert([
+                ids, doc_ids, indexes, contents, titles, sections, hashes,
+                chunk_types, sources, timestamps, vectors,
+            ])
             self._collection.flush()
 
             logger.info(
@@ -604,6 +647,73 @@ class VectorService:
         for doc_id, content in docs:
             total += self.index_document(doc_id, content, chunk_size, overlap)
         return total
+
+    def delete_by_expr(self, expr: str) -> bool:
+        """按标量表达式删除（日志证据块重新索引时先清旧数据）。"""
+        if not self.available or self._collection is None:
+            return False
+        try:
+            self._collection.delete(expr=expr)
+            self._collection.flush()
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[VectorService] delete_by_expr(%s) failed: %s", expr, exc)
+            return False
+
+    def index_log_chunks(self, log_id: int, chunks: List[Dict[str, Any]]) -> int:
+        """写入日志证据块（chunk_type = error / template）。
+
+        chunks: [{"chunk_type","ts","title","section","content","index_text","content_hash"}]
+
+        主键取负数（-(log_id * MAX_CHUNKS_PER_DOC + i)）：知识文档用正数，
+        日志块用负数，两边主键空间天然不重叠，也不会误删知识库向量。
+        """
+        if not chunks:
+            return 0
+        if not self.available or self._collection is None:
+            logger.debug("[VectorService] Milvus unavailable, skip log chunks %d", log_id)
+            return 0
+        if self._embedding is None:
+            logger.warning("[VectorService] Embedding unavailable, skip log chunks %d", log_id)
+            return 0
+
+        try:
+            embeddings = self._embedding.embed_batch([chunk["index_text"] for chunk in chunks])
+            if not embeddings or len(embeddings[0]) != self._dim:
+                logger.error(
+                    "[VectorService] Log chunk embedding dim mismatch (got %s, expected %d)",
+                    len(embeddings[0]) if embeddings else 0, self._dim,
+                )
+                return 0
+
+            source = f"log:{log_id}"
+            ids, doc_ids, indexes, contents, titles, sections, hashes = (
+                [], [], [], [], [], [], [],
+            )
+            chunk_types, sources, timestamps, vectors = [], [], [], []
+            for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+                ids.append(-(log_id * MAX_CHUNKS_PER_DOC + i))
+                doc_ids.append(0)                      # 0 = 不属于任何知识文档
+                indexes.append(i)
+                contents.append(chunk["content"][:MAX_CONTENT_LENGTH])
+                titles.append(chunk.get("title", "")[:512])
+                sections.append(chunk.get("section", "")[:512])
+                hashes.append(chunk.get("content_hash", ""))
+                chunk_types.append(chunk["chunk_type"])
+                sources.append(source)
+                timestamps.append(chunk.get("ts", "")[:32])
+                vectors.append(emb)
+
+            self._collection.insert([
+                ids, doc_ids, indexes, contents, titles, sections, hashes,
+                chunk_types, sources, timestamps, vectors,
+            ])
+            self._collection.flush()
+            logger.info("[VectorService] Indexed %d log chunks for log %d", len(chunks), log_id)
+            return len(chunks)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[VectorService] index_log_chunks(%d) failed: %s", log_id, exc)
+            return 0
 
     def delete_document(self, doc_id: int) -> bool:
         """删除文档的所有向量。

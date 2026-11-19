@@ -19,6 +19,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List
 
+from celery import chain, group
 from celery.exceptions import SoftTimeLimitExceeded
 
 from app.core.config import settings
@@ -26,6 +27,7 @@ from app.core.logging_config import get_logger
 from app.worker.celery_app import EMBED_QUEUE, celery_app
 from app.worker.ingest_service import (
     DEFAULT_CHUNK_BYTES,
+    ChunkPlan,
     normalize_line,
     plan_chunks,
     stage_progress,
@@ -104,11 +106,10 @@ def ingest_prepare(self, log_id: int, chunk_bytes: int = DEFAULT_CHUNK_BYTES) ->
         total_bytes = Path(path).stat().st_size
         plans = plan_chunks(total_bytes, chunk_bytes)
 
-        for plan in plans:
-            ingest_parse.apply_async(
-                args=[log_id, plan.index, plan.start, plan.length],
-                queue="ingest",
-            )
+        # 整条链一次性投递：parse 分片并发，之后 template → compress → index → finalize 串行。
+        # 用 si()（immutable）——每步只吃自己的参数，不吃上一步返回值，
+        # 避免 group 的返回值列表被当成下一个任务的入参。
+        build_pipeline_chain(log_id, plans).apply_async()
         return {
             "stage": "prepare",
             "total_bytes": total_bytes,
@@ -216,6 +217,32 @@ def ingest_compress(self, log_id: int) -> Dict[str, Any]:
         }
 
     return _run_stage("compress", log_id, worker)
+
+
+@celery_app.task(name="embed.log_index", bind=True, max_retries=3, default_retry_delay=30)
+def log_index(self, log_id: int) -> Dict[str, Any]:
+    """把日志证据块写入向量库（chunk_type=error/template，走 embed 队列）。"""
+
+    def worker(store: TaskStateStore) -> Dict[str, Any]:
+        from app.services.diagnostics.log_indexer import LogChunkIndexer
+
+        return {"stage": "index", **LogChunkIndexer().index_log(log_id)}
+
+    return _run_stage("index", log_id, worker)
+
+
+def build_pipeline_chain(log_id: int, plans: List[ChunkPlan]):
+    """构造完整处理链签名（便于离线断言，不需要 broker）。"""
+    header = group(
+        *[ingest_parse.si(log_id, plan.index, plan.start, plan.length) for plan in plans]
+    )
+    return chain(
+        header,
+        ingest_template.si(log_id),
+        ingest_compress.si(log_id),
+        log_index.si(log_id),
+        ingest_finalize.si(log_id),
+    )
 
 
 @celery_app.task(name="ingest.finalize", bind=True)

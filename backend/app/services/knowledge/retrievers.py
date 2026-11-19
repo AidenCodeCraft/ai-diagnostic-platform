@@ -126,7 +126,11 @@ class MilvusRetriever(IRetriever):
                 return []
 
         try:
-            results = self._svc.search(query, top_k=top_k)
+            from app.services.knowledge.vector_service import KNOWLEDGE_CHUNK_TYPES
+
+            results = self._svc.search(
+                query, top_k=top_k, chunk_types=list(KNOWLEDGE_CHUNK_TYPES),
+            )
             return [
                 SearchResult(
                     chunk=Chunk(

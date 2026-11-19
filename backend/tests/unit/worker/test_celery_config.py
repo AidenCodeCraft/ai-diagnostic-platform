@@ -30,9 +30,42 @@ def test_serialization_is_json_only():
 def test_pipeline_tasks_are_registered():
     for name in (
         "ingest.prepare", "ingest.parse", "ingest.template",
-        "ingest.compress", "ingest.finalize",
+        "ingest.compress", "embed.log_index", "ingest.finalize",
     ):
         assert name in celery_app.tasks, f"{name} 未注册"
+
+
+def _flatten_tasks(signature):
+    names = []
+    children = getattr(signature, "tasks", None)
+    if children is not None:
+        for child in children:
+            names.extend(_flatten_tasks(child))
+    else:
+        task = getattr(signature, "task", None)
+        if task:
+            names.append(task)
+    body = getattr(signature, "body", None)
+    if body is not None:
+        names.extend(_flatten_tasks(body))
+    return names
+
+
+def test_pipeline_chain_order_and_immutability():
+    from app.worker.ingest_service import ChunkPlan
+    from app.worker.tasks import build_pipeline_chain
+
+    signature = build_pipeline_chain(9, [ChunkPlan(0, 0, 10), ChunkPlan(1, 10, 10)])
+
+    assert _flatten_tasks(signature) == [
+        "ingest.parse", "ingest.parse",
+        "ingest.template", "ingest.compress", "embed.log_index", "ingest.finalize",
+    ]
+
+
+def test_log_index_task_routes_to_embed_queue():
+    routed = celery_app.amqp.router.route({}, "embed.log_index")
+    assert routed["queue"].name == EMBED_QUEUE
 
 
 def test_tasks_have_retry_policy():

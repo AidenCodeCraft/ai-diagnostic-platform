@@ -94,8 +94,10 @@ def safe_vector_search(query: str, top_k: int) -> list:
     """安全的向量搜索包装。"""
     try:
         from app.services.knowledge.vector_service import VectorService
+        from app.services.knowledge.vector_service import KNOWLEDGE_CHUNK_TYPES
         svc = VectorService()
-        return svc.search(query, top_k=top_k)
+        # 知识检索必须按 chunk_type 过滤，日志证据块不能混进知识召回
+        return svc.search(query, top_k=top_k, chunk_types=list(KNOWLEDGE_CHUNK_TYPES))
     except (ImportError, Exception):
         return []
 
