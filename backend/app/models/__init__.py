@@ -10,6 +10,7 @@ from app.models.knowledge import (
 from app.models.system import (
     Organization, OrganizationMember, Project, BugCase, ClientLogEntry, AdminAuditLog,
 )
+from app.models.integrations import FeishuAttachment, FeishuEvent
 from app.models.quality import (
     GoldenSample, SampleReview, RegressionRun,
     SAMPLE_STATUSES, STATUS_TRANSITIONS, EXPECTED_CONCLUSIONS,
@@ -24,6 +25,7 @@ __all__ = [
     "KnowledgeSection", "KnowledgeDocumentMeta",
     "Organization", "OrganizationMember", "Project", "BugCase", "ClientLogEntry",
     "AdminAuditLog",
+    "FeishuEvent", "FeishuAttachment",
     "GoldenSample", "SampleReview", "RegressionRun",
     "SAMPLE_STATUSES", "STATUS_TRANSITIONS", "EXPECTED_CONCLUSIONS",
 ]

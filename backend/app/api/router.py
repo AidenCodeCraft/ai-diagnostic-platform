@@ -31,6 +31,9 @@ from app.api.diagnostics.reports import router as reports_router
 from app.api.knowledge import router as knowledge_router
 from app.api.knowledge.vector import router as vector_router
 
+# ── Integrations（飞书回调：不走 JWT，校验飞书签名/Token） ──
+from app.api.integrations.feishu import router as feishu_router
+
 # ── Quality（黄金集标注 / 三级审核 / 回归导出） ──────────────
 from app.api.quality import router as quality_router
 
@@ -68,6 +71,9 @@ api_router.include_router(parser_router, dependencies=[Depends(require_auth)])
 api_router.include_router(parsing_router, dependencies=[Depends(require_auth)])
 api_router.include_router(analyses_router, dependencies=[Depends(require_auth)])
 api_router.include_router(reports_router, dependencies=[Depends(require_auth)])
+
+# Integrations（事件入口自行校验飞书凭据；附件查询需登录）
+api_router.include_router(feishu_router)
 
 # Knowledge
 api_router.include_router(knowledge_router)

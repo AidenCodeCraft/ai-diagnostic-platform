@@ -24,6 +24,8 @@ reportlab==5.1.0                # 服务端 PDF 报告导出（含中文 CID 字
 celery==5.4.0
 # 日志模板提取（模板库需持久化，否则跨文件 template_id 不可对齐）
 drain3>=0.9.11
+# 飞书加密事件解密（AES-256-CBC）；回调开加密后必需
+cryptography>=43.0.0
 
 rank-bm25>=0.2.2                # BM25 稀疏检索
 tiktoken>=0.7.0                 # 精确 Token 计数（模型感知上下文管理）

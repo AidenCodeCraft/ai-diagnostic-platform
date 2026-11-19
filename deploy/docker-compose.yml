@@ -222,6 +222,12 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      # 飞书图片识别（S1）：未配置凭据时回调端点返回 404/503，不会裸奔
+      FEISHU_ENABLED: ${FEISHU_ENABLED:-false}
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+      FEISHU_VERIFICATION_TOKEN: ${FEISHU_VERIFICATION_TOKEN:-}
+      FEISHU_ENCRYPT_KEY: ${FEISHU_ENCRYPT_KEY:-}
       MINIO_BUCKET: diagnostic-logs
       MINIO_SECURE: "false"
       # ── Ollama (可选) ─────────────────────────────

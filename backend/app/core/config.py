@@ -92,6 +92,13 @@ class Settings(BaseSettings):
     # 上传后是否投递异步预处理链；broker 不可用时仅记日志，不影响上传
     CELERY_ASYNC_INGEST: bool = True
 
+    # ── Feishu (Lark) integration ────────────────────────────
+    FEISHU_ENABLED: bool = False
+    FEISHU_APP_ID: str = ""
+    FEISHU_APP_SECRET: str = ""
+    FEISHU_VERIFICATION_TOKEN: str = ""   # 回调校验（未开加密时必填）
+    FEISHU_ENCRYPT_KEY: str = ""          # 开启加密事件时必须配置
+
     # ── Object storage ───────────────────────────────────────
     # 预签名 URL 有效期：15 分钟（文档 P3.4 口径）；桶必须私有
     MINIO_PRESIGN_TTL_SECONDS: int = 900
