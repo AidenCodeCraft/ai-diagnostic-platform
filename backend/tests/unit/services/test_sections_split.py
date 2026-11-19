@@ -62,3 +62,26 @@ def test_is_navigation_heading_variants():
         assert is_navigation_heading(heading) is True, heading
     for heading in ("现象", "4G 注册失败", "FAQ", "排查步骤"):
         assert is_navigation_heading(heading) is False, heading
+
+
+def test_tiny_subheadings_merge_into_parent_section():
+    """真实案例：FAQ 的「现象/分析/关键字」碎片曾把完整章节挤出召回。"""
+    content = (
+        "# 5. 查看设备是否有进出站\n"
+        "### 现象\n有站点不报站\n\n"
+        "### 分析\n先看是否有进出站\n\n"
+        "### 关键字\nEnter station Rang index\n\n"
+        "# 6. 其他\n" + "详细说明内容。" * 30
+    )
+    sections = split_markdown_sections(content, merge_tiny=True)
+    headings = [h for h, _ in sections]
+
+    assert headings[0] == "5. 查看设备是否有进出站"
+    assert "现象" not in headings and "关键字" not in headings
+    assert "先看是否有进出站" in dict(sections)["5. 查看设备是否有进出站"]
+
+
+def test_merge_can_be_disabled():
+    content = "# 5. 章节\n### 现象\n短\n\n### 分析\n也短\n"
+    headings = [h for h, _ in split_markdown_sections(content, merge_tiny=False)]
+    assert "现象" in headings

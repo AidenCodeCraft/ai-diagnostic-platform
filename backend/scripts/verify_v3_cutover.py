@@ -31,9 +31,19 @@ DEFAULT_REPORT = "reports/v3_cutover.json"
 
 
 def _server_version() -> str:
+    """读取服务端版本（get_server_version 需要已建立的连接）。"""
     try:
-        from pymilvus import utility
+        from pymilvus import connections, utility
 
+        from app.core.config import settings
+
+        try:
+            connections.connect(
+                host=str(getattr(settings, "MILVUS_HOST", "localhost")),
+                port=str(getattr(settings, "MILVUS_PORT", 19530)),
+            )
+        except Exception:  # noqa: BLE001 - 已连接时重复 connect 也会抛，忽略
+            pass
         return str(utility.get_server_version())
     except Exception as exc:  # noqa: BLE001
         return f"unknown ({exc})"
@@ -149,7 +159,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
             summary = stats.summary()
             report["reindex"] = summary
-            ok = summary.get("failed_docs", 0) == 0 and summary.get("indexed_chunks", 0) > 0
+            ok = summary.get("failed_docs", 0) == 0 and summary.get("total_chunks", 0) > 0
             report["checks"].append({"name": "reindex", "ok": ok, "detail": summary})
             if args.dry_run:
                 report["verdict"] = "dry-run"

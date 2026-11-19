@@ -22,6 +22,11 @@ _WINDOW_CHARS = 1000
 # 会与相邻段落合并进同一个章节窗（见 _split_long_section）
 MIN_SECTION_CHARS = 12
 
+# 低于该长度的子标题碎片（如「现象」「分析」「关键字」）合并进上一个章节：
+# 它们单独成块时 BM25 分虚高、会挤掉真正对题的完整章节（真实案例：
+# 「进出站日志中搜索什么」被《线路》的「关键字」碎片顶掉）。
+MERGE_TINY_SECTION_CHARS = 80
+
 # 目录/前言这类「导航与声明」内容不该进入检索：它们命中率高但对诊断无用，
 # 还会挤掉真正对题的章节（FAQ 类文档尤其明显）。
 DROPPED_HEADINGS = (
@@ -71,8 +76,24 @@ def looks_like_toc(body: str) -> bool:
     return hits >= max(3, int(len(lines) * 0.6))
 
 
+def merge_tiny_sections(
+    sections: List[Tuple[str, str]], min_chars: int = MERGE_TINY_SECTION_CHARS,
+) -> List[Tuple[str, str]]:
+    """把过短的章节碎片并入上一个章节（保持顺序与标题）。"""
+    merged: List[Tuple[str, str]] = []
+    for heading, body in sections:
+        text = (body or "").strip()
+        if merged and len(text) < min_chars:
+            prev_heading, prev_body = merged[-1]
+            extra = f"### {heading}\n{text}".strip() if heading else text
+            merged[-1] = (prev_heading, f"{prev_body}\n\n{extra}".strip())
+            continue
+        merged.append((heading, text))
+    return merged
+
+
 def split_markdown_sections(
-    content: str, *, drop_navigation: bool = True,
+    content: str, *, drop_navigation: bool = True, merge_tiny: bool = False,
 ) -> List[Tuple[str, str]]:
     """按 `#` 标题切分文档，返回 [(heading, body), ...]。
 
@@ -80,6 +101,8 @@ def split_markdown_sections(
     - 超长小节按空行切窗，每窗继承同一个 heading
     - 无标题文档返回单节，保证仍可检索
     - drop_navigation=True 时丢弃目录/前言/声明类章节（可用参数关闭以便排查）
+    - merge_tiny=True 时把「现象/分析/关键字」这类超短子标题并入上一节
+      （默认关闭：合并会改变块边界，需先用黄金集证明收益再打开）
     """
     text = content or ""
     if not text.strip():
@@ -103,6 +126,9 @@ def split_markdown_sections(
             continue
 
         sections.extend(_split_long_section(heading, body))
+
+    if merge_tiny:
+        sections = merge_tiny_sections(sections)
 
     return sections or [("", text.strip())]
 
