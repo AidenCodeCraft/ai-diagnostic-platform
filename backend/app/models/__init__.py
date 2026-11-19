@@ -1,5 +1,7 @@
 from app.models.auth import User, LoginAttempt, ApiKey
-from app.models.chat import ChatSession, ChatMessage, AgentTask, RetrievalTrace
+from app.models.chat import (
+    ChatSession, ChatMessage, AgentTask, RetrievalTrace, ChatImageUpload, IMAGE_STATUSES,
+)
 from app.models.diagnostics import (
     Log, LOG_STATUS_TRANSITIONS, LogEvent, Analysis, ANALYSIS_STATUS_TRANSITIONS, Report,
 )
@@ -18,6 +20,7 @@ from app.models.quality import (
 __all__ = [
     "User", "LoginAttempt", "ApiKey",
     "ChatSession", "ChatMessage", "AgentTask", "RetrievalTrace",
+    "ChatImageUpload", "IMAGE_STATUSES",
     "Log", "LOG_STATUS_TRANSITIONS", "LogEvent",
     "Analysis", "ANALYSIS_STATUS_TRANSITIONS", "Report",
     "KnowledgeDocument", "KnowledgeImage", "KnowledgeImageFeedback", "KnowledgeDiagnosisProfile",

@@ -245,10 +245,27 @@ class ChatService:
             log_context = build_log_context(
                 context.get("active_slots") or {}, analysis, context,
             )
-            return log_context.to_dict() if log_context else None
+            payload = log_context.to_dict() if log_context else None
+
+            # 会话内截图（对话界面粘贴/上传）的识别文本，作为现场证据并列注入
+            images = self._session_image_evidence(session_id)
+            if images:
+                payload = dict(payload or {})
+                payload["image_evidence"] = images
+            return payload
         except Exception:  # noqa: BLE001
             logger.debug("[chat] build log context failed", exc_info=True)
             return None
+
+    def _session_image_evidence(self, session_id: int) -> List[Dict[str, Any]]:
+        """最近成功的截图识别文本（失败静默返回空——证据是增强项）。"""
+        try:
+            from app.services.vision.image_service import ChatImageService
+
+            return ChatImageService(self.db).texts_for_session(session_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("[chat] load image evidence failed", exc_info=True)
+            return []
 
     def _record_gate_trace(self, session_id: int, content: str) -> None:
         """槽位缺失追问的轨迹（结论分支 ask_slot），便于黄金集统计负样本。"""

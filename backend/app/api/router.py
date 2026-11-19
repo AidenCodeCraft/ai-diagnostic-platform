@@ -19,6 +19,7 @@ from app.api.chat.agents import router as agents_router
 from app.api.chat.agent_tasks import router as agent_tasks_router
 from app.api.chat.function_calling import router as function_calling_router
 from app.api.chat.supervisor import router as supervisor_router
+from app.api.chat.images import router as images_router
 
 # ── Diagnostics ──────────────────────────────────────────────
 from app.api.diagnostics.logs import router as logs_router
@@ -61,6 +62,7 @@ api_router.include_router(agents_router)
 api_router.include_router(agent_tasks_router)
 api_router.include_router(function_calling_router)
 api_router.include_router(supervisor_router)
+api_router.include_router(images_router, dependencies=[Depends(require_auth)])
 
 # Diagnostics（日志/解析/分析/报告均需登录）
 api_router.include_router(logs_router, dependencies=[Depends(require_auth)])

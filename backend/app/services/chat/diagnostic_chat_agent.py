@@ -151,6 +151,8 @@ class DiagnosticChatAgent:
         self.log_context = log_context
         self.log_evidence: Optional[Dict[str, Any]] = None
         self.log_evidence_summary: str = ""
+        # 用户截图的识别文本（现场证据，与日志证据并列注入）
+        self.image_evidence: List[Dict[str, Any]] = []
 
     # ==================================================================
     # Pipeline Entry
@@ -544,10 +546,36 @@ class DiagnosticChatAgent:
         evidence_text = self._build_log_evidence_text(text, items)
         if evidence_text:
             lines.append(evidence_text)
+
+        # 对话界面截图：识别文本作为现场证据注入（不参与知识检索，只是上下文）
+        image_text = self._build_image_evidence_text()
+        if image_text:
+            lines.append(image_text)
             # 只有日志证据、没有知识库命中时，也要基于证据作答，而不是拒答
             return "\n\n".join(lines), self.references
 
         return "\n\n".join(lines) if lines else "", self.references
+
+    def _build_image_evidence_text(self) -> str:
+        """把会话内截图的识别文本拼成证据块。
+
+        为什么单列一块而不是塞进日志证据：截图来自用户，日志来自设备，
+        两者可信度与用途不同；回答引用时要能区分"用户说"与"设备记录"。
+        """
+        evidence = (self.log_context or {}).get("image_evidence") or []
+        if not evidence:
+            return ""
+        self.image_evidence = list(evidence)
+        lines = ["【用户提供的截图（现场证据）】"]
+        for item in evidence[:5]:
+            label = {"ocr": "OCR 识别", "vision": "图像理解", "ocr+vision": "OCR+图像理解"}.get(
+                str(item.get("path") or "ocr"), "OCR 识别",
+            )
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            lines.append(f"- 截图 #{item.get('image_id')}（{label}）：\n{text}")
+        return "\n".join(lines) if len(lines) > 1 else ""
 
     def _build_log_evidence_text(self, text: str, items: List[Dict[str, Any]]) -> str:
         """生成日志证据块（带行号），失败静默跳过——证据是增强项，不是依赖项。"""

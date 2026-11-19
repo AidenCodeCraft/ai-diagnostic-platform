@@ -282,4 +282,4 @@ Status: P0 已完成，P1~P3 按本文执行
 | 文档 | 内容 |
 | --- | --- |
 | [`Deployment-Verification-Checklist.md`](./Deployment-Verification-Checklist.md) | V1~V7：只能在部署环境验证的项（集合回填、过滤语义、100MB 端到端、Drain3 质量、精排 A/B、MinIO、回归 CI） |
-| [`Feishu-Image-Recognition-Design.md`](./Feishu-Image-Recognition-Design.md) | 飞书图片识别（DeepSeek-only：OCR 主路径 + 视觉兜底、权限清单、事件流、成本） |
+| [`Chat-Image-Recognition-Design.md`](./Chat-Image-Recognition-Design.md) | 对话界面截图识别（DeepSeek-only：OCR 主路径 + 视觉兜底、路由规则、成本） |
