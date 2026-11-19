@@ -9,9 +9,12 @@ Worker 侧只做编排，问题才好定位（是「逻辑算错」还是「IO/�
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import os
 import re
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -98,12 +101,63 @@ def template_id(line: str) -> str:
     """
     masked = mask_variables(line)
     if template_source() == "drain3":
-        with _DRAIN_LOCK:
-            cluster = _drain_template(masked)
+        try:
+            # 线程锁防同进程并发；文件锁防多 worker 进程同时写模板库状态文件
+            with _DRAIN_LOCK, _drain_file_lock():
+                cluster = _drain_template(masked)
+        except DrainLockTimeout:
+            logger.warning("[template] 模板库锁超时，本条退化为哈希模板")
+            cluster = None
         if cluster is not None:
             return f"d{cluster}"
     digest = hashlib.sha1(masked.strip().encode("utf-8")).hexdigest()[:16]
     return f"h:{digest}"
+
+
+class DrainLockTimeout(RuntimeError):
+    """模板库文件锁获取超时。"""
+
+
+STALE_LOCK_SECONDS = 120.0
+
+
+def _drain_lock_path() -> Path:
+    return _drain_state_path().with_suffix(".lock")
+
+
+@contextlib.contextmanager
+def _drain_file_lock(timeout: float = 10.0):
+    """跨进程互斥（O_CREAT|O_EXCL 锁文件，Windows/POSIX 通用）。
+
+    为什么不用 fcntl/msvcrt：两个平台 API 完全不同，锁文件实现一套代码够用；
+    进程崩溃留下的陈旧锁由 mtime 判超时清理，不会让整条链路永久卡死。
+    """
+    path = _drain_lock_path()
+    deadline = time.monotonic() + timeout
+    handle = None
+    while handle is None:
+        try:
+            handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                if time.time() - path.stat().st_mtime > STALE_LOCK_SECONDS:
+                    logger.warning("[template] 清理陈旧模板库锁: %s", path)
+                    path.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            if time.monotonic() > deadline:
+                raise DrainLockTimeout(f"获取模板库锁超时: {path}")
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        if handle is not None:
+            os.close(handle)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.debug("[template] 锁文件删除失败: %s", path)
 
 
 def _drain_state_path() -> Path:

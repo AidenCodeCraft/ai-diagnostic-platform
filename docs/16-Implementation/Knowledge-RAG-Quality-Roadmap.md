@@ -140,6 +140,8 @@ Status: P0 已完成，P1~P3 按本文执行
 | 上传接线 + 进度查询 | ✅ | `LogService._enqueue_ingest`、`GET /logs/{id}/ingest-status` |
 | Drain3 真实依赖与模板库持久化 | ✅ | `ingest_service.py`（`FilePersistence` → `_ingest/drain3_state.bin`） |
 | 分块入 Milvus（`chunk_type=error/template`） | ✅ | `diagnostics/log_indexer.py` + `VectorService.index_log_chunks` |
+| 产物入对象存储 | ✅ | `diagnostics/artifact_store.py`（`ingest/{log_id}/…`，MinIO 优先、本地兜底） |
+| 模板库跨进程锁 | ✅ | `ingest_service._drain_file_lock`（O_CREAT 锁文件 + 陈旧锁清理） |
 
 ## 4.1 队列骨架
 

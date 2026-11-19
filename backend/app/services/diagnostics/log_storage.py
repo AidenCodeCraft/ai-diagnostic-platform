@@ -7,11 +7,12 @@ MinIO 未启用或客户端不可用时自动回退本地路径。
 
 from __future__ import annotations
 
+import io
 import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -116,6 +117,55 @@ class LogStorage:
         except Exception as exc:  # noqa: BLE001 - 回退本地存储
             logger.warning("[LogStorage] upload failed (%s); keeping local file", exc)
             return str(path)
+
+    # ------------------------------------------------------------------
+    # 通用对象读写（预处理中间产物用）
+    # ------------------------------------------------------------------
+
+    def put_bytes(
+        self, data: bytes, key: str, content_type: str = "application/octet-stream",
+    ) -> Optional[str]:
+        """写入任意字节对象；返回 minio:// 引用，未启用对象存储时返回 None。"""
+        if not self.remote_available or not key:
+            return None
+        try:
+            self._client.put_object(  # type: ignore[attr-defined]
+                self.bucket, key, io.BytesIO(data), len(data), content_type=content_type,
+            )
+            return f"minio://{self.bucket}/{key}"
+        except Exception as exc:  # noqa: BLE001 - 由调用方回退本地
+            logger.warning("[LogStorage] put_bytes(%s) failed: %s", key, exc)
+            return None
+
+    def get_bytes(self, key: str) -> Optional[bytes]:
+        """按对象键读取；不存在/不可用时返回 None。"""
+        if not self.remote_available or not key:
+            return None
+        try:
+            response = self._client.get_object(self.bucket, key)  # type: ignore[attr-defined]
+            try:
+                return response.read()
+            finally:
+                response.close()
+                response.release_conn()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[LogStorage] get_bytes(%s) failed: %s", key, exc)
+            return None
+
+    def list_keys(self, prefix: str) -> List[str]:
+        """列出前缀下的对象键（递归）。"""
+        if not self.remote_available or not prefix:
+            return []
+        try:
+            return [
+                obj.object_name
+                for obj in self._client.list_objects(  # type: ignore[attr-defined]
+                    self.bucket, prefix=prefix, recursive=True,
+                )
+            ]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[LogStorage] list_keys(%s) failed: %s", prefix, exc)
+            return []
 
     def presigned_get(self, reference: str, ttl_seconds: Optional[int] = None) -> Optional[str]:
         """生成对象下载的预签名 URL（默认 15 分钟）。

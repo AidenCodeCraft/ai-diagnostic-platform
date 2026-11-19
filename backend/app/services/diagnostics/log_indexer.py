@@ -153,25 +153,30 @@ def build_log_chunks(
     return chunks[:max_chunks]
 
 
-def artifact_dir(log_id: int) -> Path:
-    base = Path(str(getattr(settings, "UPLOAD_DIR", "data/raw")))
-    return base / ARTIFACT_DIRNAME / str(log_id)
-
-
 def read_artifacts(log_id: int) -> List[Dict[str, Any]]:
-    """读取 ingest 产出的规范化行（按 chunk 顺序）。"""
-    directory = artifact_dir(log_id)
+    """读取 ingest 产出的规范化行（对象存储优先，本地兜底）。
+
+    多机部署时 parse 与 index 很可能不在同一台机器，只能通过产物存储读。
+    """
+    from app.services.diagnostics.artifact_store import ArtifactStore
+
+    artifacts = ArtifactStore()
     records: List[Dict[str, Any]] = []
-    for path in sorted(directory.glob("normalized_*.jsonl.gz")):
-        with gzip.open(path, "rt", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    records.append(json.loads(line))
-                except ValueError:
-                    continue
+    for name in artifacts.normalized_names(log_id):
+        data = artifacts.get(log_id, name) or b""
+        try:
+            text = gzip.decompress(data).decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            logger.warning("[log-indexer] 产物无法解压，跳过: %s", name)
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except ValueError:
+                continue
     return records
 
 

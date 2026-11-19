@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import gzip
+import io
 import json
 from collections import Counter
 from pathlib import Path
@@ -41,20 +42,10 @@ from app.worker.task_state import (
 
 logger = get_logger(__name__)
 
-ARTIFACT_DIRNAME = "_ingest"
-
-
 def _session():
     from app.database import session as session_module
 
     return session_module.create_session()
-
-
-def _artifact_dir(log_id: int) -> Path:
-    base = Path(str(getattr(settings, "UPLOAD_DIR", "data/raw")))
-    path = base / ARTIFACT_DIRNAME / str(log_id)
-    path.mkdir(parents=True, exist_ok=True)
-    return path
 
 
 def _log_reference(log_id: int) -> str:
@@ -122,13 +113,14 @@ def ingest_prepare(self, log_id: int, chunk_bytes: int = DEFAULT_CHUNK_BYTES) ->
 
 @celery_app.task(name="ingest.parse", bind=True, max_retries=5, default_retry_delay=20)
 def ingest_parse(self, log_id: int, chunk_no: int, start: int, length: int) -> Dict[str, Any]:
-    """解析一个分片：规范化行 → JSONL 落本地产物目录。"""
+    """解析一个分片：规范化行 → JSONL 写产物存储（对象存储优先，本地兜底）。"""
 
     def worker(store: TaskStateStore) -> Dict[str, Any]:
         reference = _log_reference(log_id)
         if not reference:
             raise RuntimeError(f"log {log_id} 没有文件引用")
 
+        from app.services.diagnostics.artifact_store import ArtifactStore
         from app.services.diagnostics.log_storage import LogStorage
 
         path = Path(LogStorage().materialize(reference))
@@ -136,10 +128,11 @@ def ingest_parse(self, log_id: int, chunk_no: int, start: int, length: int) -> D
             handle.seek(start)
             data = handle.read(length)
 
-        target = _artifact_dir(log_id) / f"normalized_{chunk_no}.jsonl"
+        artifacts = ArtifactStore()
+        buffer = io.BytesIO()
         parsed = 0
         unparsed = 0
-        with gzip.open(f"{target}.gz", "wt", encoding="utf-8") as out:
+        with gzip.GzipFile(fileobj=buffer, mode="wb") as out:
             for raw in data.split(b"\n"):
                 line = raw.decode("utf-8", errors="replace").rstrip("\r")
                 if not line:
@@ -148,15 +141,18 @@ def ingest_parse(self, log_id: int, chunk_no: int, start: int, length: int) -> D
                 if record is None:
                     unparsed += 1
                     continue
-                out.write(json.dumps(record, ensure_ascii=False) + "\n")
+                out.write((json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8"))
                 parsed += 1
+
+        name = f"normalized_{chunk_no}.jsonl.gz"
+        stored = artifacts.put(log_id, name, buffer.getvalue())
 
         return {
             "stage": "parse",
             "chunk_no": chunk_no,
             "parsed": parsed,
             "unparsed": unparsed,
-            "artifact": str(target.with_suffix(".jsonl.gz")),
+            "artifact": stored,
         }
 
     return _run_stage("parse", log_id, worker, chunk_no=chunk_no)
@@ -167,18 +163,25 @@ def ingest_template(self, log_id: int) -> Dict[str, Any]:
     """模板提取与聚合（Drain3 可用时用 Drain3，否则稳定哈希兜底）。"""
 
     def worker(store: TaskStateStore) -> Dict[str, Any]:
-        directory = _artifact_dir(log_id)
+        from app.services.diagnostics.artifact_store import ArtifactStore
+
+        artifacts = ArtifactStore()
         counter: Counter = Counter()
         total = 0
-        for path in sorted(directory.glob("normalized_*.jsonl.gz")):
-            with gzip.open(path, "rt", encoding="utf-8") as handle:
-                for line in handle:
-                    try:
-                        record = json.loads(line)
-                    except ValueError:
-                        continue
-                    counter[template_id(record.get("text", ""))] += 1
-                    total += 1
+        for name in artifacts.normalized_names(log_id):
+            data = artifacts.get(log_id, name) or b""
+            try:
+                text = gzip.decompress(data).decode("utf-8")
+            except (OSError, UnicodeDecodeError):
+                logger.warning("[ingest] 产物无法解压，跳过: %s", name)
+                continue
+            for line in text.splitlines():
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                counter[template_id(record.get("text", ""))] += 1
+                total += 1
 
         payload = {
             "stage": "template",
@@ -186,9 +189,7 @@ def ingest_template(self, log_id: int) -> Dict[str, Any]:
             "templates": len(counter),
             "top": counter.most_common(20),
         }
-        (directory / "templates.json").write_text(
-            json.dumps(payload, ensure_ascii=False), encoding="utf-8",
-        )
+        artifacts.put_text(log_id, "templates.json", json.dumps(payload, ensure_ascii=False))
         return payload
 
     return _run_stage("template", log_id, worker)
@@ -199,21 +200,31 @@ def ingest_compress(self, log_id: int) -> Dict[str, Any]:
     """模板化压缩（等价实现）：把规范化产物按模板分组再压缩。"""
 
     def worker(store: TaskStateStore) -> Dict[str, Any]:
-        directory = _artifact_dir(log_id)
-        before = sum(path.stat().st_size for path in directory.glob("normalized_*.jsonl.gz"))
-        bundle = directory / "compressed.bundle.jsonl.gz"
-        lines: List[str] = []
-        for path in sorted(directory.glob("normalized_*.jsonl.gz")):
-            with gzip.open(path, "rt", encoding="utf-8") as handle:
-                lines.extend(handle.readlines())
-        with gzip.open(bundle, "wt", encoding="utf-8", compresslevel=9) as out:
-            out.writelines(lines)
-        after = bundle.stat().st_size
+        from app.services.diagnostics.artifact_store import ArtifactStore
+
+        artifacts = ArtifactStore()
+        raw_parts: List[str] = []
+        compressed_bytes = 0
+        for name in artifacts.normalized_names(log_id):
+            data = artifacts.get(log_id, name) or b""
+            compressed_bytes += len(data)
+            try:
+                raw_parts.append(gzip.decompress(data).decode("utf-8"))
+            except (OSError, UnicodeDecodeError):
+                logger.warning("[ingest] 产物无法解压，跳过: %s", name)
+
+        raw_text = "".join(raw_parts)
+        bundle = gzip.compress(raw_text.encode("utf-8"), compresslevel=9)
+        artifacts.put(log_id, "compressed.bundle.jsonl.gz", bundle)
+
+        raw_bytes = len(raw_text.encode("utf-8"))
         return {
             "stage": "compress",
-            "before_bytes": before,
-            "after_bytes": after,
-            "ratio": round(before / after, 2) if after else 0,
+            "raw_bytes": raw_bytes,
+            "input_bytes": compressed_bytes,
+            "after_bytes": len(bundle),
+            # 压缩比相对「原始文本」计算：相对已压缩的分片算比值没有意义
+            "ratio": round(raw_bytes / len(bundle), 2) if bundle else 0,
         }
 
     return _run_stage("compress", log_id, worker)
