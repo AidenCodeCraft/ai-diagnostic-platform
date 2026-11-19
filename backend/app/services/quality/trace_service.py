@@ -55,6 +55,8 @@ def record_trace(
     message_id: Optional[int] = None,
     log_id: Optional[int] = None,
     kb_candidates: Optional[List[Dict[str, Any]]] = None,
+    log_patterns: Optional[Dict[str, Any]] = None,
+    log_blocks: Optional[Dict[str, Any]] = None,
 ) -> Optional[RetrievalTrace]:
     """记录一次检索轨迹；失败返回 None，绝不抛异常。"""
     try:
@@ -68,6 +70,8 @@ def record_trace(
                 else _candidates_from_references(references),
                 "clarification": clarification or [],
             },
+            log_patterns=log_patterns,
+            log_blocks=log_blocks,
             timings=timings or {},
             conclusion=conclusion,
             pipeline_version=PIPELINE_VERSION,

@@ -220,6 +220,23 @@ class ChatService:
         except Exception:  # noqa: BLE001
             logger.debug("[chat] record time-mismatch trace failed", exc_info=True)
 
+    def _build_log_context(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """为本次提问装配日志时间窗与片段（无日志/无时间窗时返回 None）。"""
+        try:
+            from app.services.chat.log_context import build_log_context
+
+            session = self.get_session(session_id)
+            context = session.context or {}
+            log_context = build_log_context(
+                context.get("active_slots") or {},
+                context.get("last_analysis") or {},
+                context,
+            )
+            return log_context.to_dict() if log_context else None
+        except Exception:  # noqa: BLE001
+            logger.debug("[chat] build log context failed", exc_info=True)
+            return None
+
     def _record_gate_trace(self, session_id: int, content: str) -> None:
         """槽位缺失追问的轨迹（结论分支 ask_slot），便于黄金集统计负样本。"""
         try:
@@ -346,6 +363,7 @@ class ChatService:
             from app.services.quality.trace_service import record_trace, resolve_conclusion
 
             clarification = getattr(agent, "clarification_questions", None)
+            evidence = getattr(agent, "log_evidence", None) or {}
             record_trace(
                 self.db,
                 session_id=session_id,
@@ -354,6 +372,8 @@ class ChatService:
                 clarification=clarification,
                 conclusion=resolve_conclusion(direct_reply, clarification),
                 log_id=getattr(agent, "log_id", None),
+                log_patterns={"patterns": evidence.get("patterns") or []} if evidence else None,
+                log_blocks=(evidence.get("locate") or None) if evidence else None,
             )
         except Exception:  # noqa: BLE001 - 观测附产物，绝不影响主流程
             logger.debug("[chat] record retrieval trace failed", exc_info=True)
@@ -398,6 +418,7 @@ class ChatService:
         # Enrich with diagnostic context（按会话所属项目过滤知识）
         agent = DiagnosticChatAgent(
             self.db, provider_name, project_id=getattr(session, "project_id", None),
+            log_context=self._build_log_context(session_id),
         )
         messages, direct_reply = agent.enrich_messages(session_id, content, messages, resolved_analysis)
         self._record_retrieval_trace(session_id, content, agent, direct_reply)
@@ -461,6 +482,7 @@ class ChatService:
         try:
             agent = DiagnosticChatAgent(
                 self.db, provider_name, project_id=getattr(session, "project_id", None),
+                log_context=self._build_log_context(session_id),
             )
             messages, direct_reply = agent.enrich_messages(session_id, content, messages, resolved_analysis)
             self._record_retrieval_trace(session_id, content, agent, direct_reply)

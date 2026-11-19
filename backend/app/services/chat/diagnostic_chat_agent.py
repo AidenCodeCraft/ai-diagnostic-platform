@@ -138,6 +138,7 @@ class DiagnosticChatAgent:
     def __init__(
         self, db: Session, provider_name: str = "mock",
         project_id: Optional[int] = None,
+        log_context: Optional[Dict[str, Any]] = None,
     ):
         self.db = db
         self.provider_name = provider_name
@@ -147,6 +148,9 @@ class DiagnosticChatAgent:
         self.clarification_questions: List[Dict[str, Any]] = []
         self._last_search_partial: bool = False
         self._last_search_layer: str = ""
+        self.log_context = log_context
+        self.log_evidence: Optional[Dict[str, Any]] = None
+        self.log_evidence_summary: str = ""
 
     # ==================================================================
     # Pipeline Entry
@@ -536,7 +540,36 @@ class DiagnosticChatAgent:
         self._last_search_partial = search_result.is_partial_match
         self._last_search_layer = search_result.matched_layer
 
+        # P1 步骤 5：把「按知识库关键字在时间窗内定位到的日志」拼成证据块注入上下文
+        evidence_text = self._build_log_evidence_text(text, items)
+        if evidence_text:
+            lines.append(evidence_text)
+            # 只有日志证据、没有知识库命中时，也要基于证据作答，而不是拒答
+            return "\n\n".join(lines), self.references
+
         return "\n\n".join(lines) if lines else "", self.references
+
+    def _build_log_evidence_text(self, text: str, items: List[Dict[str, Any]]) -> str:
+        """生成日志证据块（带行号），失败静默跳过——证据是增强项，不是依赖项。"""
+        if not self.log_context:
+            return ""
+        try:
+            from app.services.chat.log_evidence import build_log_evidence
+
+            evidence = build_log_evidence(
+                items,
+                self.log_context.get("data"),
+                start=self.log_context.get("start"),
+                end=self.log_context.get("end"),
+                question=text,
+                window_label=str(self.log_context.get("window_label") or ""),
+            )
+            self.log_evidence = evidence.to_dict()
+            self.log_evidence_summary = evidence.summary
+            return evidence.text
+        except Exception:  # noqa: BLE001
+            logger.debug("[知识检索] 日志证据组装失败", exc_info=True)
+            return ""
 
     @staticmethod
     def _extract_section_anchor(snippet: str) -> str:

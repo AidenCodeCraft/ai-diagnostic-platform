@@ -60,6 +60,17 @@ Status: P0 已完成，P1~P3 按本文执行
 
 目标：用户在对话中提问并附上日志文件，系统「先查知识库要点 → 用要点关键字按时间窗定位日志 → 给出结论」。
 
+## 3.0 进度
+
+| 步骤 | 状态 | 落地位置 |
+| --- | --- | --- |
+| 1 槽位闸门 | ✅ | `chat/slot_gate.py` + `ChatService._check_log_slots` |
+| 2 时间轴扫描 | ✅ | `diagnostics/log_timeline.py` |
+| 3 候选时段 | ✅ | `diagnostics/error_windows.py` + `chat/time_gate.py` |
+| 4 关键字定位 | ✅ | `chat/log_patterns.py` / `log_locator.py` / `log_evidence.py` |
+| 5 回答组装 | ✅ | `chat/log_context.py` + `DiagnosticChatAgent._build_log_evidence_text` |
+| 6 轨迹落库 | ✅ | `quality/trace_service.py`（含 patterns/blocks） |
+
 ## 3.1 步骤 1：槽位闸门
 
 | 项 | 内容 |
