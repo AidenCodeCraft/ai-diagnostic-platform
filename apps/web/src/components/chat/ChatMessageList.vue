@@ -18,13 +18,20 @@
       <div v-for="msg in sorted" :key="msg.id" class="message-row" :class="msg.role">
         <div class="message-body">
           <!-- AI 思维链（默认展开，显示完整推理过程） -->
-          <div v-if="msg.role === 'assistant' && msg.thinking && (msg.thinking.text || msg.thinking.active)" class="think-block">
+          <div v-if="msg.role === 'assistant' && msg.thinking && (msg.thinking.text || msg.thinking.active)"
+            class="think-block">
             <div class="think-header">
               <button class="think-toggle" @click="toggleThink(msg)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 6v6l4 2" />
+                </svg>
                 <span>{{ msg.thinking.active ? '正在思考...' : `已思考（用时 ${msg.thinking.elapsed || 1} 秒）` }}</span>
                 <span class="think-action">{{ msg._thinkOpen === false ? '展开' : '收起' }}</span>
-                <svg class="think-arrow" :class="{ open: msg._thinkOpen !== false }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                <svg class="think-arrow" :class="{ open: msg._thinkOpen !== false }" width="12" height="12"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
               </button>
             </div>
             <div v-show="msg._thinkOpen !== false" class="think-body">{{ msg.thinking.text || '正在准备回答…' }}</div>
@@ -39,106 +46,102 @@
           </div>
           <div class="message-bubble" :class="{ 'is-editing': editingId === msg.id }">
             <div v-if="editingId === msg.id" class="msg-edit">
-              <textarea
-                ref="editTextarea"
-                v-model="editText"
-                class="msg-edit-textarea"
-                rows="1"
-                placeholder="修改提问内容…"
-                @input="autoGrowEdit"
-                @keydown.enter.exact.prevent="submitEdit(msg)"
-                @keydown.escape="cancelEdit"
-              ></textarea>
+              <textarea ref="editTextarea" v-model="editText" class="msg-edit-textarea" rows="1" placeholder="修改提问内容…"
+                @input="autoGrowEdit" @keydown.enter.exact.prevent="submitEdit(msg)"
+                @keydown.escape="cancelEdit"></textarea>
               <div class="msg-edit-actions">
                 <span class="msg-edit-hint">Enter 发送 · Esc 取消</span>
                 <button class="msg-edit-btn" @click="cancelEdit">取消</button>
                 <button class="msg-edit-btn primary" :disabled="!editText.trim()" @click="submitEdit(msg)">发送</button>
               </div>
             </div>
-            <div
-              v-else
-              class="msg-content"
+            <div v-else class="msg-content"
               v-html="renderContent(msg.content, msg, msg.files && msg.files.length > 0, msg.sources, msg.thinking?.active)"
-              @click="onMsgContentClick"
-              @mouseover="onMsgContentMouseOver"
-              @mouseout="onMsgContentMouseOut"
-            ></div>
+              @click="onMsgContentClick" @mouseover="onMsgContentMouseOver" @mouseout="onMsgContentMouseOut"></div>
             <div v-if="msg.clarification && msg.clarification.length" class="clarify-block">
               <div v-for="(q, qi) in msg.clarification" :key="qi" class="clarify-item">
                 <span class="clarify-label">{{ q.label }}</span>
                 <div class="clarify-options">
-                  <button
-                    v-for="opt in (q.options || [])"
-                    :key="opt"
-                    type="button"
-                    class="clarify-option"
-                    @click="pickClarification(opt)"
-                  >{{ opt }}</button>
+                  <button v-for="opt in (q.options || [])" :key="opt" type="button" class="clarify-option"
+                    @click="pickClarification(opt)">{{ opt }}</button>
                 </div>
               </div>
             </div>
-            <div
-              v-if="msg._renderedSources && !isNoMatchResponse(msg.content)"
-              class="msg-sources"
-              v-html="msg._renderedSources"
-              @click="onMsgContentClick"
-              @mouseover="onMsgContentMouseOver"
-              @mouseout="onMsgContentMouseOut"
-            ></div>
+            <div v-if="msg._renderedSources && !isNoMatchResponse(msg.content)" class="msg-sources"
+              v-html="msg._renderedSources" @click="onMsgContentClick" @mouseover="onMsgContentMouseOver"
+              @mouseout="onMsgContentMouseOut"></div>
             <KnowledgeImageGallery
               v-if="msg.role === 'assistant' && msg.content && !loading && !msg.thinking?.active && !isNoMatchResponse(msg.content) && getImages(msg).length > 0"
-              :images="getImages(msg)"
-            />
+              :images="getImages(msg)" />
           </div>
-          <!-- 版本切换（编辑重发后保留历史提问/回答，‹ › 切换查看） -->
-          <div
-            v-if="msg.role === 'user' && editingId !== msg.id && !loading && msg.versions && msg.versions.length > 1"
-            class="msg-version-nav"
-          >
-            <button class="ver-btn" :disabled="(msg.activeVersion ?? 0) <= 0" title="上一版本"
-              @click="switchVersion(msg, -1)">‹</button>
-            <span class="ver-count">{{ (msg.activeVersion ?? 0) + 1 }} / {{ msg.versions.length }}</span>
-            <button class="ver-btn" :disabled="(msg.activeVersion ?? 0) >= msg.versions.length - 1" title="下一版本"
-              @click="switchVersion(msg, 1)">›</button>
-          </div>
-          <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active && !loading" class="message-actions">
-            <el-tooltip :content="copiedId === msg.id ? '已复制' : '复制'" placement="top" :show-after="0">
+          <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active && !loading"
+            class="message-actions">
+            <el-tooltip :content="copiedId === msg.id ? '已复制' : '复制'" placement="bottom"
+              popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" :class="{ active: copiedId === msg.id }" @click="copyMessage(msg)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
               </button>
             </el-tooltip>
-            <el-tooltip content="重新生成" placement="top" :show-after="0">
+            <el-tooltip content="重新生成" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" @click="regenerateMessage(msg)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="23 4 23 10 17 10" />
+                  <polyline points="1 20 1 14 7 14" />
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                </svg>
               </button>
             </el-tooltip>
-            <el-tooltip v-if="msg._persisted" :content="msg._resolved ? '已标记解决' : '标记已解决并沉淀知识'" placement="top" :show-after="0">
-              <button class="action-btn" :class="{ active: msg._resolved }" @click="resolveMessage(msg)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            <el-tooltip content="标注为回归样本" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
+              <button class="action-btn" @click="emit('annotate', msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                </svg>
               </button>
             </el-tooltip>
-            <el-tooltip content="有帮助" placement="top" :show-after="0">
+            <el-tooltip content="有帮助" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" :class="{ active: msg._liked }" @click="likeMessage(msg)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path
+                    d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                </svg>
               </button>
             </el-tooltip>
-            <el-tooltip content="无帮助" placement="top" :show-after="0">
+            <el-tooltip content="无帮助" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" :class="{ active: msg._disliked }" @click="dislikeMessage(msg)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path
+                    d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
+                </svg>
               </button>
             </el-tooltip>
           </div>
           <div v-else-if="msg.role === 'user' && msg.content && editingId !== msg.id" class="message-actions">
-            <el-tooltip content="编辑" placement="top" :show-after="0">
+            <el-tooltip content="编辑" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" @click="startEdit(msg)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                </svg>
               </button>
             </el-tooltip>
-            <el-tooltip content="复制" placement="top" :show-after="0">
+            <el-tooltip content="复制" placement="bottom" popper-class="chat-action-tooltip" :show-after="0">
               <button class="action-btn" @click="copyMessage(msg)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
               </button>
             </el-tooltip>
+            <!-- 编辑重发后的版本切换（位于复制按钮之后） -->
+            <div v-if="!loading && msg.versions && msg.versions.length > 1" class="msg-version-nav">
+              <button class="ver-btn" :disabled="(msg.activeVersion ?? 0) <= 0"
+                @click="switchVersion(msg, -1)">‹</button>
+              <span class="ver-count">{{ (msg.activeVersion ?? 0) + 1 }} / {{ msg.versions.length }}</span>
+              <button class="ver-btn" :disabled="(msg.activeVersion ?? 0) >= msg.versions.length - 1"
+                @click="switchVersion(msg, 1)">›</button>
+            </div>
           </div>
         </div>
       </div>
@@ -159,13 +162,8 @@
 
     <!-- 引用文档 Tooltip -->
     <Teleport to="body">
-      <div
-        v-if="tooltip.visible"
-        class="ref-tooltip"
-        :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px' }"
-        @mouseenter="cancelTooltipHide"
-        @mouseleave="scheduleTooltipHide"
-      >
+      <div v-if="tooltip.visible" class="ref-tooltip" :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px' }"
+        @mouseenter="cancelTooltipHide" @mouseleave="scheduleTooltipHide">
         <div class="ref-tooltip-title">{{ tooltip.title }}</div>
         <div class="ref-tooltip-source">{{ tooltip.source }}</div>
         <div class="ref-tooltip-excerpt" v-html="tooltip.excerptRendered"></div>
@@ -179,7 +177,10 @@
         <div class="doc-panel-header">
           <span class="doc-panel-title">{{ docPanel.title }}</span>
           <button class="doc-panel-close" @click="closeDocPanel" title="关闭">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
           </button>
         </div>
         <div class="doc-panel-body">
@@ -222,6 +223,8 @@ const emit = defineEmits<{
   /** 切换消息版本（编辑重发历史） */
   (e: 'switchVersion', msg: any, index: number): void
   (e: 'selectClarification', text: string): void
+  /** 标注为回归样本（携带被标注的 assistant 消息） */
+  (e: 'annotate', msg: any): void
 }>()
 
 // ── 引用文档 Tooltip ──────────────────────────────────────────
@@ -707,7 +710,15 @@ function switchVersion(msg: any, delta: number) {
 function likeMessage(msg: any) {
   const newLiked = !msg._liked
   msg._liked = newLiked
-  if (newLiked) msg._disliked = false
+  if (newLiked) {
+    msg._disliked = false
+    // 「有帮助」即认可答案：同时标记已解决并沉淀到知识库候选（合并原独立功能）
+    if (props.chatId && msg._persisted) {
+      chatApi.resolveMessage(props.chatId, msg.id, true)
+        .then(() => { msg._resolved = true })
+        .catch(e => console.warn('[likeMessage] resolve failed:', e))
+    }
+  }
   if (props.chatId) {
     chatApi.updateFeedback(props.chatId, msg.id, newLiked ? 'like' : null)
       .catch(e => console.warn('[likeMessage] persist failed:', e))
@@ -727,17 +738,6 @@ function dislikeMessage(msg: any) {
 /** 澄清选项芯片：把选项内容回填给父组件（填入输入框） */
 function pickClarification(value: string) {
   emit('selectClarification', value)
-}
-
-/** 标记「已解决」并触发自进化蒸馏（仅对已持久化的消息可用） */
-async function resolveMessage(msg: any) {
-  if (!props.chatId || !msg._persisted) return
-  try {
-    await chatApi.resolveMessage(props.chatId, msg.id, true)
-    msg._resolved = true
-  } catch (e) {
-    console.warn('[resolveMessage] failed:', e)
-  }
 }
 
 defineExpose({ scrollToBottom })
@@ -831,27 +831,38 @@ function scrollToBottom() {
 .message-bubble {
   padding: 0;
   border-radius: 14px;
-  line-height: 1.8;
+  line-height: 1.7;
   font-size: 15px;
   color: var(--chat-msg-text);
 }
 
 .message-row.user .message-bubble {
   max-width: 72%;
-  padding: 10px 16px;
+  padding: 6px 12px;
   background: var(--chat-msg-user-bg);
   border: 1px solid transparent;
   border-radius: 18px;
   border-bottom-right-radius: 6px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   transition: background 0.15s, border-color 0.15s;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.message-row.user .msg-content :deep(p) {
+  margin: 0;
+  padding: 5px 8px;
+}
+
+.message-row.user .msg-content :deep(ul),
+.message-row.user .msg-content :deep(ol) {
+  margin: 0;
 }
 
 .message-row.user .message-bubble:hover {
   border-color: var(--chat-msg-user-border);
 }
 
-/* 编辑态：去掉气泡外壳，避免与编辑卡片形成双层边框 */
 .message-row.user .message-bubble.is-editing {
   max-width: 100%;
   width: 100%;
@@ -862,6 +873,11 @@ function scrollToBottom() {
 }
 
 .message-row.user .msg-content {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.message-row.user .msg-content :deep(p) {
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -926,21 +942,25 @@ function scrollToBottom() {
   flex-direction: column;
   gap: 10px;
 }
+
 .clarify-item {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
+
 .clarify-label {
   font-size: 13px;
   font-weight: 600;
   color: #374151;
 }
+
 .clarify-options {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
+
 .clarify-option {
   padding: 4px 12px;
   border: 1px solid #bfdbfe;
@@ -951,6 +971,7 @@ function scrollToBottom() {
   cursor: pointer;
   transition: all 0.15s;
 }
+
 .clarify-option:hover {
   background: #2563eb;
   color: #fff;
@@ -1198,9 +1219,11 @@ function scrollToBottom() {
   border-left: 1px solid var(--chat-think-border);
   overflow: hidden;
 }
+
 .think-header {
   padding: 0;
 }
+
 .think-toggle {
   width: 100%;
   border: 0;
@@ -1215,10 +1238,24 @@ function scrollToBottom() {
   cursor: pointer;
   text-align: left;
 }
-.think-toggle:hover { color: var(--chat-msg-text); }
-.think-action { margin-left: 4px; color: var(--chat-think-action); }
-.think-arrow { transition: transform 0.2s; }
-.think-arrow.open { transform: rotate(180deg); }
+
+.think-toggle:hover {
+  color: var(--chat-msg-text);
+}
+
+.think-action {
+  margin-left: 4px;
+  color: var(--chat-think-action);
+}
+
+.think-arrow {
+  transition: transform 0.2s;
+}
+
+.think-arrow.open {
+  transform: rotate(180deg);
+}
+
 .think-body {
   padding: 4px 12px 12px 14px;
   font-size: 13px;
@@ -1228,23 +1265,109 @@ function scrollToBottom() {
   overflow-y: visible;
 }
 
-.source-list { margin-top: 20px; padding: 12px 14px; border-radius: 10px; background: var(--chat-source-bg); border: 1px solid var(--chat-source-border); }
-.source-title { margin-bottom: 4px; color: var(--chat-source-text); font-size: 13px; font-weight: 600; }
-.source-card { display: flex; align-items: center; gap: 10px; padding: 10px 0; margin: 0; border: 0; border-top: 1px solid var(--chat-source-border); color: var(--chat-source-text); }
-.source-card:first-of-type { border-top: 0; }
-.source-index { display: grid; place-items: center; flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%; color: var(--chat-source-index-text); background: var(--chat-source-index-bg); font-size: 11px; }
-.source-detail { min-width: 0; display: flex; flex-direction: column; gap: 3px; border: 0; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
-.source-detail strong, .source-detail small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.source-detail strong { font-size: 12px; font-weight: 600; }
-.source-detail small { font-size: 11px; color: var(--chat-source-muted); }
-.source-open { margin-left: auto; border: 0; padding: 4px; background: transparent; color: var(--chat-source-link); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.source-list {
+  margin-top: 20px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--chat-source-bg);
+  border: 1px solid var(--chat-source-border);
+}
+
+.source-title {
+  margin-bottom: 4px;
+  color: var(--chat-source-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.source-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--chat-source-border);
+  color: var(--chat-source-text);
+}
+
+.source-card:first-of-type {
+  border-top: 0;
+}
+
+.source-index {
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: var(--chat-source-index-text);
+  background: var(--chat-source-index-bg);
+  font-size: 11px;
+}
+
+.source-detail {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.source-detail strong,
+.source-detail small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-detail strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.source-detail small {
+  font-size: 11px;
+  color: var(--chat-source-muted);
+}
+
+.source-open {
+  margin-left: auto;
+  border: 0;
+  padding: 4px;
+  background: transparent;
+  color: var(--chat-source-link);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
 
 @media (max-width: 640px) {
-  .chat-messages { padding: 28px 16px 16px; }
-  .message-row { margin-bottom: 20px; }
-  .message-body { max-width: 100%; }
-  .source-card { align-items: flex-start; }
-  .source-open { display: none; }
+  .chat-messages {
+    padding: 28px 16px 16px;
+  }
+
+  .message-row {
+    margin-bottom: 20px;
+  }
+
+  .message-body {
+    max-width: 100%;
+  }
+
+  .source-card {
+    align-items: flex-start;
+  }
+
+  .source-open {
+    display: none;
+  }
 }
 
 /* ── 引用序号标记（正文中的 ①②③） ───────────────────────── */
@@ -1261,6 +1384,7 @@ function scrollToBottom() {
   vertical-align: baseline;
   transition: transform 0.15s;
 }
+
 .msg-content :deep(.ref-link.ref-seq:hover) {
   transform: scale(1.2);
 }
@@ -1281,6 +1405,7 @@ function scrollToBottom() {
   line-height: 1.5;
   color: var(--chat-source-muted);
 }
+
 .msg-content :deep(.ref-source-line .ref-link.ref-source-doc),
 .msg-content :deep(.ref-source-line .ref-link.ref-source-section),
 .msg-sources :deep(.ref-source-line .ref-link.ref-source-doc),
@@ -1295,6 +1420,7 @@ function scrollToBottom() {
   padding: 1px 0;
   transition: all 0.15s;
 }
+
 .msg-content :deep(.ref-source-line .ref-link.ref-source-doc:hover),
 .msg-content :deep(.ref-source-line .ref-link.ref-source-section:hover),
 .msg-sources :deep(.ref-source-line .ref-link.ref-source-doc:hover),
@@ -1328,21 +1454,32 @@ function scrollToBottom() {
   pointer-events: auto;
   animation: tooltipIn 0.15s ease;
 }
+
 @keyframes tooltipIn {
-  from { opacity: 0; transform: translate(-50%, calc(-100% + 6px)); }
-  to   { opacity: 1; transform: translate(-50%, -100%); }
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% + 6px));
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%);
+  }
 }
+
 .ref-tooltip-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--chat-popup-text);
   margin-bottom: 4px;
 }
+
 .ref-tooltip-source {
   font-size: 11px;
   color: var(--chat-source-muted);
   margin-bottom: 6px;
 }
+
 .ref-tooltip-excerpt {
   font-size: 12px;
   color: var(--chat-source-text);
@@ -1350,11 +1487,29 @@ function scrollToBottom() {
   max-height: 160px;
   overflow-y: auto;
 }
-.ref-tooltip-excerpt :deep(p) { margin: 3px 0; }
+
+.ref-tooltip-excerpt :deep(p) {
+  margin: 3px 0;
+}
+
 .ref-tooltip-excerpt :deep(ul),
-.ref-tooltip-excerpt :deep(ol) { padding-left: 16px; margin: 3px 0; }
-.ref-tooltip-excerpt :deep(strong) { font-weight: 600; color: var(--chat-popup-text); }
-.ref-tooltip-excerpt :deep(code) { background: var(--chat-msg-code-bg); color: var(--chat-msg-text); padding: 1px 4px; border-radius: 2px; font-size: 11px; }
+.ref-tooltip-excerpt :deep(ol) {
+  padding-left: 16px;
+  margin: 3px 0;
+}
+
+.ref-tooltip-excerpt :deep(strong) {
+  font-weight: 600;
+  color: var(--chat-popup-text);
+}
+
+.ref-tooltip-excerpt :deep(code) {
+  background: var(--chat-msg-code-bg);
+  color: var(--chat-msg-text);
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 11px;
+}
 
 /* ── 右侧文档预览面板 ──────────────────────────────────────── */
 .doc-panel-overlay {
@@ -1364,10 +1519,17 @@ function scrollToBottom() {
   background: rgba(0, 0, 0, 0.15);
   animation: overlayIn 0.2s ease;
 }
+
 @keyframes overlayIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
+
 .doc-panel {
   position: fixed;
   top: 0;
@@ -1384,10 +1546,17 @@ function scrollToBottom() {
   flex-direction: column;
   animation: panelIn 0.25s ease;
 }
+
 @keyframes panelIn {
-  from { transform: translateX(100%); }
-  to   { transform: translateX(0); }
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
 }
+
 .doc-panel-header {
   display: flex;
   align-items: center;
@@ -1396,6 +1565,7 @@ function scrollToBottom() {
   border-bottom: 1px solid var(--chat-popup-border);
   flex-shrink: 0;
 }
+
 .doc-panel-title {
   font-size: 15px;
   font-weight: 600;
@@ -1406,6 +1576,7 @@ function scrollToBottom() {
   flex: 1;
   margin-right: 12px;
 }
+
 .doc-panel-close {
   display: flex;
   align-items: center;
@@ -1420,21 +1591,25 @@ function scrollToBottom() {
   flex-shrink: 0;
   transition: all 0.15s;
 }
+
 .doc-panel-close:hover {
   background: var(--chat-copy-hover-bg);
   color: var(--chat-copy-hover-text);
 }
+
 .doc-panel-body {
   flex: 1;
   overflow-y: auto;
   padding: 18px;
 }
+
 .doc-panel-spinner {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
 }
+
 .spinner {
   width: 32px;
   height: 32px;
@@ -1443,20 +1618,26 @@ function scrollToBottom() {
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
+
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
+
 .doc-panel-error {
   color: var(--chat-popup-danger-hover-text);
   font-size: 13px;
   padding: 16px;
   text-align: center;
 }
+
 .doc-panel-content {
   font-size: 14px;
   line-height: 1.75;
   color: var(--chat-msg-text);
 }
+
 .doc-panel-content :deep(h1),
 .doc-panel-content :deep(h2),
 .doc-panel-content :deep(h3) {
@@ -1464,28 +1645,48 @@ function scrollToBottom() {
   font-weight: 600;
   color: var(--chat-msg-text);
 }
-.doc-panel-content :deep(h1) { font-size: 18px; }
-.doc-panel-content :deep(h2) { font-size: 16px; }
-.doc-panel-content :deep(h3) { font-size: 14px; }
-.doc-panel-content :deep(p) { margin: 4px 0; }
+
+.doc-panel-content :deep(h1) {
+  font-size: 18px;
+}
+
+.doc-panel-content :deep(h2) {
+  font-size: 16px;
+}
+
+.doc-panel-content :deep(h3) {
+  font-size: 14px;
+}
+
+.doc-panel-content :deep(p) {
+  margin: 4px 0;
+}
+
 .doc-panel-content :deep(ul),
-.doc-panel-content :deep(ol) { padding-left: 20px; margin: 6px 0; }
+.doc-panel-content :deep(ol) {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+
 .doc-panel-content :deep(table) {
   width: 100%;
   border-collapse: collapse;
   margin: 10px 0;
   font-size: 13px;
 }
+
 .doc-panel-content :deep(th),
 .doc-panel-content :deep(td) {
   border: 1px solid var(--chat-msg-table-border);
   padding: 8px 10px;
   text-align: left;
 }
+
 .doc-panel-content :deep(th) {
   background: var(--chat-msg-table-head-bg);
   font-weight: 600;
 }
+
 .doc-panel-content :deep(pre) {
   background: var(--chat-msg-pre-bg);
   border: 1px solid var(--chat-msg-pre-border);
@@ -1495,6 +1696,7 @@ function scrollToBottom() {
   overflow-x: auto;
   font-size: 12px;
 }
+
 .doc-panel-content :deep(code) {
   background: var(--chat-msg-code-bg);
   color: var(--chat-msg-text);
@@ -1502,6 +1704,7 @@ function scrollToBottom() {
   border-radius: 3px;
   font-size: 12px;
 }
+
 .doc-panel-content :deep(pre code) {
   background: transparent;
   padding: 0;
@@ -1511,9 +1714,17 @@ function scrollToBottom() {
 .doc-panel-content :deep(.doc-anchor-highlight) {
   animation: anchorFlash 1.5s ease;
 }
+
 @keyframes anchorFlash {
-  0%, 100% { background: transparent; }
-  30% { background: var(--chat-citation-hover-bg); }
+
+  0%,
+  100% {
+    background: transparent;
+  }
+
+  30% {
+    background: var(--chat-citation-hover-bg);
+  }
 }
 
 /* ── 深色模式适配 ─────────────────────────────────────────────
@@ -1522,12 +1733,15 @@ function scrollToBottom() {
 [data-theme='dark'] .ref-tooltip {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
 }
+
 [data-theme='dark'] .doc-panel-overlay {
   background: rgba(0, 0, 0, 0.55);
 }
+
 [data-theme='dark'] .doc-panel {
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.45);
 }
+
 [data-theme='dark'] .doc-panel-error {
   color: #f87171;
 }
@@ -1536,17 +1750,52 @@ function scrollToBottom() {
 [data-theme='dark'] .msg-edit {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
 }
+
 [data-theme='dark'] .message-row.user .message-bubble {
   box-shadow: none;
 }
 
 /* 消息操作按钮 */
-.message-actions { display: flex; gap: 4px; margin-top: 10px; opacity: 0.7; transition: opacity 0.2s; }
-.message-row:hover .message-actions { opacity: 1; }
-.action-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--chat-copy-text); background: transparent; border: 0; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
-.action-btn:hover { background: var(--chat-copy-hover-bg); color: var(--chat-copy-hover-text); }
-.action-btn.active { color: var(--chat-source-link); background: var(--chat-citation-hover-bg); }
-.action-btn svg { flex-shrink: 0; }
+.message-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.message-row:hover .message-actions {
+  opacity: 1;
+}
+
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--chat-copy-text);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.action-btn:hover {
+  background: var(--chat-copy-hover-bg);
+  color: var(--chat-copy-hover-text);
+}
+
+.action-btn.active {
+  color: var(--chat-source-link);
+  background: var(--chat-citation-hover-bg);
+}
+
+.action-btn svg {
+  flex-shrink: 0;
+}
 
 /* ── 消息内联编辑（编辑框覆盖在原气泡上，参照 DeepSeek） ──── */
 .msg-edit {
@@ -1559,10 +1808,12 @@ function scrollToBottom() {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
+
 .msg-edit:focus-within {
   border-color: var(--chat-input-focus-border);
   box-shadow: 0 0 0 3px var(--chat-input-focus-ring);
 }
+
 .msg-edit-textarea {
   width: 100%;
   min-height: 44px;
@@ -1577,7 +1828,11 @@ function scrollToBottom() {
   max-height: 40vh;
   overflow-y: auto;
 }
-.msg-edit-textarea::placeholder { color: var(--chat-input-placeholder); }
+
+.msg-edit-textarea::placeholder {
+  color: var(--chat-input-placeholder);
+}
+
 .msg-edit-actions {
   display: flex;
   align-items: center;
@@ -1585,11 +1840,13 @@ function scrollToBottom() {
   gap: 8px;
   margin-top: 8px;
 }
+
 .msg-edit-hint {
   margin-right: auto;
   font-size: 11px;
   color: var(--chat-copy-text);
 }
+
 .msg-edit-btn {
   padding: 5px 14px;
   border-radius: 8px;
@@ -1600,29 +1857,38 @@ function scrollToBottom() {
   cursor: pointer;
   transition: all 0.15s;
 }
+
 .msg-edit-btn:hover:not(:disabled) {
   background: var(--chat-input-action-hover-bg);
   color: var(--chat-input-action-hover-text);
 }
+
 .msg-edit-btn.primary {
   background: var(--chat-input-send-active-bg);
   border-color: var(--chat-input-send-active-border);
   color: #fff;
 }
-.msg-edit-btn.primary:hover:not(:disabled) { filter: brightness(1.05); }
-.msg-edit-btn.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.msg-edit-btn.primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.msg-edit-btn.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* ── 消息版本切换（‹ 1/2 ›，参照 DeepSeek） ───────────────── */
 .msg-version-nav {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-top: 6px;
-  padding: 2px 6px;
-  border: 1px solid var(--chat-input-action-border);
-  border-radius: 10px;
-  background: var(--chat-input-action-bg);
+  margin-left: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
+
 .ver-btn {
   width: 22px;
   height: 22px;
@@ -1638,11 +1904,17 @@ function scrollToBottom() {
   line-height: 1;
   transition: all 0.15s;
 }
+
 .ver-btn:hover:not(:disabled) {
   background: var(--chat-input-action-hover-bg);
   color: var(--chat-input-action-hover-text);
 }
-.ver-btn:disabled { opacity: 0.35; cursor: default; }
+
+.ver-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .ver-count {
   font-size: 12px;
   color: var(--chat-copy-text);

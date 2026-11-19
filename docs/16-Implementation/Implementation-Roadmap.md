@@ -282,6 +282,10 @@ DeepSeek推理
 
 # 7. RAG 系统实现
 
+> 检索质量与日志定位的后续优化以
+> [`Knowledge-RAG-Quality-Roadmap.md`](./Knowledge-RAG-Quality-Roadmap.md) 为准
+> （P0 已落地，P1~P3 按该文档步骤执行）。
+
 ## 7.1 RAG 目标
 
 让 AI 拥有企业经验。

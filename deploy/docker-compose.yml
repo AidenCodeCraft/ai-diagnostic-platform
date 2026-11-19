@@ -197,18 +197,20 @@ services:
       MILVUS_ENABLED: "true"
       MILVUS_HOST: milvus
       MILVUS_PORT: "19530"
-      MILVUS_COLLECTION: knowledge_docs
-      MILVUS_DIM: "${MILVUS_DIM:-512}"
+      MILVUS_COLLECTION: ${MILVUS_COLLECTION:-knowledge_sections_v2}
+      MILVUS_DIM: "${MILVUS_DIM:-1024}"
       MILVUS_USER: ""
       MILVUS_PASSWORD: ""
       # ── Embedding ──────────────────────────────────
       EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-auto}"
       EMBEDDING_BATCH_SIZE: "32"
-      EMBEDDING_DIM: "${MILVUS_DIM:-512}"
+      EMBEDDING_DIM: "${MILVUS_DIM:-1024}"
       EMBEDDING_API_URL: "${EMBEDDING_API_URL:-}"
       EMBEDDING_API_KEY: "${EMBEDDING_API_KEY:-}"
       EMBEDDING_API_MODEL: "${EMBEDDING_API_MODEL:-text-embedding-3-small}"
-      EMBEDDING_HASH_FALLBACK: "true"
+      EMBEDDING_HASH_FALLBACK: "false"
+      # 基础镜像不含 sentence-transformers，精排自动跳过（bge 覆盖文件里打开）
+      RERANKER_ENABLED: "false"
       # BGE 冷加载超时（秒）；容器内本地 BGE 建议 120（见 docker-compose.bge.yml）
       EMBEDDING_LOAD_TIMEOUT: "${EMBEDDING_LOAD_TIMEOUT:-30}"
       # ── HuggingFace / BGE（受限网络/离线部署用；Docker 内本地 BGE 见 docker-compose.bge.yml）──
@@ -281,12 +283,14 @@ services:
       MILVUS_ENABLED: "true"
       MILVUS_HOST: milvus
       MILVUS_PORT: "19530"
-      MILVUS_COLLECTION: knowledge_docs
-      # 与 backend 保持一致（默认 512，HashingEmbedder 输出维度）
-      MILVUS_DIM: "${MILVUS_DIM:-512}"
+      MILVUS_COLLECTION: ${MILVUS_COLLECTION:-knowledge_sections_v2}
+      # 与 backend 保持一致（章节级 schema：1024 维 BGE 向量）
+      MILVUS_DIM: "${MILVUS_DIM:-1024}"
       EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-auto}"
-      EMBEDDING_DIM: "${MILVUS_DIM:-512}"
-      EMBEDDING_HASH_FALLBACK: "true"
+      EMBEDDING_DIM: "${MILVUS_DIM:-1024}"
+      EMBEDDING_HASH_FALLBACK: "false"
+      # 基础镜像不含 sentence-transformers，精排自动跳过（bge 覆盖文件里打开）
+      RERANKER_ENABLED: "false"
       MINIO_ENABLED: "true"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin

@@ -6,7 +6,7 @@
 
 门槛（全部满足才真正执行）：
     RUN_REAL_BGE=1        必须显式设置（默认整模块 skip）
-    模型已缓存            BAAI/bge-small-zh-v1.5 的 HF 缓存完整（否则 skip）
+    模型已缓存            BAAI/bge-large-zh-v1.5 的 HF 缓存完整（否则 skip）
 
 注意：模块被启用（RUN_REAL_BGE=1）时会自动强制 ``HF_HUB_OFFLINE=1`` /
 ``TRANSFORMERS_OFFLINE=1`` —— 否则 transformers 会对 repo id 发起
@@ -51,7 +51,8 @@ RUN_REAL_BGE_OFFLINE = os.getenv("RUN_REAL_BGE_OFFLINE", "").strip().lower() in 
     "yes",
     "on",
 )
-MODEL_NAME = os.getenv("BGE_MODEL_NAME", "BAAI/bge-small-zh-v1.5")
+MODEL_NAME = os.getenv("BGE_MODEL_NAME", "BAAI/bge-large-zh-v1.5")
+MODEL_DIM = int(os.getenv("BGE_MODEL_DIM", "1024") or 1024)
 
 BACKEND_DIR = Path(__file__).resolve().parents[3]  # backend/
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
@@ -181,7 +182,7 @@ def embedder(snapshot_dir: Path):
         model_name=MODEL_NAME,
         device="cpu",
         normalize=True,
-        dimension=512,
+        dimension=MODEL_DIM,
     )
     return BGEEmbedder(config)
 
@@ -198,7 +199,7 @@ def _cosine(vec_a: List[float], vec_b: List[float]) -> float:
 # 1. 磁盘缓存证据
 # ----------------------------------------------------------------------
 def test_model_cache_present(snapshot_dir: Path) -> None:
-    """模型真实落盘：权重 ≥50MB、config hidden_size=512、sentence-transformers 布局完整。"""
+    """模型真实落盘：权重 ≥50MB、config hidden_size 与配置维度一致、sentence-transformers 布局完整。"""
     weights = [
         p
         for p in (snapshot_dir / "model.safetensors", snapshot_dir / "pytorch_model.bin")
@@ -208,7 +209,7 @@ def test_model_cache_present(snapshot_dir: Path) -> None:
     assert max(p.stat().st_size for p in weights) > 50 * 1024 * 1024
 
     cfg = json.loads((snapshot_dir / "config.json").read_text(encoding="utf-8"))
-    assert cfg.get("hidden_size") == 512, f"config hidden_size 应为 512，实际 {cfg.get('hidden_size')}"
+    assert cfg.get("hidden_size") == MODEL_DIM, f"config hidden_size 应为 {MODEL_DIM}，实际 {cfg.get('hidden_size')}"
     assert cfg.get("model_type") == "bert"
     assert (snapshot_dir / "modules.json").is_file(), "缺少 sentence-transformers modules.json"
     assert (snapshot_dir / "tokenizer.json").is_file()
@@ -220,12 +221,12 @@ def test_model_cache_present(snapshot_dir: Path) -> None:
 # ----------------------------------------------------------------------
 # 2. 加载与维度
 # ----------------------------------------------------------------------
-def test_embedder_loads_dimension_512(embedder) -> None:
-    """真实加载成功，dimension=512，health_check 通过，嵌入非空。"""
+def test_embedder_loads_expected_dimension(embedder) -> None:
+    """真实加载成功，维度与配置一致，health_check 通过，嵌入非空。"""
     assert embedder.health_check() is True
-    assert embedder.dimension == 512
+    assert embedder.dimension == MODEL_DIM
     vec = embedder.embed("USB 设备超时无响应")
-    assert len(vec) == 512
+    assert len(vec) == MODEL_DIM
     assert all(isinstance(v, float) for v in vec)
     assert any(abs(v) > 1e-6 for v in vec), "嵌入向量不应全为 0"
 
@@ -335,7 +336,7 @@ def test_offline_load_by_repo_id(snapshot_dir: Path) -> None:
             payload = json.loads(line[len("OFFLINE_CHILD_RESULT: "):])
             break
     assert payload is not None, f"子进程未输出结果:\n{completed.stdout[-2000:]}"
-    assert payload["dimension"] == 512
+    assert payload["dimension"] == MODEL_DIM
     assert abs(payload["norm"] - 1.0) < 1e-3, f"norm={payload['norm']}"
 
 
@@ -355,7 +356,7 @@ def test_milvus_joint_index_search(monkeypatch) -> None:
     monkeypatch.setattr(settings, "MILVUS_HOST", MILVUS_HOST)
     monkeypatch.setattr(settings, "MILVUS_PORT", MILVUS_PORT)
     monkeypatch.setattr(settings, "EMBEDDING_PROVIDER", "local")
-    monkeypatch.setattr(settings, "EMBEDDING_DIM", 512)
+    monkeypatch.setattr(settings, "EMBEDDING_DIM", MODEL_DIM)
     monkeypatch.setattr(settings, "EMBEDDING_LOAD_TIMEOUT", 300.0)
     monkeypatch.setattr(settings, "EMBEDDING_HASH_FALLBACK", False)
 
@@ -366,7 +367,7 @@ def test_milvus_joint_index_search(monkeypatch) -> None:
 
     service = VectorService()
     assert service.available is True, "VectorService 应可用（Milvus 连接 + BGE 加载）"
-    assert service.dimension == 512
+    assert service.dimension == MODEL_DIM
 
     try:
         chunks = service.index_document(MILVUS_DOC_ID, content=MILVUS_DOC_CONTENT)

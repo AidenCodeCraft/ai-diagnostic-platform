@@ -227,6 +227,9 @@ class EmbeddingService:
         cfg = EmbeddingConfig()
         try:
             cfg.provider = str(getattr(settings, "EMBEDDING_PROVIDER", "auto") or "auto").lower()
+            cfg.model_name = str(
+                getattr(settings, "EMBEDDING_MODEL", cfg.model_name) or cfg.model_name
+            )
             cfg.dimension = int(getattr(settings, "EMBEDDING_DIM", cfg.dimension) or cfg.dimension)
             cfg.batch_size = int(getattr(settings, "EMBEDDING_BATCH_SIZE", cfg.batch_size) or cfg.batch_size)
             cfg.api_url = str(getattr(settings, "EMBEDDING_API_URL", "") or "")

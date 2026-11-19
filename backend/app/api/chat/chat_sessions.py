@@ -69,7 +69,10 @@ def update_session(
 ):
     try:
         return ChatService(db).update_session(
-            session_id, title=body.get("title"), user_id=user_id,
+            session_id,
+            title=body.get("title"),
+            is_pinned=body.get("is_pinned"),
+            user_id=user_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="会话不存在") from exc

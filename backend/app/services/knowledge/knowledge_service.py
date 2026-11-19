@@ -18,6 +18,31 @@ logger = get_logger(__name__)
 # 向量索引后台线程池：保存知识时不必等待 Milvus 连接/embedding/insert/flush
 _INDEX_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="kb-index")
 
+# 章节级 BM25 索引缓存：按语料签名复用，避免每次检索重建全量索引
+_SECTION_INDEX_LOCK = __import__("threading").Lock()
+_SECTION_INDEX: Any = None
+_SECTION_INDEX_SIGNATURE: Optional[str] = None
+
+
+def _get_section_index(signature: str, chunks: List[Any], index_cls: Any) -> Any:
+    """返回按语料签名缓存的 BM25 索引（语料不变则复用）。"""
+    global _SECTION_INDEX, _SECTION_INDEX_SIGNATURE
+    with _SECTION_INDEX_LOCK:
+        if _SECTION_INDEX is None or _SECTION_INDEX_SIGNATURE != signature:
+            index = index_cls()
+            index.ensure(chunks, signature)
+            _SECTION_INDEX = index
+            _SECTION_INDEX_SIGNATURE = signature
+        return _SECTION_INDEX
+
+
+def reset_section_index_cache() -> None:
+    """测试用：清空 BM25 缓存。"""
+    global _SECTION_INDEX, _SECTION_INDEX_SIGNATURE
+    with _SECTION_INDEX_LOCK:
+        _SECTION_INDEX = None
+        _SECTION_INDEX_SIGNATURE = None
+
 
 def _index_document_in_background(doc_id: int) -> None:
     from app.database import session as session_module
@@ -207,17 +232,28 @@ class KnowledgeService:
         page: int = 1,
         page_size: int = 20,
         project_id: Optional[int] = None,
+        sections: bool = False,
     ) -> Dict[str, Any]:
-        """Run one consistent hybrid search for every caller.
+        """章节级混合检索：BM25 + 向量，按 RRF 融合。
 
-        Dense and sparse retrieval use different score scales, so they are
-        merged by rank rather than by comparing their raw scores.
+        - 统一在「章节」粒度检索与融合：BM25 索引、向量写入、snippet 展示同一切分；
+        - 分数只由名次决定（RRF），不比 BM25 与向量的原始分（量纲不可比）；
+        - `sections=False` 按文档去重（管理端列表用），`True` 保留每个命中章节
+          （对话回答用，模型需要精确到节）。
+
+        这是此前「整篇文档建索引 + 章节提权」的替代实现：提权规则已删除，
+        命中粒度本身就是修正。
         """
+        empty = {"items": [], "total": 0, "page": page, "page_size": page_size}
+        if not (query_text or "").strip():
+            return empty
+
         try:
-            from app.services.knowledge.retrievers import (
-                BM25Retriever,
-                HybridRetriever,
-                MilvusRetriever,
+            from app.services.knowledge.section_search import (
+                SectionBM25Index,
+                build_section_chunks,
+                corpus_signature,
+                rank_sections,
             )
 
             docs_query = (
@@ -226,40 +262,79 @@ class KnowledgeService:
             )
             docs_query = self._apply_project_filter(docs_query, project_id)
             docs = docs_query.order_by(KnowledgeDocument.updated_at.desc()).limit(1000).all()
-            sparse = BM25Retriever()
-            sparse.index([
-                (int(doc.id), f"{doc.title or ''}\n{doc.content or ''}")
-                for doc in docs
-            ])
-            retriever = HybridRetriever(MilvusRetriever(), sparse)
-            retrieved = retriever.retrieve(query_text, top_k=max(page_size, 10))
+            if not docs:
+                return empty
+
+            chunks = build_section_chunks(docs)
+            if not chunks:
+                items = self._keyword_search_bm25(query_text, page_size, project_id=project_id)
+                return {
+                    "items": items[:page_size], "total": len(items),
+                    "page": page, "page_size": page_size,
+                }
+
+            bm25_index = _get_section_index(corpus_signature(docs), chunks, SectionBM25Index)
+            dense_hits = self._dense_hits(query_text, top_k=max(page_size * 3, 30))
+            ranked = rank_sections(
+                chunks, query=query_text, dense_hits=dense_hits, bm25_index=bm25_index,
+            )
+
+            if not ranked:
+                items = self._keyword_search_bm25(query_text, page_size, project_id=project_id)
+                return {
+                    "items": items[:page_size], "total": len(items),
+                    "page": page, "page_size": page_size,
+                }
 
             doc_map = {int(doc.id): doc for doc in docs}
-            results = []
-            seen_ids = set()
-            for item in retrieved:
-                doc = doc_map.get(int(item.chunk.doc_id))
-                if not doc or doc.id in seen_ids:
+            items: List[Dict[str, Any]] = []
+            seen_docs: set = set()
+            for chunk, score in ranked:
+                doc = doc_map.get(chunk.doc_id)
+                if doc is None:
                     continue
-                seen_ids.add(doc.id)
-                results.append({
-                    "id": doc.id, "title": doc.title,
-                    "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
-                    "relevance_score": round(item.score, 4),
-                    "snippet": self._extract_snippet(str(doc.content), query_text),
+                if not sections:
+                    if chunk.doc_id in seen_docs:
+                        continue
+                    seen_docs.add(chunk.doc_id)
+                items.append({
+                    "id": doc.id,
+                    "title": doc.title,
+                    "category": doc.category,
+                    "doc_type": doc.doc_type,
+                    "source": doc.source,
+                    "section": chunk.section,
+                    "key": chunk.key,
+                    "relevance_score": round(float(score), 4),
+                    "snippet": chunk.content[:800] if sections else self._extract_snippet(
+                        str(doc.content), query_text,
+                    ),
                 })
-            if results:
-                return {"items": results[:page_size], "total": len(results), "page": page, "page_size": page_size}
-        except Exception as exc:
-            logger = __import__("app.core.logging_config", fromlist=["get_logger"]).get_logger(__name__)
-            logger.debug("[KnowledgeService] Hybrid search unavailable, falling back to keyword: %s", exc)
+                if len(items) >= page_size:
+                    break
 
-        items = self._keyword_search_bm25(query_text, page_size, project_id=project_id)
-        if items:
-            total = len(items)
-            return {"items": items[:page_size], "total": total, "page": page, "page_size": page_size}
+            return {"items": items, "total": len(items), "page": page, "page_size": page_size}
+        except Exception as exc:  # noqa: BLE001 - 检索失败退回关键词，不让问答崩
+            logger.warning("[KnowledgeService] section search failed, fallback to keyword: %s", exc)
+            items = self._keyword_search_bm25(query_text, page_size, project_id=project_id)
+            return {
+                "items": items[:page_size], "total": len(items),
+                "page": page, "page_size": page_size,
+            }
 
-        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+    @staticmethod
+    def _dense_hits(query_text: str, top_k: int) -> List[Dict[str, Any]]:
+        """向量一路的章节命中；Milvus 不可用时不参与融合（不报错）。"""
+        try:
+            from app.services.knowledge.vector_service import get_vector_service
+
+            service = get_vector_service()
+            if not getattr(service, "available", False):
+                return []
+            return service.search(query_text, top_k=top_k)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[KnowledgeService] dense search unavailable: %s", exc)
+            return []
 
     def search_by_title(
         self,

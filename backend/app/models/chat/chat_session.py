@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 
 from app.database.base import Base
 
@@ -14,6 +14,7 @@ class ChatSession(Base):
     log_id = Column(Integer, ForeignKey("logs.id"), nullable=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)  # 知识检索的项目范围
     model = Column(String(50), nullable=True)
+    is_pinned = Column(Boolean, default=False, nullable=False)  # 侧栏置顶
     context = Column(JSON, nullable=True)  # { last_analysis: {...}, analysis_mode: 'chat'|'diagnose' }
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(

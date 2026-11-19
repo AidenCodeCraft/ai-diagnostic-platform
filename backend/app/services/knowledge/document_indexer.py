@@ -79,7 +79,8 @@ class DocumentIndexer:
             return 0
 
         try:
-            chunk_count = self.vector_service.index_document(doc_id, content)
+            title = self._get_document_title(doc_id)
+            chunk_count = self.vector_service.index_document(doc_id, content, title=title)
             self._index_stats["total_indexed"] += chunk_count
             logger.info("[DocumentIndexer] Indexed doc %d: %d chunks", doc_id, chunk_count)
             return chunk_count
@@ -184,6 +185,18 @@ class DocumentIndexer:
     # ==================================================================
     # Helpers
     # ==================================================================
+
+    def _get_document_title(self, doc_id: int) -> str:
+        """取文档标题（作为向量索引文本的前缀）。"""
+        from app.models import KnowledgeDocument
+
+        try:
+            doc = self.db.query(KnowledgeDocument).filter(
+                KnowledgeDocument.id == doc_id
+            ).first()
+            return str(doc.title or "") if doc else ""
+        except Exception:  # noqa: BLE001 - 标题缺失只影响召回质量，不应阻断索引
+            return ""
 
     def _get_document_content(self, doc_id: int) -> Optional[str]:
         """从数据库获取文档内容。"""

@@ -16,7 +16,7 @@
     RUN_REAL_MILVUS  设为 1 才执行
     MILVUS_HOST      默认 localhost
     MILVUS_PORT      默认 19530
-    MILVUS_DIM       默认 512
+    MILVUS_DIM       默认 1024
 """
 
 from __future__ import annotations
@@ -27,6 +27,8 @@ import uuid
 from typing import List
 
 import pytest
+
+from app.services.knowledge.vector_service import build_index_params, build_search_params
 
 # 默认跳过（防止默认全量 pytest 依赖 Milvus / 污染基线）
 pytestmark = pytest.mark.skipif(
@@ -52,7 +54,7 @@ except ImportError as exc:  # noqa: BLE001 - 记为 skip 原因
 
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 MILVUS_PORT = str(os.getenv("MILVUS_PORT", "19530"))
-MILVUS_DIM = int(os.getenv("MILVUS_DIM", "512") or 512)
+MILVUS_DIM = int(os.getenv("MILVUS_DIM", "1024") or 1024)
 ALIAS = "pytest_real_milvus"
 
 
@@ -100,7 +102,7 @@ def temp_collection(milvus_conn):
     )
     collection.create_index(
         "embedding",
-        {"metric_type": "IP", "index_type": "IVF_FLAT", "params": {"nlist": 128}},
+        build_index_params(),
     )
     collection.load()
     try:
@@ -140,13 +142,13 @@ def test_insert_flush_search_and_cleanup(temp_collection, milvus_conn):
     hits = collection.search(
         data=[vectors[0]],
         anns_field="embedding",
-        param={"metric_type": "IP", "params": {"nprobe": 16}},
+        param=build_search_params(),
         limit=3,
         output_fields=["doc_id", "content"],
     )[0]
     assert len(hits) > 0, "search 应至少命中 1 条"
     assert hits[0].entity.get("doc_id") == 987654, "Top1 应命中自身文档"
-    assert float(hits[0].score) > 0.99, "自身向量 IP 相似度应接近 1.0"
+    assert float(hits[0].score) > 0.99, "自身向量 COSINE 相似度应接近 1.0"
 
     # delete 表达式 + query 验证（num_entities 在 delete 后不立即下降，属 Milvus 统计口径）
     collection.delete("doc_id == 987654")

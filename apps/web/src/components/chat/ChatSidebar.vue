@@ -67,8 +67,7 @@
       </div>
 
       <div class="sidebar-history" v-show="!collapsed">
-        <div class="section-title">最近对话</div>
-        <template v-for="group in chatGroups" :key="group.label">
+        <template v-for="group in displayGroups" :key="group.label">
           <div class="history-group-title">{{ group.label }}</div>
           <div
             v-for="chat in group.chats"
@@ -77,7 +76,19 @@
             :class="{ active: chat.id === activeChatId }"
             @click="$emit('selectChat', chat.id)"
           >
-            <span class="history-title">{{ chat.title }}</span>
+            <input
+              v-if="renamingId === chat.id"
+              :ref="setRenameRef"
+              v-model="renameText"
+              class="rename-input"
+              maxlength="200"
+              @click.stop
+              @dblclick.stop
+              @keydown.enter.prevent="commitRename"
+              @keydown.esc.prevent="cancelRename"
+              @blur="commitRename"
+            />
+            <span v-else class="history-title">{{ chat.title }}</span>
             <span v-if="sendingIds && sendingIds.includes(chat.id)" class="streaming-badge" title="回答生成中">
               <span class="streaming-dot" />回答中
             </span>
@@ -118,8 +129,51 @@ const props = defineProps<{
   isAdmin: boolean
 }>()
 
-/** 最近对话按时间分组：今天 / 7天内 / 30天内 / 具体月份 */
-const chatGroups = computed(() => groupChatsByTime(props.chats))
+/** 置顶对话单独成组，其余按时间分组：今天 / 7天内 / 30天内 / 具体月份 */
+const displayGroups = computed(() => {
+  const groups: Array<{ label: string; chats: ChatRecord[] }> = []
+  const pinned = props.chats.filter(c => c.pinned)
+  if (pinned.length) groups.push({ label: '置顶', chats: pinned })
+  groups.push(...groupChatsByTime(props.chats.filter(c => !c.pinned)))
+  return groups
+})
+
+/** 内联重命名状态 */
+const renamingId = ref<number | null>(null)
+const renameText = ref('')
+let renameInputEl: HTMLInputElement | null = null
+
+function setRenameRef(el: any) {
+  renameInputEl = el as HTMLInputElement | null
+}
+
+function startRename(id: number) {
+  const chat = props.chats.find(c => c.id === id)
+  if (!chat) return
+  renamingId.value = id
+  renameText.value = chat.title
+  nextTick(() => {
+    renameInputEl?.focus()
+    renameInputEl?.select()
+  })
+}
+
+function commitRename() {
+  const id = renamingId.value
+  if (id == null) return
+  const chat = props.chats.find(c => c.id === id)
+  const title = renameText.value.trim()
+  renamingId.value = null
+  if (title && chat && title !== chat.title) {
+    emit('renameChat', id, title)
+  }
+}
+
+function cancelRename() {
+  renamingId.value = null
+}
+
+defineExpose({ startRename })
 
 const emit = defineEmits<{
   (e: 'update:collapsed', value: boolean): void
@@ -130,6 +184,7 @@ const emit = defineEmits<{
   (e: 'chatMenu', event: MouseEvent, chat: ChatRecord): void
   (e: 'toggleUserMenu'): void
   (e: 'searchChats', query: string): void
+  (e: 'renameChat', id: number, title: string): void
 }>()
 
 const showSearch = ref(false)
@@ -309,11 +364,17 @@ function closeSearch() {
   padding: 8px 10px;
 }
 
-.section-title {
-  font-size: 12px;
-  color: var(--chat-sidebar-section);
-  padding: 8px 12px 4px;
-  letter-spacing: 0.5px;
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--chat-sidebar-search-focus, #2563eb);
+  border-radius: 4px;
+  background: var(--chat-sidebar-search-bg, #f3f4f6);
+  color: var(--chat-sidebar-history-text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
 }
 
 /* 时间分组标题（今天 / 7天内 / 30天内 / 具体月份） */
