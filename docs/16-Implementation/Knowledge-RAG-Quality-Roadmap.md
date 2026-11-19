@@ -180,6 +180,18 @@ Status: P0 已完成，P1~P3 按本文执行
 
 # 5. P3 检索基础设施与运维
 
+## 5.0 进度
+
+| 项 | 状态 | 落地位置 |
+| --- | --- | --- |
+| 5.3 观测：流水线/检索/向量快照 | ✅ | `diagnostics/pipeline_metrics.py`、`GET /logs/pipeline/health` |
+| 5.4 存储布局与预签名 | ✅ | `LogStorage.save(project_id=)` → `logs/p{pid}/{yyyymmdd}/`、`presigned_get()` TTL 900s |
+| 5.1 BM25 外置 | ⏳ | 需 Milvus 2.5 内置 BM25 或外部索引，待部署环境确认版本 |
+| 5.2 阈值校准 | ⏳ | 依赖真实黄金集与 A/B 数据（见 Deployment-Verification-Checklist V5） |
+| 5.5 回归 CI push 触发 | ⏳ | 需自托管 runner（标签 `ai-diag`）就绪 |
+
+> 部署环境需要人工验证的项统一列在 [`Deployment-Verification-Checklist.md`](./Deployment-Verification-Checklist.md)，含命令、期望结果与回填模板。
+
 ## 5.1 BM25 外置
 
 当前 BM25 是进程内索引（已按语料签名缓存，避免每请求重建）。进一步：
@@ -199,9 +211,9 @@ Status: P0 已完成，P1~P3 按本文执行
 
 ## 5.4 存储治理
 
-- 对象布局：`logs/{project_id}/{log_id}/{raw|index|templates|chunks}/`
+- 对象布局（已实现）：`logs/p{project_id}/{yyyymmdd}/{uuid}_{filename}`；预处理产物仍在 `UPLOAD_DIR/_ingest/{log_id}/`，迁移到对象存储时沿用同一前缀规则
 - ILM：raw 30 天、index 90 天、artifacts 长期；`replay_snapshot` 独立桶不随 ILM 清理
-- 预签名 TTL 15 分钟，桶禁公开
+- 预签名 TTL 15 分钟（`MINIO_PRESIGN_TTL_SECONDS=900`，`LogStorage.presigned_get()`），桶禁公开
 
 ## 5.5 黄金集与回归 CI
 

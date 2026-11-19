@@ -75,7 +75,7 @@ class LogService:
             raise
 
         # 保存到对象存储（MinIO 启用时）或保留本地路径
-        file_reference = LogStorage().save(stored_path, stored_name)
+        file_reference = LogStorage().save(stored_path, stored_name, project_id=project_id)
 
         log = Log(
             filename=stored_name,

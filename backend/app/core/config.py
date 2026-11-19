@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     # 上传后是否投递异步预处理链；broker 不可用时仅记日志，不影响上传
     CELERY_ASYNC_INGEST: bool = True
 
+    # ── Object storage ───────────────────────────────────────
+    # 预签名 URL 有效期：15 分钟（文档 P3.4 口径）；桶必须私有
+    MINIO_PRESIGN_TTL_SECONDS: int = 900
+
     # ── Security ─────────────────────────────────────────────
     SECRET_KEY: str = "CHANGE_ME_IN_PRODUCTION_GENERATE_RANDOM_64_CHAR"
     RATE_LIMIT_ENABLED: bool = False
