@@ -274,3 +274,12 @@ Status: P0 已完成，P1~P3 按本文执行
 3. **章节切分只允许一套口径**：`services/knowledge/sections.py` 是唯一实现，BM25 索引、向量写入、snippet 展示必须共用。
 4. **检索轨迹必须落库**：任何绕过 `trace_service` 的新链路都会让黄金集无法标注。
 5. **日志与知识文档同集合时必须过滤 `chunk_type`**：否则日志摘要会污染知识问答。
+
+---
+
+# 9. 相关文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [`Deployment-Verification-Checklist.md`](./Deployment-Verification-Checklist.md) | V1~V7：只能在部署环境验证的项（集合回填、过滤语义、100MB 端到端、Drain3 质量、精排 A/B、MinIO、回归 CI） |
+| [`Feishu-Image-Recognition-Design.md`](./Feishu-Image-Recognition-Design.md) | 飞书图片识别（DeepSeek-only：OCR 主路径 + 视觉兜底、权限清单、事件流、成本） |
