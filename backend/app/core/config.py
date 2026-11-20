@@ -65,7 +65,9 @@ class Settings(BaseSettings):
     RRF_WEIGHT_SPARSE: float = 1.0   # BM25 一路权重
     RRF_WEIGHT_DENSE: float = 1.5    # 向量一路权重（黄金集扫描：1.5 时 MRR 0.897→0.921）
 
-    RERANKER_ENABLED: bool = True                     # 无 sentence-transformers 时自动跳过
+    # V6 黄金集实测（45 条正样本）：开启后 recall@5 1.000→0.889、MRR 0.849→0.733，
+    # 耗时 56s→532s，明确变差 —— 默认关闭。要重开请先用「全文而非 snippet」再测一轮。
+    RERANKER_ENABLED: bool = False                    # 无 sentence-transformers 时自动跳过
     RERANKER_MODEL: str = "BAAI/bge-reranker-base"    # 278M，CPU 单批 30 条约 300~500ms
     RERANKER_TOP_N: int = 30                          # 参与精排的候选数
     RERANKER_SCORE_THRESHOLD: float = 0.0             # 归一化后低于该分的候选不展示

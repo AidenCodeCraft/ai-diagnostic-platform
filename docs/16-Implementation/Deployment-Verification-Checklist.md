@@ -261,6 +261,41 @@ python -m celery -A app.worker.celery_app:celery_app worker -Q ingest,embed -P s
 
 ---
 
+## V5 实测结果（双 worker，300MiB）
+
+| 项 | 结果 |
+| --- | --- |
+| 上传 300MiB（`MAX_UPLOAD_MB=512` 临时放开） | 200，10.3s |
+| 分片 | **7 个 chunk**（单 chunk 上限 50MiB） |
+| 分片分布 | w1 拿到 3 个、w2 拿到 4 个（prepare/template/compress 落在 w2） |
+| 全部任务 | 12 个任务全部 succeeded，0 失败 |
+| 产物 | `normalized_0..6.jsonl.gz` 7 个、`templates.json`（1214 模板 / 379.9 万行）、`compressed.bundle.jsonl.gz` 51.6MB，**第三方进程从 MinIO 全部读取成功** |
+| 阶段耗时 | parse 各 ~16s（两 worker 并行）、template 50.5s、compress 28.4s、index 350s |
+
+结论：多机 worker 读取 MinIO 产物链路通。注意 index 阶段两个 worker 同时加载 BGE 会抢 CPU，
+生产上 embed 队列建议单独部署一台 worker，不要和 ingest 混跑。
+
+---
+
+## V6 实测结果（精排 A/B，45 条正样本）
+
+| 配置 | recall@5 | MRR | 耗时 |
+| --- | --- | --- | --- |
+| `RERANKER_ENABLED=false` | **1.000** | **0.849** | 56s |
+| `RERANKER_ENABLED=true` | 0.889 | 0.733 | 532s（9.5×） |
+
+**结论：默认关闭 bge-reranker-base。** 两条指标都变差，耗时涨近 10 倍。
+已把 `RERANKER_ENABLED` 默认值改为 `False` 并在配置里写明实测数据。
+
+过程中还暴露一个口径缺陷：**回归 harness 原本只调检索层、不调精排**，
+所以开关 reranker 跑出完全一样的数字，精排退化在 CI 里永远看不见。
+已改为按生产链路口径（宽召回 30 条 → 精排 → 取前 5）。
+
+待验证的假设（下次再试精排时做）：现在喂给 Cross-Encoder 的是 141 字符左右的
+`snippet`，对技术章节偏短；改成全文段落再测，可能结论不同。
+
+---
+
 ## V5 / V6 怎么跑
 
 ### V5 多 worker 读取预处理产物（MinIO）

@@ -23,11 +23,26 @@ REPORT_DIR = Path(__file__).resolve().parents[2] / "reports"
 
 
 def _retrieve(db, question: str, page_size: int = 5) -> List[Dict[str, Any]]:
+    """按**生产链路口径**召回：先宽召回，再走精排（如启用）。
+
+    之前只调检索层、不调精排，导致 RERANKER_ENABLED 开/关跑出完全一样的结果——
+    精排退化在 CI 里永远看不见（V6 实测踩到）。
+    """
+    from app.core.config import settings
     from app.services.knowledge.knowledge_service import KnowledgeService
 
+    rerank_on = bool(getattr(settings, "RERANKER_ENABLED", False))
+    fetch = max(page_size, int(getattr(settings, "RERANKER_TOP_N", 30) or 30)) if rerank_on else page_size
+
     # sections=True：按章节召回，才能判「命中是不是那一节」
-    result = KnowledgeService(db).search(question, page=1, page_size=page_size, sections=True)
-    return result.get("items", [])
+    result = KnowledgeService(db).search(question, page=1, page_size=fetch, sections=True)
+    items = result.get("items", [])
+    if not rerank_on or not items:
+        return items
+
+    from app.services.knowledge.rerank_service import rerank_items
+
+    return rerank_items(question, items, keep=page_size)
 
 
 def _expected_doc_ids(sample: Dict[str, Any]) -> set:
