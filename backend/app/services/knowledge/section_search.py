@@ -26,6 +26,7 @@ from app.services.knowledge.sections import (
 
 DEFAULT_RRF_K = 60
 DEFAULT_CANDIDATES = 50
+_SEP = chr(10)  # 换行符（避免在源码里写转义）
 
 
 @dataclass
@@ -41,32 +42,39 @@ class SectionChunk:
 
 
 def build_section_chunks(docs: Iterable[Any]) -> List[SectionChunk]:
-    """把文档切成章节块（与向量库写入、snippet 展示使用同一套切分）。"""
+    """把文档切成章节块。
+
+    必须与向量写入使用**同一个**切分实现（`VectorService._build_chunks`）：
+    此前这里另写了一套循环，结果 BM25 语料与向量集合的 content_hash 对不上，
+    向量命中只能映射回 9/30 条，语义那一路等于废掉。
+    """
+    from app.services.knowledge.vector_service import VectorService
+
     chunks: List[SectionChunk] = []
     for doc in docs:
         doc_id = int(getattr(doc, "id", 0) or 0)
         if not doc_id:
             continue
         title = str(getattr(doc, "title", "") or "")
-        chunk_no = 0
-        for heading, body in split_markdown_sections(str(getattr(doc, "content", "") or "")):
-            body = (body or "").strip()
+        _title, built = VectorService._build_chunks(
+            doc_id, str(getattr(doc, "content", "") or ""), doc_title=title,
+        )
+        for chunk_no, chunk in enumerate(built):
+            body = (chunk.get("content") or "").strip()
             if len(body) < MIN_SECTION_CHARS:
                 continue
-            # 目录/占位章节不参与检索：它们只有泛词命中，会把真正对题的章节挤掉
-            if (heading or "").strip() in {"目录", "[TOC]"} or "[TOC]" in body[:20]:
-                continue
+            heading = (chunk.get("section") or "").strip()
+            index_text = chunk.get("index_text") or _SEP.join([title, heading, body])
             chunks.append(SectionChunk(
                 doc_id=doc_id,
                 chunk_no=chunk_no,
                 title=title,
-                section=(heading or "").strip(),
+                section=heading,
                 content=body,
-                index_text=f"{title}\n{heading}\n{body}".strip(),
-                key=section_key(doc_id, heading or "", chunk_no),
-                content_hash=content_hash(title, heading or "", body),
+                index_text=str(index_text).strip(),
+                key=section_key(doc_id, heading, chunk_no),
+                content_hash=str(chunk.get("content_hash") or ""),
             ))
-            chunk_no += 1
     return chunks
 
 

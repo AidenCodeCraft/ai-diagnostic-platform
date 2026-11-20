@@ -106,8 +106,11 @@ def run_reindex(
     """
     stats = ReindexStats()
 
+    # 与检索侧保持同一可见集合：检索只看 active，回填也只回填 active，
+    # 否则会出现「向量库里有、BM25 没索引」的文档，语义那一路直接失效
     query = (
         db.query(KnowledgeDocument)
+        .filter(KnowledgeDocument.status == "active")
         .filter(KnowledgeDocument.id > start_id)
         .order_by(KnowledgeDocument.id.asc())
     )
