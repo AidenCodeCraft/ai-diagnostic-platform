@@ -66,6 +66,38 @@ def _remove_index_in_background(doc_id: int) -> None:
         logger.warning("[KnowledgeService] background index remove failed for doc %s: %s", doc_id, exc)
 
 
+def dedupe_by_content_hash(chunks: List[Any]) -> List[Any]:
+    """跨文档同内容去重：同一 hash 只保留排名最靠前的一条。
+
+    同一段知识在多个文档里各存一份时（FAQ 与专题文档常见），
+    重复条目会互相挤位，还让「命中哪个文档」变成随机结果。
+    """
+    seen: set = set()
+    unique: List[Any] = []
+    for chunk in chunks:
+        digest = getattr(chunk, "content_hash", "") or ""
+        if digest:
+            if digest in seen:
+                continue
+            seen.add(digest)
+        unique.append(chunk)
+    return unique
+
+
+def dedupe_pairs_by_content_hash(pairs: List[Any]) -> List[Any]:
+    """对 (chunk, score) 序列按 content_hash 去重，保留排名靠前的一条。"""
+    seen: set = set()
+    unique: List[Any] = []
+    for chunk, score in pairs:
+        digest = getattr(chunk, "content_hash", "") or ""
+        if digest:
+            if digest in seen:
+                continue
+            seen.add(digest)
+        unique.append((chunk, score))
+    return unique
+
+
 class KnowledgeService:
     """Service for managing knowledge documents with keyword-based search."""
 
@@ -289,6 +321,9 @@ class KnowledgeService:
             doc_map = {int(doc.id): doc for doc in docs}
             items: List[Dict[str, Any]] = []
             seen_docs: set = set()
+            # 跨文档同内容去重：同一段知识在 FAQ 与专题文档里各存一份时，
+            # 两条都进候选只会互相挤位，还让「命中哪个文档」变成随机结果
+            ranked = dedupe_pairs_by_content_hash(ranked)
             for chunk, score in ranked:
                 doc = doc_map.get(chunk.doc_id)
                 if doc is None:

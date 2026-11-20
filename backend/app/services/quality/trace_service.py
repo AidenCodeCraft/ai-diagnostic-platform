@@ -39,6 +39,8 @@ def _candidates_from_references(references: Optional[List[Dict[str, Any]]]) -> L
                 "section": ref.get("section"),
                 "score": ref.get("score") or ref.get("relevance_score"),
                 "key": ref.get("key"),
+                # 归一化分数常常全是 1.0，排位才是评估时真正可比的东西
+                "rank": ref.get("num"),
             })
         except Exception:  # noqa: BLE001 - 单条异常不影响整体
             continue

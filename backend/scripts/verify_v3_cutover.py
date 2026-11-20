@@ -67,11 +67,32 @@ def _check_hits(hits: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _acceptance_hit(
-    hits: List[Dict[str, Any]], expect_doc: Optional[str], expect_section: Optional[str],
+    hits: List[Dict[str, Any]],
+    expect_doc: Optional[str],
+    expect_section: Optional[str],
+    expect_topic: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """验收用例：《FAQ》第 5 节应被召回（旧实现只召回《线路》第 1 节）。"""
-    if not (expect_doc or expect_section):
-        return {"ok": None, "detail": "未指定 --expect-doc/--expect-section，跳过"}
+    """验收用例：正确主题应被召回。
+
+    默认口径是「主题命中」（--expect-topic，只看章节标题是否含主题词）：
+    同一段知识可能同时存在于 FAQ 与专题文档，按文档名判定会把正确召回判成失败。
+    """
+    if not (expect_doc or expect_section or expect_topic):
+        return {"ok": None, "detail": "未指定 --expect-doc/--expect-section/--expect-topic，跳过"}
+
+    if expect_topic:
+        for rank, hit in enumerate(hits, start=1):
+            section = str(hit.get("section") or "")
+            if expect_topic in section:
+                return {"ok": True, "rank": rank, "title": hit.get("title"), "section": section}
+        return {
+            "ok": False,
+            "expected": {"topic": expect_topic},
+            "top5": [
+                {"rank": i, "title": h.get("title"), "section": h.get("section")}
+                for i, h in enumerate(hits[:5], start=1)
+            ],
+        }
 
     for rank, hit in enumerate(hits, start=1):
         title = str(hit.get("title") or "")
@@ -96,6 +117,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--question", default="", help="验收提问（真实失败样本）")
     parser.add_argument("--expect-doc", default="", help="期望命中的文档标题关键字，如 FAQ")
     parser.add_argument("--expect-section", default="", help="期望命中的章节关键字，如 第 5 节")
+    parser.add_argument("--expect-topic", default="", help="期望命中的章节主题（不限定文档）")
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--report", default=DEFAULT_REPORT)
     args = parser.parse_args(argv)
@@ -181,7 +203,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             retrieval_ok = retrieval_ok and check["ok"]
             entry = {"question": question, **check}
             if question == args.question and args.question:
-                acceptance = _acceptance_hit(hits, args.expect_doc, args.expect_section)
+                acceptance = _acceptance_hit(
+                    hits, args.expect_doc, args.expect_section, args.expect_topic,
+                )
                 entry["acceptance"] = acceptance
                 if acceptance.get("ok") is not None:
                     acceptance_ok = bool(acceptance["ok"])
