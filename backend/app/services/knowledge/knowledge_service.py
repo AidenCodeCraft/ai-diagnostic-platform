@@ -84,6 +84,20 @@ def dedupe_by_content_hash(chunks: List[Any]) -> List[Any]:
     return unique
 
 
+def dedupe_triples_by_content_hash(rows: List[Any]) -> List[Any]:
+    """对 (chunk, normalized, raw) 序列按 content_hash 去重，保留排名靠前的一条。"""
+    seen: set = set()
+    unique: List[Any] = []
+    for chunk, normalized, raw in rows:
+        digest = getattr(chunk, "content_hash", "") or ""
+        if digest:
+            if digest in seen:
+                continue
+            seen.add(digest)
+        unique.append((chunk, normalized, raw))
+    return unique
+
+
 def dedupe_pairs_by_content_hash(pairs: List[Any]) -> List[Any]:
     """对 (chunk, score) 序列按 content_hash 去重，保留排名靠前的一条。"""
     seen: set = set()
@@ -309,6 +323,7 @@ class KnowledgeService:
             dense_hits = self._dense_hits(query_text, top_k=max(page_size * 3, 30))
             ranked = rank_sections(
                 chunks, query=query_text, dense_hits=dense_hits, bm25_index=bm25_index,
+                with_raw=True,
             )
 
             if not ranked:
@@ -323,8 +338,8 @@ class KnowledgeService:
             seen_docs: set = set()
             # 跨文档同内容去重：同一段知识在 FAQ 与专题文档里各存一份时，
             # 两条都进候选只会互相挤位，还让「命中哪个文档」变成随机结果
-            ranked = dedupe_pairs_by_content_hash(ranked)
-            for chunk, score in ranked:
+            ranked = dedupe_triples_by_content_hash(ranked)
+            for chunk, score, raw_score in ranked:
                 doc = doc_map.get(chunk.doc_id)
                 if doc is None:
                     continue
@@ -341,6 +356,8 @@ class KnowledgeService:
                     "section": chunk.section,
                     "key": chunk.key,
                     "relevance_score": round(float(score), 4),
+                    # 原始 RRF 分：跨层可比，排序调优用这个
+                    "fusion_score": round(float(raw_score), 6),
                     "snippet": chunk.content[:800] if sections else self._extract_snippet(
                         str(doc.content), query_text,
                     ),

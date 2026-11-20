@@ -600,11 +600,16 @@ class QueryPreprocessor:
                         high_score_keys.add(item_key)
 
                     if item_key in seen_keys:
-                        # 更新已有结果的最高分
+                        # 更新已有结果：归一化分取大，原始分也取大（排序看原始分）
                         for existing in all_items:
                             if self._item_key(existing) == item_key:
                                 if score > float(existing.get("relevance_score", 0) or 0):
                                     existing["relevance_score"] = score
+                                raw = item.get("fusion_score")
+                                if raw is not None and float(raw) > float(
+                                    existing.get("fusion_score", 0) or 0
+                                ):
+                                    existing["fusion_score"] = raw
                                 break
                         continue
 
@@ -645,8 +650,7 @@ class QueryPreprocessor:
         # 纯按检索分排序会让"被大量宽泛词命中的文档"压过真正对题的文档
         # （RRF 分数只反映命中了多少个搜索词，不反映是否切题）。
         all_items.sort(
-            key=lambda d: float(d.get("relevance_score", 0) or 0)
-            * self._lexical_boost(query, d),
+            key=lambda d: self._rank_score(d) * self._lexical_boost(query, d),
             reverse=True,
         )
 
@@ -656,6 +660,21 @@ class QueryPreprocessor:
             matched_term=matched_term,
             total_attempted=total_attempted,
         )
+
+    @staticmethod
+    def _rank_score(item: Dict[str, Any]) -> float:
+        """排序用分数：优先原始融合分。
+
+        relevance_score 是逐层归一化的（每层最高 1.0），多层合并后不可比；
+        fusion_score 是原始 RRF 分，跨层可比。
+        """
+        raw = item.get("fusion_score")
+        if raw is not None:
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                pass
+        return float(item.get("relevance_score", 0) or 0)
 
     @staticmethod
     def _item_key(item: Dict[str, Any]) -> str:

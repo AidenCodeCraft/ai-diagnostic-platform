@@ -529,8 +529,9 @@ class DiagnosticChatAgent:
                     "source": item.get("source") or "知识库",
                     "excerpt": snippet,
                     "section": section_title or "",
-                    # 分数必须留下：黄金集标注与回归都靠它判断"当时排第几"
+                    # 分数必须留下：归一化分用于展示，原始融合分用于排序与评估
                     "score": float(item.get("relevance_score", 0) or 0),
+                    "fusion_score": item.get("fusion_score"),
                     "section_key": section.get("section_key", ""),
                     "start_line": section.get("start_line", 0),
                     "end_line": section.get("end_line", 0),

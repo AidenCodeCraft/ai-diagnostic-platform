@@ -158,8 +158,15 @@ def rank_sections(
     bm25_index: Optional[SectionBM25Index] = None,
     top_k: int = DEFAULT_CANDIDATES,
     rrf_k: int = DEFAULT_RRF_K,
-) -> List[Tuple[SectionChunk, float]]:
-    """章节级 RRF 融合，返回 [(chunk, 归一化分)]，最高分为 1.0。"""
+    with_raw: bool = False,
+) -> List[Tuple]:
+    """章节级 RRF 融合。
+
+    默认返回 [(chunk, 归一化分)]（最高 1.0，便于展示与阈值判断）；
+    with_raw=True 时返回 [(chunk, 归一化分, 原始RRF分)] ——
+    归一化分在「多层检索再合并」后每层各自变成 1.0，失去可比性，
+    原始 RRF 分才是能跨层比较、能用来调排序的那个数。
+    """
     if not chunks or not (query or "").strip():
         return []
 
@@ -182,4 +189,10 @@ def rank_sections(
 
     top_score = max(fused.values()) or 1.0
     ordered = sorted(fused.items(), key=lambda pair: pair[1], reverse=True)
+    if with_raw:
+        return [
+            (chunks[idx], score / top_score, float(score))
+            for idx, score in ordered
+            if 0 <= idx < len(chunks)
+        ]
     return [(chunks[idx], score / top_score) for idx, score in ordered if 0 <= idx < len(chunks)]
