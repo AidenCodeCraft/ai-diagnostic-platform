@@ -571,8 +571,10 @@ class QueryPreprocessor:
     ) -> SearchResult:
         """按分层计划执行搜索，逐层降级，最后按「检索分 × 字面重合加成」排序。"""
         all_items: List[Dict[str, Any]] = []
-        seen_ids: Set[int] = set()
-        high_score_ids: Set[int] = set()
+        # 去重键 = 章节，不是文档：同一文档的不同章节必须都能进候选，
+        # 否则「FAQ 有很多节，但只能留第一节」——正确章节会被同文档的其他节挤掉
+        seen_keys: Set[str] = set()
+        high_score_keys: Set[str] = set()
         matched_layer = "无匹配"
         matched_term = ""
         total_attempted = 0
@@ -591,22 +593,22 @@ class QueryPreprocessor:
                     continue
 
                 for item in items:
-                    doc_id = item.get("id")
+                    item_key = self._item_key(item)
                     score = float(item.get("relevance_score", 0) or 0)
 
                     if score >= high_score_threshold:
-                        high_score_ids.add(doc_id)
+                        high_score_keys.add(item_key)
 
-                    if doc_id in seen_ids:
+                    if item_key in seen_keys:
                         # 更新已有结果的最高分
                         for existing in all_items:
-                            if existing.get("id") == doc_id:
+                            if self._item_key(existing) == item_key:
                                 if score > float(existing.get("relevance_score", 0) or 0):
                                     existing["relevance_score"] = score
                                 break
                         continue
 
-                    seen_ids.add(doc_id)
+                    seen_keys.add(item_key)
                     all_items.append(item)
                     layer_has_result = True
 
@@ -615,7 +617,7 @@ class QueryPreprocessor:
                     matched_term = term
 
                 # 找到高分结果且该层允许提前停止
-                if layer.stop_on_high_score and high_score_ids and len(all_items) >= 3:
+                if layer.stop_on_high_score and high_score_keys and len(all_items) >= 3:
                     break
 
         # 完整问题始终参与召回，避免宽泛词的无关结果阻断语义检索。
@@ -629,9 +631,9 @@ class QueryPreprocessor:
                 except Exception:
                     continue
                 for item in items:
-                    doc_id = item.get("id")
-                    if doc_id not in seen_ids:
-                        seen_ids.add(doc_id)
+                    item_key = self._item_key(item)
+                    if item_key not in seen_keys:
+                        seen_keys.add(item_key)
                         all_items.append(item)
                         matched_layer = "完整问题搜索"
                         matched_term = term
@@ -654,6 +656,14 @@ class QueryPreprocessor:
             matched_term=matched_term,
             total_attempted=total_attempted,
         )
+
+    @staticmethod
+    def _item_key(item: Dict[str, Any]) -> str:
+        """候选去重键：优先用章节 key，退化为 (doc_id, section)。"""
+        key = item.get("key")
+        if key:
+            return str(key)
+        return f"{item.get('id')}|{item.get('section') or ''}"
 
     @staticmethod
     def _lexical_boost(query: str, item: Dict[str, Any]) -> float:

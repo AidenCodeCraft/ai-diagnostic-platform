@@ -502,7 +502,14 @@ class DiagnosticChatAgent:
                 # 章节定位 + 图片关联（章节标题优先，回退到 snippet 解析）
                 # section_range：命中章节在文档中的行号区间，用于判断"图片属于哪个知识点"
                 section = item.get("_section") or {}
-                anchor = section.get("section_title") or self._extract_section_anchor(snippet)
+                # 章节标题优先取结构化字段，回退到检索结果的 section，
+                # 再回退到从 snippet 解析——三者都空时才留空字符串
+                section_title = (
+                    section.get("section_title")
+                    or item.get("section")
+                    or self._extract_section_anchor(snippet)
+                )
+                anchor = section_title
                 images = self._match_doc_images(
                     item.get("id"),
                     text,
@@ -521,7 +528,9 @@ class DiagnosticChatAgent:
                     "title": title,
                     "source": item.get("source") or "知识库",
                     "excerpt": snippet,
-                    "section": section.get("section_title", ""),
+                    "section": section_title or "",
+                    # 分数必须留下：黄金集标注与回归都靠它判断"当时排第几"
+                    "score": float(item.get("relevance_score", 0) or 0),
                     "section_key": section.get("section_key", ""),
                     "start_line": section.get("start_line", 0),
                     "end_line": section.get("end_line", 0),
