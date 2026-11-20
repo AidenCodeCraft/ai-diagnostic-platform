@@ -14,7 +14,7 @@
           <span class="ufc-size">{{ formatSize(fa.file.size) }}</span>
           <div class="ufc-progress-wrap" v-if="fa.status !== 'pending'">
             <div class="ufc-progress">
-              <div class="ufc-progress-bar" :class="fa.status" :style="{ width: fa.progress + '%' }"></div>
+              <div class="ufc-progress-bar" :class="fa.status" :style="{ width: ingestPercent(fa) + '%' }"></div>
             </div>
             <span class="ufc-status" :class="fa.status">
               {{ statusText(fa) }}
@@ -98,6 +98,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useFormat } from '@/composables/useFormat'
 import { adminApi, type ModelOption } from '@/api/admin'
 import type { FileAttachment, ImageAttachment } from './types'
+import { stageLabel } from '@/utils/ingestProgress'
 
 const { formatFileSize } = useFormat()
 
@@ -212,6 +213,14 @@ function autoResize() {
   textareaRef.value.style.height = Math.min(textareaRef.value.scrollHeight, 200) + 'px'
 }
 
+/** 进度条取值：上传阶段用字节进度，预处理阶段用阶段完成度 */
+function ingestPercent(fa: FileAttachment): number {
+  if (fa.status === 'parsing' && fa.ingest?.total) {
+    return Math.min(100, Math.round((fa.ingest.done / fa.ingest.total) * 100))
+  }
+  return fa.progress
+}
+
 function formatSize(bytes: number) {
   return formatFileSize(bytes)
 }
@@ -219,9 +228,15 @@ function formatSize(bytes: number) {
 function statusText(fa: FileAttachment): string {
   switch (fa.status) {
     case 'uploading': return `上传中 ${fa.progress}%`
-    case 'parsing': return '解析中...'
+    case 'parsing': {
+      // 有真实预处理进度就用它，否则退回笼统的"解析中"
+      const ingest = fa.ingest
+      if (!ingest || !ingest.total) return '解析中...'
+      if (ingest.failed) return `预处理失败 · ${stageLabel(ingest.stage)}`
+      return `预处理 ${ingest.done}/${ingest.total} · ${stageLabel(ingest.stage)}`
+    }
     case 'done': return '✓ 完成'
-    case 'error': return '✕ 失败'
+    case 'error': return fa.ingest?.failed ? `✕ ${fa.error || '预处理失败'}` : '✕ 失败'
     default: return ''
   }
 }

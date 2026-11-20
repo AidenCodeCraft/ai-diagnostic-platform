@@ -134,6 +134,7 @@ import { adminApi } from '@/api/admin'
 import { useUserStore } from '@/stores/user'
 import { exportChat as exportChatUtil } from '@/utils/export'
 import { pollAnalysis } from '@/utils/analysisPoll'
+import { watchIngestProgress } from '@/utils/ingestProgress'
 import type { ExportMessage } from '@/utils/export'
 import { getActiveChatId, setActiveChatId, removeActiveChatId } from '@/utils/sessionState'
 
@@ -865,6 +866,9 @@ function waitForAnalysis(
   return pollAnalysis(chatApi, analysisId, { onProgress, timeoutMs })
 }
 
+/** 预处理进度轮询的停止函数，按 logId 存放（分析结束即停） */
+const ingestStops = new Map<number, () => void>()
+
 async function processFiles(files: FileAttachment[], text: string, chatId: number) {
   setLoadingPhase(chatId, 'uploading')
 
@@ -890,6 +894,21 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
         if (!logId || logId <= 0) {
           throw new Error(`服务器返回了无效的日志ID: ${resp.data?.id}`)
         }
+        // 上传成功后立刻跟预处理链的真实进度：解析 → 模板 → 压缩 → 收尾
+        ingestStops.set(
+          logId,
+          watchIngestProgress(
+            logId,
+            (id) => client.get(`/logs/${id}/ingest-status`).then((r) => r.data),
+            (progress) => {
+              fa.ingest = progress
+              if (progress.failed) {
+                fa.status = 'error'
+                fa.error = `预处理失败（${progress.stage || '未知阶段'}）`
+              }
+            },
+          ),
+        )
         return { fa, logId, ok: true }
       } catch (e: any) {
         fa.status = 'error'
@@ -1010,6 +1029,8 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
           processingMsg.thinking.active = false
           canGenerateReport.value = true
           fa.status = 'done'
+          ingestStops.get(logId)?.()
+          ingestStops.delete(logId)
 
           // 保存消息时包含思维链数据
           const thinkingData = {
@@ -1026,6 +1047,8 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
         processingMsg.thinking.active = false
         fa.status = 'error'
         fa.error = e.response?.data?.detail || e.message
+        ingestStops.get(logId)?.()
+        ingestStops.delete(logId)
       }
       if (currentChatId.value === chatId) msgListRef.value?.scrollToBottom()
     }),
