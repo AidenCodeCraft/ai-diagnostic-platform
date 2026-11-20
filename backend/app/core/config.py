@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     EMBEDDING_LOAD_TIMEOUT: float = 30.0  # BGE 模型加载超时（秒），超时回退
 
     # ── Reranker（Cross-Encoder 精排）──────────────────────────
+    # 章节级 RRF 融合参数（调优入口；改动需跑黄金集回归对照）
+    RRF_K: int = 60
+    RRF_WEIGHT_SPARSE: float = 1.0   # BM25 一路权重
+    RRF_WEIGHT_DENSE: float = 1.5    # 向量一路权重（黄金集扫描：1.5 时 MRR 0.897→0.921）
+
     RERANKER_ENABLED: bool = True                     # 无 sentence-transformers 时自动跳过
     RERANKER_MODEL: str = "BAAI/bge-reranker-base"    # 278M，CPU 单批 30 条约 300~500ms
     RERANKER_TOP_N: int = 30                          # 参与精排的候选数

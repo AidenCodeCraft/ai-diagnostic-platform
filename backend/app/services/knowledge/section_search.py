@@ -141,12 +141,23 @@ def map_dense_hits(chunks: List[SectionChunk], dense_hits: List[Dict[str, Any]])
     return ordered
 
 
-def fuse_rrf(rankings: List[List[int]], k: int = DEFAULT_RRF_K) -> Dict[int, float]:
-    """Reciprocal Rank Fusion：只依赖名次，避免 BM25/向量分数量纲不可比。"""
+def fuse_rrf(
+    rankings: List[List[int]],
+    k: int = DEFAULT_RRF_K,
+    weights: Optional[List[float]] = None,
+) -> Dict[int, float]:
+    """加权 Reciprocal Rank Fusion。
+
+    默认等权；weights 用于表达「更信任哪一路」（BM25 强于专有名词、向量强于同义表达）。
+    只依赖名次，避免 BM25 与向量的原始分数量纲不可比。
+    """
     fused: Dict[int, float] = {}
-    for ranking in rankings:
+    for position, ranking in enumerate(rankings):
+        weight = 1.0
+        if weights is not None and position < len(weights):
+            weight = float(weights[position])
         for rank, idx in enumerate(ranking):
-            fused[idx] = fused.get(idx, 0.0) + 1.0 / (k + rank + 1)
+            fused[idx] = fused.get(idx, 0.0) + weight / (k + rank + 1)
     return fused
 
 
@@ -158,6 +169,7 @@ def rank_sections(
     bm25_index: Optional[SectionBM25Index] = None,
     top_k: int = DEFAULT_CANDIDATES,
     rrf_k: int = DEFAULT_RRF_K,
+    weights: Optional[List[float]] = None,
     with_raw: bool = False,
 ) -> List[Tuple]:
     """章节级 RRF 融合。
@@ -183,7 +195,7 @@ def rank_sections(
     if dense:
         rankings.append(dense)
 
-    fused = fuse_rrf(rankings, k=rrf_k)
+    fused = fuse_rrf(rankings, k=rrf_k, weights=weights)
     if not fused:
         return []
 

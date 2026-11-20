@@ -118,7 +118,7 @@ def split_markdown_sections(
     - 无标题文档返回单节，保证仍可检索
     - drop_navigation=True 时丢弃目录/前言/声明类章节（可用参数关闭以便排查）
     - merge_tiny=True 时把「现象/分析/关键字」这类超短子标题并入上一节
-      （默认关闭：合并会改变块边界，需先用黄金集证明收益再打开）
+      （默认关闭：黄金集实测 merge 后 recall@5 0.952→0.905、MRR 0.921→0.786，明确更差）
     - with_path=True（默认）时章节名带父级路径：`5. 进出站 > 关键字`
     """
     text = content or ""

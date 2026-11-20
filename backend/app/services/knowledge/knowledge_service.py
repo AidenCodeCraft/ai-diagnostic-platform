@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.models import KnowledgeDocument, KnowledgeDocumentMeta
 from app.services.knowledge.templates import guess_section_key
@@ -323,6 +324,11 @@ class KnowledgeService:
             dense_hits = self._dense_hits(query_text, top_k=max(page_size * 3, 30))
             ranked = rank_sections(
                 chunks, query=query_text, dense_hits=dense_hits, bm25_index=bm25_index,
+                rrf_k=int(getattr(settings, "RRF_K", 60) or 60),
+                weights=[
+                    float(getattr(settings, "RRF_WEIGHT_SPARSE", 1.0) or 1.0),
+                    float(getattr(settings, "RRF_WEIGHT_DENSE", 1.0) or 1.0),
+                ],
                 with_raw=True,
             )
 
@@ -367,7 +373,11 @@ class KnowledgeService:
 
             return {"items": items, "total": len(items), "page": page, "page_size": page_size}
         except Exception as exc:  # noqa: BLE001 - 检索失败退回关键词，不让问答崩
-            logger.warning("[KnowledgeService] section search failed, fallback to keyword: %s", exc)
+            logger.error(
+                "[KnowledgeService] 章节检索失败，已退回关键词检索（会显著降低召回，"
+                "通常是代码缺陷而非数据问题）: %s", exc,
+                exc_info=True,
+            )
             items = self._keyword_search_bm25(query_text, page_size, project_id=project_id)
             return {
                 "items": items[:page_size], "total": len(items),
