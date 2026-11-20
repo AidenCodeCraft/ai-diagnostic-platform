@@ -127,11 +127,14 @@ class TaskStateStore:
                 bucket["failed"] += 1
             elif row.status == STATUS_RUNNING:
                 bucket["running"] += 1
+        # finalize 自己也在统计里：它执行时状态必然是 running，
+        # 不排除的话 all_succeeded 永远为 False（V4 实测踩到）
+        counted = [row for row in rows if str(row.state or "") != "finalize"]
         return {
             "log_id": log_id,
             "stages": stages,
             "tasks": len(rows),
-            "all_succeeded": bool(rows) and all(row.status == STATUS_SUCCEEDED for row in rows),
+            "all_succeeded": bool(counted) and all(row.status == STATUS_SUCCEEDED for row in counted),
             "failed_tasks": [row.task_id for row in rows if row.status == STATUS_FAILED],
         }
 

@@ -165,9 +165,18 @@ def ingest_template(self, log_id: int) -> Dict[str, Any]:
     def worker(store: TaskStateStore) -> Dict[str, Any]:
         from app.services.diagnostics.artifact_store import ArtifactStore
 
+        from app.worker.ingest_service import (
+            TEMPLATE_BATCH_SIZE,
+            TEMPLATE_MINE_LIMIT,
+            template_ids_batch,
+            template_source,
+        )
+
         artifacts = ArtifactStore()
         counter: Counter = Counter()
         total = 0
+        mined = 0
+        hashed_beyond_limit = 0
         for name in artifacts.normalized_names(log_id):
             data = artifacts.get(log_id, name) or b""
             try:
@@ -175,18 +184,43 @@ def ingest_template(self, log_id: int) -> Dict[str, Any]:
             except (OSError, UnicodeDecodeError):
                 logger.warning("[ingest] 产物无法解压，跳过: %s", name)
                 continue
+            batch: List[str] = []
+
+            def flush() -> None:
+                nonlocal mined, hashed_beyond_limit
+                if not batch:
+                    return
+                # 超过挖矿上限后只做哈希：模板是统计结果，不需要把每行都喂给 Drain3
+                if mined >= TEMPLATE_MINE_LIMIT:
+                    # 超限部分直接哈希：不走 Drain3，避免再碰文件锁（V4 实测会 PermissionError）
+                    from app.worker.ingest_service import hash_template, mask_variables
+                    for line in batch:
+                        counter[hash_template(mask_variables(line))] += 1
+                    hashed_beyond_limit += len(batch)
+                else:
+                    for tid in template_ids_batch(batch):
+                        counter[tid] += 1
+                    mined += len(batch)
+                batch.clear()
+
             for line in text.splitlines():
                 try:
                     record = json.loads(line)
                 except ValueError:
                     continue
-                counter[template_id(record.get("text", ""))] += 1
                 total += 1
+                batch.append(str(record.get("text", "")))
+                if len(batch) >= TEMPLATE_BATCH_SIZE:
+                    flush()
+            flush()
 
         payload = {
             "stage": "template",
             "total_lines": total,
             "templates": len(counter),
+            "template_source": template_source(),
+            "mined_lines": mined,
+            "hashed_beyond_limit": hashed_beyond_limit,
             "top": counter.most_common(20),
         }
         artifacts.put_text(log_id, "templates.json", json.dumps(payload, ensure_ascii=False))

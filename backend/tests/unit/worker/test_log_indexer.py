@@ -113,3 +113,32 @@ def test_index_log_with_no_chunks_skips_writes():
     assert result["indexed"] == 0
     assert service.deleted == []
     assert service.indexed == []
+
+
+def test_build_log_chunks_batches_template_ids(monkeypatch):
+    """模板 id 必须批量生成：逐行调用会逐行抢模板库文件锁（100MB 卡十几分钟）。"""
+    import app.services.diagnostics.log_indexer as indexer
+    import app.worker.ingest_service as svc
+
+    calls = {"batch": 0, "single": 0}
+    real_batch = svc.template_ids_batch
+    real_single = svc.template_id
+
+    def batch_spy(lines):
+        calls["batch"] += 1
+        return real_batch(lines)
+
+    def single_spy(line, **kw):
+        calls["single"] += 1
+        return real_single(line, **kw)
+
+    monkeypatch.setattr(svc, "template_source", lambda: "fallback-hash")
+    monkeypatch.setattr(indexer, "template_ids_batch", batch_spy)
+    monkeypatch.setattr(indexer, "template_id", single_spy, raising=False)
+
+    records = [{"ts": "2026-11-20 08:00:00", "module": "0719", "text": f"connect failed #{i % 3}"} for i in range(50)]
+    chunks = indexer.build_log_chunks(records)
+
+    assert calls["single"] == 0, "不应再逐行生成模板 id"
+    assert calls["batch"] >= 1
+    assert chunks

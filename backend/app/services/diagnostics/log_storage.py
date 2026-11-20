@@ -8,7 +8,9 @@ MinIO 未启用或客户端不可用时自动回退本地路径。
 from __future__ import annotations
 
 import io
+import os
 import tempfile
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +20,9 @@ from app.core.config import settings
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# 同进程内的落地互斥：跨进程靠文件名里的 pid 隔离
+_materialize_lock = threading.Lock()
 
 
 class LogStorageError(RuntimeError):
@@ -207,12 +212,27 @@ class LogStorage:
         if not bucket or not key:
             raise LogStorageError(f"无效的 MinIO 引用: {reference}")
 
-        target = Path(tempfile.gettempdir()) / "diag_logs" / Path(key).name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self._client.fget_object(bucket, key, str(target))  # type: ignore[attr-defined]
-        except Exception as exc:  # noqa: BLE001
-            raise LogStorageError(f"下载 MinIO 日志失败: {exc}") from exc
+        # 目标路径必须按进程隔离：同一对象会被多个 chunk 任务并发读取，
+        # 共用路径时后一个下载会与前一个读取撞车（V4 实测 WinError 32）。
+        base = Path(tempfile.gettempdir()) / "diag_logs"
+        base.mkdir(parents=True, exist_ok=True)
+        target = base / f"p{os.getpid()}_{Path(key).name}"
+
+        with _materialize_lock:
+            if target.exists() and target.stat().st_size > 0:
+                return target
+            tmp = base / f"{target.name}.{uuid.uuid4().hex}.part"
+            try:
+                self._client.fget_object(bucket, key, str(tmp))  # type: ignore[attr-defined]
+            except Exception as exc:  # noqa: BLE001
+                raise LogStorageError(f"下载 MinIO 日志失败: {exc}") from exc
+            try:
+                os.replace(tmp, target)
+            except OSError as exc:  # noqa: BLE001
+                # 并发下另一个线程可能已把文件就位，能读就算成功
+                if not target.exists():
+                    raise LogStorageError(f"落地 MinIO 日志失败: {exc}") from exc
+                tmp.unlink(missing_ok=True)
         return target
 
     def delete(self, reference: str) -> None:

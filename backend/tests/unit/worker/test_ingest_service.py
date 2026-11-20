@@ -137,3 +137,45 @@ def test_fallback_when_drain3_missing(tmp_path, monkeypatch):
 
     assert svc.template_id("[APP] Volume:1").startswith("h:")
     assert svc.template_source() == "fallback-hash"
+
+
+# ------------------------------------------------------------------
+# 批量模板 id（100MB 性能修复的回归保护）
+# ------------------------------------------------------------------
+
+
+def test_template_ids_batch_falls_back_to_hash_without_drain(monkeypatch):
+    import app.worker.ingest_service as svc
+
+    monkeypatch.setattr(svc, "template_source", lambda: "fallback-hash")
+    ids = svc.template_ids_batch(["connect failed errno=-110", "connect failed errno=-110", "gps ok"])
+
+    assert len(ids) == 3
+    assert all(i.startswith("h:") for i in ids)
+    assert ids[0] == ids[1] != ids[2]
+
+
+def test_template_ids_batch_empty():
+    import app.worker.ingest_service as svc
+
+    assert svc.template_ids_batch([]) == []
+
+
+def test_template_ids_batch_matches_per_line_semantics(monkeypatch):
+    """批量与逐行语义一致：同样的输入得到同样的 id 序列。"""
+    import app.worker.ingest_service as svc
+
+    monkeypatch.setattr(svc, "template_source", lambda: "fallback-hash")
+    lines = ["E/Network connect failed host=10.0.0.1", "I/GPS lat=39.9"]
+    batch = svc.template_ids_batch(lines)
+    single = [svc.template_id(line) for line in lines]
+
+    assert batch == single
+
+
+def test_template_mine_limit_is_bounded():
+    """挖矿上限必须存在且有限，否则超大日志会把模板阶段拖成瓶颈。"""
+    import app.worker.ingest_service as svc
+
+    assert 0 < svc.TEMPLATE_MINE_LIMIT <= 500_000
+    assert 0 < svc.TEMPLATE_BATCH_SIZE <= 20_000

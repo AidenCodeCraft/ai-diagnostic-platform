@@ -217,3 +217,71 @@ V7 回归 CI：通过 / 不通过（runner=）
 
 未通过项按"不通过时记录什么"补齐信息，我再据此定位——这些现象在本地无法复现，
 缺失信息会导致只能靠猜。
+
+---
+
+## V4 实测结果（2026-11-20，本机 100MiB 合成日志）
+
+| 步骤 | 结果 |
+| --- | --- |
+| 上传 100MiB（=100×1024×1024 字节，边界值） | 200，2.7s |
+| 用户提问 → 出结论 | **6.9s**（提问不等待预处理链） |
+| 预处理链全链路 | **230s**，6 阶段全部成功 |
+| ├ prepare | 2.0s（2 个 chunk） |
+| ├ parse ×2 | 13.7s / 13.7s（127 万行，产物落 MinIO） |
+| ├ template | 16.9s（Drain3 挖 20 万行 → 250 个模板） |
+| ├ compress | 8.0s（274MB 文本 → 15.5MB，压缩比 17.6） |
+| └ index | 171s（300 个证据块入 Milvus） |
+
+### V4 发现并修掉的 4 个缺陷（都在真实链路上）
+
+1. **`kombu` 版本漂移**：`celery==5.4.0` 未锁 kombu，装到 5.7 后要求 `redis-py>=6.1`
+   与 `redis==5.0.8` 冲突，worker 直接启动失败。→ 锁 `kombu==5.4.2`。
+2. **`materialize()` 目标路径不分进程**：同一对象的两个 chunk 任务并发下载到同一个
+   临时文件，Windows 报 `WinError 32`，parse 稳定失败。→ 路径带 pid + 进程内互斥 + 命中即复用。
+3. **模板 id 逐行抢文件锁**：`template_id()` 每行都要拿模板库文件锁并落盘，
+   100MB（127 万行）在模板阶段能卡十几分钟。→ 新增 `template_ids_batch()`，
+   一批 5000 行一次持锁、一次落盘，并设 20 万行挖矿上限（超出走哈希）。
+4. **证据块上限 2000 太高**：CPU 上 BGE 约 4~6 块/秒，2000 块要 8 分钟。
+   → 默认 300（`LOG_INDEX_MAX_CHUNKS` 可调），信息量足够且 1 分钟内完成。
+
+附带修掉：`finalize` 阶段把自己算进统计，`all_succeeded` 永远为 False。
+
+### 复现方式
+
+```bash
+# 后端与 worker（本机）
+cd backend
+export DATABASE_URL=... MILVUS_ENABLED=true EMBEDDING_PROVIDER=local        EMBEDDING_LOAD_TIMEOUT=1800 MINIO_ENABLED=true CELERY_ASYNC_INGEST=true
+python -m uvicorn app.main:app --port 8010
+python -m celery -A app.worker.celery_app:celery_app worker -Q ingest,embed -P solo -c 1
+```
+
+> Windows 必须 `-P solo`：默认 prefork 池会报 `OSError(9, '句柄无效')`。
+
+---
+
+## V5 / V6 怎么跑
+
+### V5 多 worker 读取预处理产物（MinIO）
+
+```bash
+# 终端 A、B 各起一个 worker（solo 池，Windows 上不能跑并发池）
+python -m celery -A app.worker.celery_app:celery_app worker -Q ingest -P solo -c 1 -n w1@%h
+python -m celery -A app.worker.celery_app:celery_app worker -Q ingest -P solo -c 1 -n w2@%h
+```
+
+验收：上传一份 >256MiB 的日志（分 2+ chunk），在 `TaskStateStore.summary(log_id)`
+里确认各 chunk 落在不同 worker 且全部 succeeded；`ingest/{log_id}/normalized_*.jsonl.gz`
+在 MinIO 桶里能读到（`mc ls local/diagnostic-logs/ingest/<log_id>/`）。
+
+### V6 精排 A/B（CPU 上能否接受）
+
+```bash
+# 用同一条黄金集，分别在 RERANKER_ENABLED=false / true 下跑回归
+export RERANKER_ENABLED=false && pytest tests/regression -m golden -q
+export RERANKER_ENABLED=true  && pytest tests/regression -m golden -q
+```
+
+对比 `reports/golden_report.json` 的 recall@5 / MRR 与两次运行耗时；
+精排如果只提升 MRR 但让 P95 超过 1.5s，就默认关闭、只在人工排查时打开。

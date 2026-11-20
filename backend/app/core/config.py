@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     CELERY_MAX_TASKS_PER_CHILD: int = 50     # worker 子进程回收阈值
     # 上传后是否投递异步预处理链；broker 不可用时仅记日志，不影响上传
     CELERY_ASYNC_INGEST: bool = True
+    # 单份日志写入向量库的证据块上限：CPU 上 BGE 约 4 块/秒，
+    # 2000 块要 8 分钟（V4 实测），300 块约 1 分钟且信息量足够
+    LOG_INDEX_MAX_CHUNKS: int = 300
 
     # ── Object storage ───────────────────────────────────────
     # 预签名 URL 有效期：15 分钟（文档 P3.4 口径）；桶必须私有

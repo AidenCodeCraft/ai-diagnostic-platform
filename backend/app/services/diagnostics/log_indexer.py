@@ -31,14 +31,20 @@ from app.services.knowledge.vector_service import (
     MAX_CONTENT_LENGTH,
     VectorService,
 )
-from app.worker.ingest_service import template_id
+from app.worker.ingest_service import (
+    TEMPLATE_BATCH_SIZE,
+    TEMPLATE_MINE_LIMIT,
+    hash_template,
+    mask_variables,
+    template_ids_batch,
+)
 
 logger = get_logger(__name__)
 
 ARTIFACT_DIRNAME = "_ingest"
 DEFAULT_BUCKET_SECONDS = 60
 MAX_SAMPLES = 3
-MAX_CHUNKS_PER_LOG = 2000
+MAX_CHUNKS_PER_LOG = int(getattr(settings, "LOG_INDEX_MAX_CHUNKS", 300))
 MIN_TEMPLATE_REPEAT = 2
 
 # 报错线索：命中即为 error 块（诊断价值最高，不做重复次数过滤）
@@ -111,13 +117,38 @@ def build_log_chunks(
         lambda: {"count": 0, "samples": [], "ts": "", "module": "", "error": False}
     )
 
-    for record in records:
+    # 一次性批量算模板 id：逐行调用 template_id() 会逐行抢模板库文件锁，
+    # 100MB 日志在这一步能卡十几分钟（V4 实测）。
+    tid_by_index: Dict[int, str] = {}
+    pending: List[int] = []
+    pending_texts: List[str] = []
+    mined = 0
+    for index, record in enumerate(records):
+        text = (record.get("text") or "").strip()
+        if not text:
+            continue
+        if mined >= TEMPLATE_MINE_LIMIT:
+            tid_by_index[index] = hash_template(mask_variables(text))
+            continue
+        pending.append(index)
+        pending_texts.append(text)
+        if len(pending_texts) >= TEMPLATE_BATCH_SIZE:
+            for i, tid in zip(pending, template_ids_batch(pending_texts)):
+                tid_by_index[i] = tid
+            mined += len(pending_texts)
+            pending.clear()
+            pending_texts.clear()
+    if pending_texts:
+        for i, tid in zip(pending, template_ids_batch(pending_texts)):
+            tid_by_index[i] = tid
+
+    for index, record in enumerate(records):
         text = (record.get("text") or "").strip()
         if not text:
             continue
         ts = record.get("ts") or ""
         module = (record.get("module") or "").strip()
-        tid = template_id(text)
+        tid = tid_by_index.get(index) or hash_template(mask_variables(text))
         key = (tid, _bucket(ts, bucket_seconds), module)
         group = groups[key]
         group["count"] += 1

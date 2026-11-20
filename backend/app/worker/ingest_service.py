@@ -114,6 +114,65 @@ def template_id(line: str) -> str:
     return f"h:{digest}"
 
 
+# 一次持锁处理的行数：逐行加锁/落盘会让 100MB（127 万行）的模板阶段
+# 从秒级退化到十几分钟——V4 实测就是这个瓶颈。
+TEMPLATE_BATCH_SIZE = 5000
+# Drain3 挖矿上限：模板是统计结果，30 万行足够覆盖；超出部分走哈希，
+# 避免单个超大文件把模板阶段拖成瓶颈。
+TEMPLATE_MINE_LIMIT = 200_000
+
+
+def hash_template(masked: str) -> str:
+    """稳定哈希模板 id（Drain3 不可用或超出挖矿上限时使用）。"""
+    digest = hashlib.sha1(masked.strip().encode("utf-8")).hexdigest()[:16]
+    return f"h:{digest}"
+
+
+_hash_template = hash_template
+
+
+def template_ids_batch(lines: List[str]) -> List[str]:
+    """批量生成模板 id：一次持锁、一次落盘。
+
+    与 `template_id()` 语义一致（drain3 优先、不可用退化为哈希），
+    但去掉了逐行获取文件锁与逐行落盘的开销。
+    """
+    if not lines:
+        return []
+    masked_lines = [mask_variables(line) for line in lines]
+    if template_source() != "drain3":
+        return [_hash_template(masked) for masked in masked_lines]
+
+    ids: List[str] = []
+    try:
+        with _DRAIN_LOCK, _drain_file_lock():
+            miner = _get_drain_miner()
+            handler = getattr(miner, "persistence_handler", None)
+            real_save = getattr(handler, "save_state", None)
+            if real_save is not None:
+                # 抑制 Drain3 自身的"每有模板变化就落盘"，批次结束统一写一次
+                handler.save_state = lambda *a, **kw: None  # type: ignore[assignment]
+            try:
+                for masked in masked_lines:
+                    cluster = _drain_template(masked)
+                    ids.append(f"d{cluster}" if cluster is not None else _hash_template(masked))
+            finally:
+                if real_save is not None:
+                    handler.save_state = real_save  # type: ignore[assignment]
+                try:
+                    # TemplateMiner.save_state() 会带上 miner 状态再交给 persistence handler
+                    miner.save_state("batch_end")
+                except Exception:  # noqa: BLE001 - 落盘失败不该让整条链失败
+                    logger.warning("[template] 模板库落盘失败", exc_info=True)
+    except DrainLockTimeout:
+        logger.warning("[template] 模板库锁超时，本批退化为哈希模板")
+        return [_hash_template(masked) for masked in masked_lines]
+    except Exception:  # noqa: BLE001
+        logger.warning("[template] Drain3 批量模板失败，本批退化为哈希", exc_info=True)
+        return [_hash_template(masked) for masked in masked_lines]
+    return ids
+
+
 class DrainLockTimeout(RuntimeError):
     """模板库文件锁获取超时。"""
 
