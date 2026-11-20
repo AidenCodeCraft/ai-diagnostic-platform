@@ -137,3 +137,48 @@ def test_pipeline_health_endpoint(client, admin_headers):
     body = resp.json()
     assert set(body) >= {"ingest", "retrieval", "vector", "generated_at"}
     assert body["ingest"]["total"] >= 0
+
+
+def test_image_cost_stats_sums_usage(db_session):
+    from app.models import ChatImageUpload
+
+    db_session.add_all([
+        ChatImageUpload(
+            filename="a.png", status="succeeded", recognize_path="ocr",
+            usage={"ocr_pages": 2},
+        ),
+        ChatImageUpload(
+            filename="b.png", status="succeeded", recognize_path="ocr+vision",
+            usage={"ocr_pages": 1, "vision_usage": {"prompt_tokens": 1300, "completion_tokens": 300}},
+        ),
+        ChatImageUpload(filename="c.png", status="failed"),
+    ])
+    db_session.commit()
+
+    stats = PipelineMetrics(db_session).image_cost_stats(window_hours=24)
+
+    assert stats["images"] == 3
+    assert stats["by_status"]["succeeded"] == 2
+    assert stats["ocr_pages"] == 3
+    assert stats["vision_input_tokens"] == 1300
+    assert stats["vision_output_tokens"] == 300
+    # 3 页 OCR + 1300 输入 + 300 输出
+    expected = 3 * 0.0015 + 1300 * 2 / 1e6 + 300 * 8 / 1e6
+    assert abs(stats["estimated_cost_yuan"] - round(expected, 4)) < 1e-6
+
+
+def test_image_cost_stats_handles_empty_usage(db_session):
+    from app.models import ChatImageUpload
+
+    db_session.add(ChatImageUpload(filename="x.png", status="pending", usage=None))
+    db_session.commit()
+
+    stats = PipelineMetrics(db_session).image_cost_stats()
+    assert stats["images"] == 1
+    assert stats["estimated_cost_yuan"] == 0
+
+
+def test_snapshot_includes_image_cost(client, admin_headers):
+    body = client.get("/api/v1/logs/pipeline/health", headers=admin_headers).json()
+    assert "image_cost" in body
+    assert "estimated_cost_yuan" in body["image_cost"]

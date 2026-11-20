@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import AgentTask, RetrievalTrace
+from app.models import AgentTask, ChatImageUpload, RetrievalTrace
 from app.worker.task_state import STATUS_FAILED, STATUS_RUNNING, STATUS_SUCCEEDED
 
 DEFAULT_WINDOW_HOURS = 24
@@ -37,6 +37,12 @@ def _as_utc(value: Any) -> Optional[datetime]:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value
+
+
+# 单价（元）：与 docs/16-Implementation/Chat-Image-Recognition-Design.md §6 一致
+OCR_YUAN_PER_PAGE = 0.0015
+VISION_YUAN_PER_INPUT_TOKEN = 2 / 1_000_000      # 高峰价，估算用
+VISION_YUAN_PER_OUTPUT_TOKEN = 8 / 1_000_000
 
 
 class PipelineMetrics:
@@ -176,10 +182,73 @@ class PipelineMetrics:
 
         return info
 
+    # ------------------------------------------------------------------
+    # 截图识别成本（I5）
+    # ------------------------------------------------------------------
+
+    def image_cost_stats(self, window_hours: int = DEFAULT_WINDOW_HOURS) -> Dict[str, Any]:
+        """按 usage 汇总 OCR/视觉消耗与估算费用。
+
+        估算用高峰单价（宁可高估），避免"看起来便宜"导致预算失控；
+        真实账单以服务商为准。
+        """
+        since = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+        rows = (
+            self.db.query(ChatImageUpload)
+            .filter(ChatImageUpload.created_at >= since)
+            .all()
+        )
+
+        by_status: Dict[str, int] = {}
+        by_path: Dict[str, int] = {}
+        ocr_pages = 0
+        vision_in = 0
+        vision_out = 0
+
+        for row in rows:
+            by_status[row.status] = by_status.get(row.status, 0) + 1
+            if row.recognize_path:
+                by_path[row.recognize_path] = by_path.get(row.recognize_path, 0) + 1
+            usage = row.usage or {}
+            if isinstance(usage, dict):
+                try:
+                    ocr_pages += int(usage.get("ocr_pages") or 0)
+                except (TypeError, ValueError):
+                    pass
+                vision = usage.get("vision_usage") or {}
+                if isinstance(vision, dict):
+                    try:
+                        vision_in += int(vision.get("prompt_tokens") or 0)
+                        vision_out += int(vision.get("completion_tokens") or 0)
+                    except (TypeError, ValueError):
+                        pass
+
+        cost = (
+            ocr_pages * OCR_YUAN_PER_PAGE
+            + vision_in * VISION_YUAN_PER_INPUT_TOKEN
+            + vision_out * VISION_YUAN_PER_OUTPUT_TOKEN
+        )
+        return {
+            "window_hours": window_hours,
+            "images": len(rows),
+            "by_status": by_status,
+            "by_path": by_path,
+            "ocr_pages": ocr_pages,
+            "vision_input_tokens": vision_in,
+            "vision_output_tokens": vision_out,
+            "estimated_cost_yuan": round(cost, 4),
+            "unit_prices": {
+                "ocr_per_page": OCR_YUAN_PER_PAGE,
+                "vision_input_per_token": VISION_YUAN_PER_INPUT_TOKEN,
+                "vision_output_per_token": VISION_YUAN_PER_OUTPUT_TOKEN,
+            },
+        }
+
     def snapshot(self, window_hours: int = DEFAULT_WINDOW_HOURS) -> Dict[str, Any]:
         return {
             "ingest": self.ingest_stats(),
             "retrieval": self.retrieval_stats(window_hours),
             "vector": self.vector_health(),
+            "image_cost": self.image_cost_stats(window_hours),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
