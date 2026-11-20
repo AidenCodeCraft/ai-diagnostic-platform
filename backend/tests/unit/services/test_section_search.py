@@ -23,7 +23,7 @@ def _doc(doc_id, title, content, updated=None):
 
 def test_split_markdown_sections_basic():
     sections = split_markdown_sections("# 现象\n第一段内容\n\n## 处理\n第二段内容\n")
-    assert [heading for heading, _ in sections] == ["现象", "处理"]
+    assert [heading for heading, _ in sections] == ["现象", "现象 > 处理"]
 
 
 def test_build_section_chunks_skips_short_sections():

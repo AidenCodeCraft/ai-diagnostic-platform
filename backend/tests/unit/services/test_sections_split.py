@@ -11,7 +11,10 @@ from app.services.knowledge.sections import (
 def test_splits_by_headings():
     content = "# 现象\nGPS 不上报\n\n## 排查\n1. 检查天线\n"
     sections = split_markdown_sections(content)
-    assert [heading for heading, _ in sections] == ["现象", "排查"]
+    # 默认带父级路径：子标题仍能看出属于哪个主题
+    assert [heading for heading, _ in sections] == ["现象", "现象 > 排查"]
+    flat = split_markdown_sections(content, with_path=False)
+    assert [heading for heading, _ in flat] == ["现象", "排查"]
 
 
 def test_long_section_is_windowed_by_paragraph():
@@ -84,4 +87,4 @@ def test_tiny_subheadings_merge_into_parent_section():
 def test_merge_can_be_disabled():
     content = "# 5. 章节\n### 现象\n短\n\n### 分析\n也短\n"
     headings = [h for h, _ in split_markdown_sections(content, merge_tiny=False)]
-    assert "现象" in headings
+    assert "5. 章节 > 现象" in headings

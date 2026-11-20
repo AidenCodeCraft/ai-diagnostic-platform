@@ -27,6 +27,9 @@ MIN_SECTION_CHARS = 12
 # 「进出站日志中搜索什么」被《线路》的「关键字」碎片顶掉）。
 MERGE_TINY_SECTION_CHARS = 80
 
+# 章节名保留父级路径的层数上限（太长的路径反而看不清）
+MAX_PATH_DEPTH = 3
+
 # 目录/前言这类「导航与声明」内容不该进入检索：它们命中率高但对诊断无用，
 # 还会挤掉真正对题的章节（FAQ 类文档尤其明显）。
 DROPPED_HEADINGS = (
@@ -92,8 +95,21 @@ def merge_tiny_sections(
     return merged
 
 
+def join_heading_path(stack: List[Tuple[int, str]], title: str) -> str:
+    """把父级标题链拼成「父 > 子」，让碎片标题仍然带着主题。
+
+    为什么必须带父级：文档里「关键字」「现象」「分析」这类子标题会重复出现，
+    只保留叶子名时，召回结果无法判断它属于哪个知识点，
+    人也无法据此判断「命中的是不是那一节」。
+    """
+    parents = [name for _level, name in stack][-(MAX_PATH_DEPTH - 1):]
+    parts = [part for part in (*parents, title) if part]
+    return " > ".join(parts)
+
+
 def split_markdown_sections(
     content: str, *, drop_navigation: bool = True, merge_tiny: bool = False,
+    with_path: bool = True,
 ) -> List[Tuple[str, str]]:
     """按 `#` 标题切分文档，返回 [(heading, body), ...]。
 
@@ -103,6 +119,7 @@ def split_markdown_sections(
     - drop_navigation=True 时丢弃目录/前言/声明类章节（可用参数关闭以便排查）
     - merge_tiny=True 时把「现象/分析/关键字」这类超短子标题并入上一节
       （默认关闭：合并会改变块边界，需先用黄金集证明收益再打开）
+    - with_path=True（默认）时章节名带父级路径：`5. 进出站 > 关键字`
     """
     text = content or ""
     if not text.strip():
@@ -117,15 +134,21 @@ def split_markdown_sections(
     if preamble:
         sections.extend(_split_long_section("", preamble))
 
+    stack: List[Tuple[int, str]] = []
     for i, match in enumerate(matches):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        level = len(match.group(1))
         heading = match.group(2).strip()
         body = text[match.end():end].strip()
 
         if drop_navigation and (is_navigation_heading(heading) or looks_like_toc(body)):
             continue
 
-        sections.extend(_split_long_section(heading, body))
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+        label = join_heading_path(stack, heading) if with_path else heading
+        stack.append((level, heading))
+        sections.extend(_split_long_section(label, body))
 
     if merge_tiny:
         sections = merge_tiny_sections(sections)
