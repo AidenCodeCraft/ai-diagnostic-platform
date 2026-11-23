@@ -188,9 +188,12 @@ Status: P0 已完成，P1~P3 按本文执行
 | --- | --- | --- |
 | 5.3 观测：流水线/检索/向量快照 | ✅ | `diagnostics/pipeline_metrics.py`、`GET /logs/pipeline/health` |
 | 5.4 存储布局与预签名 | ✅ | `LogStorage.save(project_id=)` → `logs/p{pid}/{yyyymmdd}/`、`presigned_get()` TTL 900s |
-| 5.1 BM25 外置 | ⏳ | 需 Milvus 2.5 内置 BM25 或外部索引，待部署环境确认版本 |
-| 5.2 阈值校准 | ⏳ | 依赖真实黄金集与 A/B 数据（见 Deployment-Verification-Checklist V5） |
+| 5.1 BM25 外置 | ⏸ 暂缓 | 语料 292 块、recall@5 已 1.000，进程内 BM25 未成为瓶颈；文档上千或并发 20+ 再评估 |
+| 5.2 阈值校准 | ✅ | 黄金集 52 条（45 正/7 负）基线：recall@5 1.000 / MRR 0.849；`RRF_WEIGHT_DENSE=1.5`、`merge_tiny=False`、精排实测有害已默认关闭 |
 | 5.5 回归 CI push 触发 | ✅（待 runner） | 已加 `push` 触发 + `GOLDEN_RUNNER_READY` 变量闸门；runner 就绪后设变量即生效 |
+
+> 精排（bge-reranker-base）实测：开启后 recall@5 1.000→0.889、MRR 0.849→0.733、耗时 9.5×，
+> 已把 `RERANKER_ENABLED` 默认改为 `False`；重开前应先用全文而非 snippet 再测一轮。
 
 > 部署环境需要人工验证的项统一列在 [`Deployment-Verification-Checklist.md`](./Deployment-Verification-Checklist.md)，含命令、期望结果与回填模板。
 
