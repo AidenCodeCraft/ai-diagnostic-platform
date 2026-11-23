@@ -54,8 +54,13 @@ class DeepSeekVisionProvider:
             or file_cfg.get("base_url")
             or "https://api.deepseek.com/v1/chat/completions"
         )
-        # 归一成 "…/v1" 根地址：/v1/chat/completions → /v1
-        self.api_root = str(raw_base).split("/chat/completions")[0].rstrip("/")
+        # 归一成 "…/v1" 根地址：/v1/chat/completions → /v1；
+        # 配置里只写 https://api.deepseek.com 时也要补上 /v1，
+        # 否则 OCR 会打到 /tools/ocr（文档要求 /v1/tools/ocr）而 404。
+        root = str(raw_base).split("/chat/completions")[0].rstrip("/")
+        if not root.endswith("/v1"):
+            root = f"{root}/v1"
+        self.api_root = root
         self.model = (
             model
             or os.getenv("DEEPSEEK_VISION_MODEL", "")
@@ -67,6 +72,23 @@ class DeepSeekVisionProvider:
     @property
     def available(self) -> bool:
         return bool(self.api_key)
+
+    # OCR 上传阶段的错误码（文档 §错误）
+    _OCR_STATUS_HINTS = {
+        400: "请求不合法或文件无法处理",
+        402: "余额不足",
+        408: "上传过慢（需 120 秒内完成上传）",
+        413: "文件过大（≤100MiB）",
+        429: "同时识别数超过上限（15 个）",
+        500: "文件上传或提交识别失败",
+        503: "服务繁忙，请稍后重试",
+        504: "上传与提交超过总时长（180 秒）",
+    }
+
+    def _ocr_error(self, status_code: int, body_text: str) -> "VisionProviderError":
+        hint = self._OCR_STATUS_HINTS.get(status_code, "")
+        detail = f"（{hint}）" if hint else ""
+        return VisionProviderError(f"OCR 返回 {status_code}{detail}: {body_text[:300]}")
 
     # ------------------------------------------------------------------
     # OCR
@@ -93,16 +115,22 @@ class DeepSeekVisionProvider:
             raise VisionProviderError(f"OCR 请求失败: {exc}") from exc
 
         if response.status_code != 200:
-            raise VisionProviderError(
-                f"OCR 返回 {response.status_code}: {response.text[:300]}"
-            )
+            raise self._ocr_error(response.status_code, response.text)
 
         body = response.json()
+        # 文档：识别开始后失败仍是 HTTP 200，响应体换成 error 对象。
+        # 不判就会被当成「识别成功但文本为空」，把失败伪装成空结果。
+        if isinstance(body, dict) and body.get("error"):
+            err = body.get("error") or {}
+            message = err.get("message") if isinstance(err, dict) else str(err)
+            raise VisionProviderError(f"OCR 识别失败: {message}")
         pages = body.get("pages") or []
         text = "\n".join(str(page.get("text", "")) for page in pages).strip()
+        truncated = [int(page.get("index") or 0) for page in pages if page.get("finish_reason") == "length"]
         return {
             "text": text,
-            "pages": len(pages),
+            "pages": int(body.get("page_count") or len(pages)),
+            "truncated_pages": truncated,
             "usage": body.get("usage") or {},
             "raw_id": body.get("id"),
         }

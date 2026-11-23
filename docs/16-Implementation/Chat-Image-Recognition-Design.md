@@ -154,3 +154,22 @@ created_at / updated_at
 | W2 | 识别同步完成后再允许发送（用户能看到识别结果） |
 | W3 | 识别失败不阻断提问，证据块标注"截图识别失败" |
 | W4 | 同一 `sha256` 复用文本，不重复扣费 |
+
+---
+
+## 附：与官方文档的核对结果（2026-11-20）
+
+对照 `guides/vision` 与 `guides/ocr` 两篇，把实现对齐到文档口径，核到的差异与处理：
+
+| 文档要求 | 原实现 | 处理 |
+| --- | --- | --- |
+| OCR 地址为 `/v1/tools/ocr` | 只从含 `/chat/completions` 的 base_url 截根，配置只写域名时会打到 `/tools/ocr` | `api_root` 归一补齐 `/v1` |
+| OCR 识别开始后失败仍是 **HTTP 200**，响应体是 `error` 对象 | 直接读 `pages` → 得到空文本，失败被伪装成“识别成功但没文字” | 检测 `body.error` 并抛 `VisionProviderError` |
+| `pages[].finish_reason == length` 表示该页文本不完整 | 忽略 | 返回 `truncated_pages`，落库 `usage.ocr_truncated_pages` 并打 warning |
+| OCR 计费按 `page_count`（1.5 元/1000 页），`usage` 的 token 仅供参照 | 用 `len(pages)` 当页数 | 改用 `page_count` |
+| OCR 上传错误码 400/402/408/413/429/500/503/504 各有含义 | 统一报状态码 | 增加中文提示（余额不足/上传过慢/文件过大/并发超限等） |
+| 图片格式 JPEG/PNG/GIF/WebP（BMP/TIFF 仅 OCR 支持），**按内容判断** | 只认 PNG/JPEG/WebP，且 `RIFF` 前缀会把 WAV 误判成图片 | 补 GIF/BMP/TIFF；WebP 校验 `RIFF…WEBP` 双前缀 |
+| base64/URL 单图上限 32MiB，请求体 48MiB，单请求 ≤600 图 | 上限 20MiB | 提到 32MiB（与文档一致） |
+| `purpose` 必填（`text_recognition` / `rich_layout_recognition`），多传字段返回 400 | 固定 `text_recognition`，只传两个字段 | 保持不变（截图走 text_recognition 已够） |
+
+新增 5 条回归测试覆盖：`/v1` 归一、200+error 抛错、截断页标记、413 等错误码提示、GIF/BMP/TIFF/WAV 判定。

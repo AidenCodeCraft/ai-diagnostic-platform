@@ -25,15 +25,25 @@ from app.services.vision.routing import PATH_OCR, PATH_OCR_VISION, PATH_VISION, 
 
 logger = get_logger(__name__)
 
-MAX_BYTES = 20 * 1024 * 1024
+MAX_BYTES = 32 * 1024 * 1024  # 文档：base64/URL 单图上限 32MiB
 MAX_TEXT_FOR_CONTEXT = 6000
 
 # 只按文件头判断类型：扩展名可伪造，直接把 .exe 改名 .png 会送去解码失败
+_PNG_MAGIC = bytes([0x89]) + b"PNG" + bytes([0x0D, 0x0A, 0x1A, 0x0A])
+_JPEG_MAGIC = bytes([0xFF, 0xD8, 0xFF])
+_TIFF_LE = bytes([0x49, 0x49, 0x2A, 0x00])
+_TIFF_BE = bytes([0x4D, 0x4D, 0x00, 0x2A])
 _MAGIC = (
-    (b"\x89PNG\r\n\x1a\n", "image/png", ".png"),
-    (b"\xff\xd8\xff", "image/jpeg", ".jpg"),
-    (b"RIFF", "image/webp", ".webp"),
+    (_PNG_MAGIC, "image/png", ".png"),
+    (_JPEG_MAGIC, "image/jpeg", ".jpg"),
+    (b"GIF87a", "image/gif", ".gif"),
+    (b"GIF89a", "image/gif", ".gif"),
+    (b"BM", "image/bmp", ".bmp"),
+    (_TIFF_LE, "image/tiff", ".tiff"),
+    (_TIFF_BE, "image/tiff", ".tiff"),
 )
+# WebP 也以 RIFF 开头，必须再看第 8~12 字节，否则 WAV/AVI 会被当成图片
+_WEBP_PREFIX = (b"RIFF", b"WEBP")
 
 
 class ChatImageError(ValueError):
@@ -41,6 +51,9 @@ class ChatImageError(ValueError):
 
 
 def sniff_mime(data: bytes) -> Optional[str]:
+    """按文件头判断类型（文档：格式由内容判断，不看扩展名/MIME 声明）。"""
+    if len(data) >= 12 and data[:4] == _WEBP_PREFIX[0] and data[8:12] == _WEBP_PREFIX[1]:
+        return "image/webp"
     for magic, mime, _ext in _MAGIC:
         if data.startswith(magic):
             return mime
@@ -144,6 +157,11 @@ class ChatImageService:
             ocr_result = self.provider.ocr(data, record.filename or "image.png")
             ocr_text = str(ocr_result.get("text") or "")
             record.usage = {"ocr_pages": ocr_result.get("pages", 0), **(ocr_result.get("usage") or {})}
+            truncated = ocr_result.get("truncated_pages") or []
+            if truncated:
+                # finish_reason=length：该页文本不完整，不能当成识别成功
+                record.usage["ocr_truncated_pages"] = truncated
+                logger.warning("[ChatImage] OCR 输出被截断，页: %s", truncated)
         except VisionProviderError as exc:
             ocr_error = str(exc)
             logger.warning("[chat-image] OCR 失败 id=%s: %s", record.id, exc)

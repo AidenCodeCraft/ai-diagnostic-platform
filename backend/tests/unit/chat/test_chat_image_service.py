@@ -150,7 +150,7 @@ def test_rejects_non_image_payload(db_session):
 def test_rejects_oversized_image(db_session):
     service = build_service(db_session)
     with pytest.raises(ChatImageError):
-        service.upload(PNG + b"0" * (21 * 1024 * 1024), "big.png")
+        service.upload(PNG + b"0" * (33 * 1024 * 1024), "big.png")
 
 
 def test_texts_for_session_returns_succeeded_only(db_session):
@@ -188,3 +188,139 @@ def test_bind_ignores_other_users_images(db_session):
 
     assert bound == 0
     assert db_session.query(ChatImageUpload).filter_by(session_id=9).count() == 0
+
+
+# ------------------------------------------------------------------
+# 与 DeepSeek 官方文档对齐的行为（vision / ocr 两篇 guide）
+# ------------------------------------------------------------------
+
+
+def test_sniff_mime_supports_gif_bmp_tiff_and_rejects_wav():
+    from app.services.vision.image_service import sniff_mime
+
+    assert sniff_mime(b"GIF89a-rest") == "image/gif"
+    assert sniff_mime(b"BM1234") == "image/bmp"
+    assert sniff_mime(bytes([0x49, 0x49, 0x2A, 0x00]) + b"rest") == "image/tiff"
+    # RIFF 开头但不是 WebP：音频不能当图片处理
+    assert sniff_mime(b"RIFF" + b"\x00" * 4 + b"WAVEfmt ") is None
+
+
+def test_provider_normalizes_base_url_to_v1():
+    """OCR 文档地址是 /v1/tools/ocr：配置只写域名时必须补 /v1。"""
+    from app.services.providers.vision import DeepSeekVisionProvider
+
+    p1 = DeepSeekVisionProvider(api_key="k", base_url="https://api.deepseek.com")
+    p2 = DeepSeekVisionProvider(api_key="k", base_url="https://api.deepseek.com/v1/chat/completions")
+    assert p1.api_root == "https://api.deepseek.com/v1"
+    assert p2.api_root == "https://api.deepseek.com/v1"
+
+
+def test_provider_raises_on_200_with_error_object(monkeypatch):
+    """文档：识别开始后失败仍是 HTTP 200，响应体换成 error 对象。"""
+    import httpx
+
+    from app.services.providers.vision import DeepSeekVisionProvider, VisionProviderError
+
+    provider = DeepSeekVisionProvider(api_key="k", base_url="https://api.deepseek.com/v1")
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"error": {"message": "OCR did not finish in time", "code": "gateway_timeout_error"}}'
+
+        def json(self):
+            return {"error": {"message": "OCR did not finish in time"}}
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, *a, **kw):
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    with pytest.raises(VisionProviderError) as exc:
+        provider.ocr(b"x", "a.png")
+    assert "did not finish" in str(exc.value)
+
+
+def test_provider_flags_truncated_pages(monkeypatch):
+    """finish_reason=length 表示该页文本不完整，必须显式带出来。"""
+    import httpx
+
+    from app.services.providers.vision import DeepSeekVisionProvider
+
+    provider = DeepSeekVisionProvider(api_key="k", base_url="https://api.deepseek.com/v1")
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {
+                "id": "ocr-1",
+                "page_count": 2,
+                "pages": [
+                    {"index": 0, "text": "第一页", "finish_reason": "stop"},
+                    {"index": 1, "text": "第二页…", "finish_reason": "length"},
+                ],
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, *a, **kw):
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    result = provider.ocr(b"x", "a.png")
+    assert result["pages"] == 2
+    assert result["truncated_pages"] == [1]
+    assert "第一页" in result["text"]
+
+
+def test_provider_maps_ocr_status_codes(monkeypatch):
+    import httpx
+    import pytest as _pytest
+
+    from app.services.providers.vision import DeepSeekVisionProvider, VisionProviderError
+
+    provider = DeepSeekVisionProvider(api_key="k", base_url="https://api.deepseek.com/v1")
+
+    class FakeResponse:
+        status_code = 413
+        text = '{"error": {"message": "file is too large"}}'
+
+        def json(self):
+            return {}
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, *a, **kw):
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    with _pytest.raises(VisionProviderError) as exc:
+        provider.ocr(b"x", "a.png")
+    assert "413" in str(exc.value) and "文件过大" in str(exc.value)
