@@ -143,3 +143,36 @@ def test_search_dedupes_documents_by_default(db_session, seeded_docs):
 def test_search_empty_query_returns_empty(db_session, seeded_docs):
     service = ks.KnowledgeService(db_session)
     assert service.search("   ")["items"] == []
+
+
+class TestPlaceholderSections:
+    """作者留的「（草稿未提供）」空壳章节不能进检索语料。
+
+    真实案例：文档《TMP》里两节正文就是「（草稿未提供）」，
+    向量检索把它排到第 1，回答只能照抄一句「知识库未提供」。
+    """
+
+    def _doc(self, content: str):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(id=1, title="TMP", content=content)
+
+    def test_placeholder_section_is_excluded(self):
+        from app.services.knowledge.section_search import build_section_chunks
+
+        content = (
+            "## 1. 下载文件分析\n\n### 分析\n\n（草稿未提供）\n\n**作者:** 隆昌林 2026.2.28\n\n"
+            "## 2. 关键字解释\n\n| `FileListUpgradeProc end` | 下载结束打印 |\n"
+        )
+        chunks = build_section_chunks([self._doc(content)])
+        bodies = " ".join(c.content for c in chunks)
+        assert "草稿未提供" not in bodies
+        assert "FileListUpgradeProc end" in bodies
+
+    def test_pending_marks_are_excluded(self):
+        from app.services.knowledge.section_search import build_section_chunks
+
+        content = "## 1. 待补充\n\n待补充\n\n## 2. 真内容\n\n日志搜索使用 `master_start` 关键字。\n"
+        chunks = build_section_chunks([self._doc(content)])
+        assert len(chunks) == 1
+        assert "master_start" in chunks[0].content

@@ -226,7 +226,7 @@ async function loadChatConcurrencyConfig() {
 // 按 createdAt 升序排列，使用 ID 去重（而非内容去重）
 const displayMessages = computed(() => {
   const seen = new Set<string>()
-  return [...messages.value]
+  const sorted = [...messages.value]
     .filter(m => {
       // 使用消息 ID 去重，而不是内容哈希
       // 这样即使内容相同，只要是不同的消息实例也能正常显示
@@ -235,6 +235,25 @@ const displayMessages = computed(() => {
       return true
     })
     .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+
+  // 编辑重发 = 从该提问处开新分支：新版本之后的旧对话不再属于当前分支。
+  // 版本项上记的 `truncates`（编辑时刻）就是分界：比它更早创建的后续消息属于旧分支，
+  // 只有切回旧版本时才显示（与 DeepSeek 网页版一致）。
+  const cuts: Array<{ boundary: number; cutAt: number }> = []
+  sorted.forEach((m, i) => {
+    if (m.role !== 'user') return
+    const version = m.versions?.[m.activeVersion ?? 0]
+    const cutAt = Number(version?.truncates || 0)
+    if (!cutAt) return
+    const boundary = sorted[i + 1]?.role === 'assistant' ? i + 1 : i
+    cuts.push({ boundary, cutAt })
+  })
+  if (!cuts.length) return sorted
+
+  return sorted.filter((m, idx) => {
+    const at = m.createdAt || 0
+    return !cuts.some(c => idx > c.boundary && at <= c.cutAt)
+  })
 })
 const messageIds = new Set<string>()
 
@@ -1327,6 +1346,9 @@ async function handleEditSend(userMsg: any, newText: string) {
   try {
     // 1. 提问消息版本化：保留修改前内容，追加修改后版本
     const newIdx = appendVersion(userMsg, newText)
+    // 该版本标记为「分支起点」：此刻之后仍属于旧分支的后续对话不再显示，
+    // 切回旧版本时恢复（DeepSeek 网页版语义）。
+    userMsg.versions[newIdx] = { ...(userMsg.versions[newIdx] || {}), content: newText, truncates: Date.now() }
     if (userMsg._dbId != null) {
       chatApi.updateMessage(chatId, userMsg._dbId, {
         content: newText,
