@@ -110,7 +110,7 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 # ------------------------------------------------------------------
 
 
-@router.post("", status_code=201, dependencies=[Depends(require_auth)])
+@router.post("", status_code=201, dependencies=[Depends(require_admin)])
 def create_document(
     body: KnowledgeCreate,
     db: Session = Depends(get_db_session),
@@ -127,7 +127,7 @@ def create_document(
     return _doc_payload(db, doc.id)
 
 
-@router.post("/upload", response_model=KnowledgeResponse, status_code=201, dependencies=[Depends(require_auth)])
+@router.post("/upload", response_model=KnowledgeResponse, status_code=201, dependencies=[Depends(require_admin)])
 def upload_document(
     file: UploadFile = File(...),
     category: Optional[str] = Form(default=None),
@@ -171,7 +171,9 @@ def upload_document(
 # ------------------------------------------------------------------
 
 
-@router.get("", response_model=KnowledgeListResponse, dependencies=[Depends(require_admin)])
+# 读接口对所有登录用户开放：售后/测试要在对话里点开引用来源、看知识库原文；
+# 写接口（上传/编辑/删除/模板回收站）仍由 require_admin 把关。
+@router.get("", response_model=KnowledgeListResponse, dependencies=[Depends(require_auth)])
 def list_documents(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -211,7 +213,7 @@ def polish_document(
     return service.polish(body.content, body.doc_type, body.title or "")
 
 
-@router.get("/search", dependencies=[Depends(require_admin)])
+@router.get("/search", dependencies=[Depends(require_auth)])
 def search_documents(
     q: str = Query(..., min_length=1),
     page: int = Query(default=1, ge=1),
@@ -235,7 +237,7 @@ def search_documents(
     )
 
 
-@router.get("/categories", dependencies=[Depends(require_admin)])
+@router.get("/categories", dependencies=[Depends(require_auth)])
 def list_categories(
     db: Session = Depends(get_db_session),
 ) -> List[str]:
@@ -243,7 +245,7 @@ def list_categories(
     return KnowledgeService(db).list_categories()
 
 
-@router.get("/tree", response_model=KnowledgeTreeResponse, dependencies=[Depends(require_admin)])
+@router.get("/tree", response_model=KnowledgeTreeResponse, dependencies=[Depends(require_auth)])
 def get_tree(
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
@@ -256,7 +258,7 @@ def get_tree(
 # ------------------------------------------------------------------
 
 
-@router.post("/images", response_model=KnowledgeImageResponse, status_code=201, dependencies=[Depends(require_auth)])
+@router.post("/images", response_model=KnowledgeImageResponse, status_code=201, dependencies=[Depends(require_admin)])
 def upload_image(
     file: UploadFile = File(...),
     db: Session = Depends(get_db_session),
@@ -346,7 +348,7 @@ def reset_template(doc_type: str) -> Dict[str, Any]:
     return template_to_dict(template, customized=False)
 
 
-@router.get("/{doc_id}/sections", dependencies=[Depends(require_admin)])
+@router.get("/{doc_id}/sections", dependencies=[Depends(require_auth)])
 def get_sections(
     doc_id: int,
     db: Session = Depends(get_db_session),
@@ -370,7 +372,7 @@ def format_preview(body: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-@router.get("/{doc_id}", response_model=KnowledgeResponse, dependencies=[Depends(require_admin)])
+@router.get("/{doc_id}", response_model=KnowledgeResponse, dependencies=[Depends(require_auth)])
 def get_document(
     doc_id: int,
     db: Session = Depends(get_db_session),
@@ -387,7 +389,7 @@ def get_document(
 # ------------------------------------------------------------------
 
 
-@router.put("/{doc_id}", dependencies=[Depends(require_auth)])
+@router.put("/{doc_id}", dependencies=[Depends(require_admin)])
 def update_document(
     doc_id: int,
     body: KnowledgeUpdate,
@@ -414,7 +416,7 @@ def update_document(
 # ------------------------------------------------------------------
 
 
-@router.delete("/{doc_id}", status_code=204, dependencies=[Depends(require_auth)])
+@router.delete("/{doc_id}", status_code=204, dependencies=[Depends(require_admin)])
 def delete_document(
     doc_id: int,
     db: Session = Depends(get_db_session),

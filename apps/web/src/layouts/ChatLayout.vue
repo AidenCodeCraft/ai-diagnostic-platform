@@ -1252,24 +1252,51 @@ async function handleRegenerate(assistantMsg: any) {
     ElMessage.warning(`最多支持 ${limit} 个对话同时提问，请等待进行中的对话完成`)
     return
   }
-  // 找到该 assistant 消息之前最近的 user 消息
-  const idx = messages.value.findIndex(m => m.id === assistantMsg.id)
-  const userMsg = [...messages.value].slice(0, idx).reverse().find(m => m.role === 'user')
+  const msgs = messagesByChat.get(chatId)
+  if (!msgs) return
+  const idx = msgs.findIndex((m: any) => m.id === assistantMsg.id)
+  if (idx < 0) return
+  const userMsg = [...msgs].slice(0, idx).reverse().find((m: any) => m.role === 'user')
   if (!userMsg) return
 
-  // 创建分支：保存截断前的消息状态
-  createBranch(messages.value, idx, `regen-${new Date().toLocaleTimeString()}`)
-
-  // 截断：移除该 assistant 消息及其之后的所有消息（对话分支）
-  const truncated = messages.value.slice(0, idx)
-  setChatMessages(chatId, truncated)
-  truncated.forEach((m: any) => messageIds.add(m.id))
+  // 旧回答归档成上一版本，然后在**同一条消息**上重新生成。
+  // 早期实现是把这条消息从本地列表截掉再新插一条：服务端旧行还在，
+  // 切走会话再回来重新拉取时旧回答就“复活”，还会与新回答并存。
+  const oldIdx = snapshotVersion(assistantMsg, assistantMsg.activeVersion ?? 0)
+  const newIdx = oldIdx + 1
+  assistantMsg.versions = [...(assistantMsg.versions || [])]
+  assistantMsg.versions[newIdx] = { content: '' }
+  assistantMsg.activeVersion = newIdx
+  assistantMsg.content = ''
+  assistantMsg.sources = []
+  assistantMsg.thinking = { elapsed: 0, text: '', active: true }
+  assistantMsg._versionedFrom = oldIdx
 
   setSending(chatId, true)
   setLoadingPhase(chatId, 'streaming')
+  // 先把「已清空 + 新版本下标」落库：生成中途切走再回来也不会看到旧回答
+  if (assistantMsg._dbId != null) {
+    chatApi.updateMessage(chatId, assistantMsg._dbId, {
+      content: '',
+      versions: assistantMsg.versions,
+      active_version: newIdx,
+    }).catch((e: any) => console.warn('[handleRegenerate] reset message failed:', e))
+  }
   try {
-    await streamChat(userMsg.content, chatId)
+    await streamChat(userMsg.content, chatId, assistantMsg)
   } finally {
+    // 一个 token 都没回来（失败/被立即取消）：回退旧版本，别留空回答在库里
+    if (!String(assistantMsg.content || '').trim()) {
+      applyVersion(assistantMsg, oldIdx)
+      if (assistantMsg._dbId != null) {
+        await chatApi.updateMessage(chatId, assistantMsg._dbId, {
+          content: assistantMsg.content,
+          sources: assistantMsg.sources,
+          versions: assistantMsg.versions,
+          active_version: oldIdx,
+        }).catch((e: any) => console.warn('[handleRegenerate] restore failed:', e))
+      }
+    }
     setLoadingPhase(chatId, 'idle')
     setSending(chatId, false)
   }

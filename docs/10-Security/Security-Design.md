@@ -414,4 +414,21 @@ CI 阶段加入：
 
 ---
 
+---
+
+## 知识库读写权限
+
+知识库是「全员可读、管理员可写」，读权限的边界由角色决定：
+
+| 接口 | 权限 | 理由 |
+| --- | --- | --- |
+| `GET /api/v1/knowledge`、`/tree`、`/categories`、`/search` | 任意登录用户 | 对话页左侧知识库浏览、检索 |
+| `GET /api/v1/knowledge/{id}`、`/{id}/sections` | 任意登录用户 | 对话里点开引用来源必须能看原文（否则引用等于点不开） |
+| `POST/PUT/DELETE /api/v1/knowledge`、`/upload`、`/images` | 管理员/研发 | 内容资产只能由内容负责人改动 |
+| `GET/PUT/DELETE /knowledge/templates` | 管理员/研发 | 模板影响全库文档结构 |
+| `GET /knowledge/images/{id}` | 匿名 | `<img src>` 无法带 Authorization，靠不可猜测的 ID + 私有桶 |
+
+前端只做体验层收口：非管理员不渲染「新建/上传/编辑/删除/模板」入口；
+真正的判定始终在后端 `require_auth` / `require_admin`，直接调 API 不受前端影响。
+
 > Security Design Complete

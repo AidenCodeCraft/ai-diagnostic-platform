@@ -26,6 +26,10 @@
   --chat-sidebar-history-active-text: #2563eb;
   --chat-sidebar-user-border: #e5e7eb;
   --chat-sidebar-user-text: #374151;
+  /* 搜索框 / 内联重命名输入框（缺这三个会让深色模式下输入框仍是浅色底） */
+  --chat-sidebar-search-bg: #eef0f3;
+  --chat-sidebar-search-border: #e5e7eb;
+  --chat-sidebar-search-focus: #2563eb;
 
   --chat-welcome-text: #374151;
   --chat-msg-text: #1f2937;
@@ -127,6 +131,10 @@
   --chat-sidebar-history-active-text: #aebfff;
   --chat-sidebar-user-border: #34353a;
   --chat-sidebar-user-text: #d3d7df;
+  /* 深色：输入框必须跟着走深色底，否则浅底 + 浅字等于看不见 */
+  --chat-sidebar-search-bg: #2a2b2f;
+  --chat-sidebar-search-border: #45464c;
+  --chat-sidebar-search-focus: #7c93ff;
 
   --chat-welcome-text: #e5e7eb;
   --chat-msg-text: #e7e9ee;

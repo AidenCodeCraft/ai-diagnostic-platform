@@ -367,14 +367,23 @@ function closeSearch() {
 .rename-input {
   flex: 1;
   min-width: 0;
-  padding: 1px 6px;
+  padding: 3px 6px;
   border: 1px solid var(--chat-sidebar-search-focus, #2563eb);
-  border-radius: 4px;
+  border-radius: 5px;
   background: var(--chat-sidebar-search-bg, #f3f4f6);
   color: var(--chat-sidebar-history-text);
   font-size: 13px;
   font-family: inherit;
+  line-height: 1.4;
   outline: none;
+  caret-color: var(--chat-sidebar-search-focus, #2563eb);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--chat-sidebar-search-focus, #2563eb) 22%, transparent);
+}
+
+/* 深色下选中文本也要看得见（默认高亮在深底上偏淡） */
+.rename-input::selection {
+  background: color-mix(in srgb, var(--chat-sidebar-search-focus, #2563eb) 45%, transparent);
+  color: var(--chat-sidebar-history-text);
 }
 
 /* 时间分组标题（今天 / 7天内 / 30天内 / 具体月份） */
