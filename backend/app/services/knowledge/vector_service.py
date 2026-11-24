@@ -515,7 +515,9 @@ class VectorService:
         也是此前 BM25 结构提权想做但做歪了的事。
         """
         from app.services.knowledge.sections import (
+            MIN_SECTION_CHARS,
             content_hash as section_content_hash,
+            is_placeholder_section,
             split_markdown_sections,
         )
 
@@ -531,7 +533,11 @@ class VectorService:
         chunks: List[Dict[str, Any]] = []
         for heading, body in split_markdown_sections(content or ""):
             body = (body or "").strip()
-            if not body:
+            # 与检索侧同一口径：过短碎片 + 占位章节一律不成块。
+            # 索引里若留着检索侧不认的块，dense top-k 会被它们占满后整段丢弃。
+            if len(body) < MIN_SECTION_CHARS or is_placeholder_section(body):
+                # 占位章节不进索引：写进去只会占满 dense top-k，
+                # 取回来又因为映射不到章节而被丢掉，等于让检索变瞎
                 continue
             chunks.append({
                 "title": title,

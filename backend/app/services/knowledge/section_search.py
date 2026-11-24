@@ -14,12 +14,12 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.services.knowledge.sections import (
     MIN_SECTION_CHARS,
+    is_placeholder_section,
     content_hash,
     section_key,
     split_markdown_sections,
@@ -40,28 +40,6 @@ class SectionChunk:
     index_text: str
     key: str
     content_hash: str
-
-
-# 作者留的空壳章节：正文只有「（草稿未提供）」这类占位符。
-# 它们会被向量检索当成高相关命中、排到真内容前面，回答里却什么也给不出来，
-# 所以切章节时直接排除。
-_AUTHOR_LINE_RE = re.compile(r"^\s*(\*\*)?作者(\*\*)?\s*[:：]")
-_PLACEHOLDER_TOKENS = ("草稿未提供", "待补充", "待完善", "暂无内容", "暂无", "todo", "tbd")
-
-
-def _is_placeholder_section(body: str) -> bool:
-    """章节正文是否只有占位符（没有可用信息）。"""
-    lines = []
-    for raw in (body or "").splitlines():
-        line = re.sub(r"[*>#`_|\-\s]", "", raw)
-        if not line:
-            continue
-        if _AUTHOR_LINE_RE.match(line):
-            continue
-        lines.append(line.lower())
-    if not lines:
-        return True
-    return all(any(tok in line for tok in _PLACEHOLDER_TOKENS) for line in lines)
 
 
 def build_section_chunks(docs: Iterable[Any]) -> List[SectionChunk]:
@@ -86,7 +64,7 @@ def build_section_chunks(docs: Iterable[Any]) -> List[SectionChunk]:
             body = (chunk.get("content") or "").strip()
             if len(body) < MIN_SECTION_CHARS:
                 continue
-            if _is_placeholder_section(body):
+            if is_placeholder_section(body):
                 continue
             heading = (chunk.get("section") or "").strip()
             index_text = chunk.get("index_text") or _SEP.join([title, heading, body])

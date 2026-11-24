@@ -92,15 +92,19 @@ e = get_embedder(); print('DIM', e.dimension, 'PROVIDER', e.provider_name)
 "
 # 期望输出 DIM 1024（若出现 hash 兜底说明模型没加载上，见 §8）
 
-# 6) 回填知识库（把已上传文档切章节写入 Milvus）
+# 6) 回填知识库（把已上传文档切章节写入 Milvus；内容改动后必须重跑）
 docker compose exec backend python -c "
 from app.database.session import create_session
 from app.services.knowledge.reindex_service import run_reindex
 db = create_session(); print(run_reindex(db).summary())
 "
-# 期望 total_chunks > 0、failed_docs = 0
+# 期望 total_chunks > 0、failed_docs = 0、skipped_folders = 目录节点数
 
-# 7) 管理员账号：应用启动时自动 seed（日志里会打印 "Seed complete: 2 default users ensured"）
+# 7) 索引一致性检查（回填后必须是 0 漂移；日常也可作为巡检，漂移时退出码 1）
+docker compose exec backend python -m scripts.check_knowledge_index
+# 期望 "[index] ✓ 索引与内容一致"，且 expected 与 indexed 数量相等
+
+# 8) 管理员账号：应用启动时自动 seed（日志里会打印 "Seed complete: 2 default users ensured"）
 #    默认账号 admin / admin123 —— 首次登录后立刻改密码
 docker compose logs backend | grep -i "seed complete"
 ```

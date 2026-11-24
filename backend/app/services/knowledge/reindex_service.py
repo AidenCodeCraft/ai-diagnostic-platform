@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
@@ -33,6 +34,7 @@ class ReindexStats:
     total_docs: int = 0
     indexed_docs: int = 0
     empty_docs: int = 0
+    skipped_folders: int = 0
     total_chunks: int = 0
     failed: List[dict] = field(default_factory=list)
 
@@ -41,6 +43,7 @@ class ReindexStats:
             "total_docs": self.total_docs,
             "indexed_docs": self.indexed_docs,
             "empty_docs": self.empty_docs,
+            "skipped_folders": self.skipped_folders,
             "total_chunks": self.total_chunks,
             "failed_docs": len(self.failed),
         }
@@ -108,9 +111,12 @@ def run_reindex(
 
     # 与检索侧保持同一可见集合：检索只看 active，回填也只回填 active，
     # 否则会出现「向量库里有、BM25 没索引」的文档，语义那一路直接失效
+    # 目录节点（doc_type=folder）没有正文，只用于组织树；回填时先剔除，
+    # 否则它们全部落进 empty_docs，掩盖「真的正文为空」的坏数据。
     query = (
         db.query(KnowledgeDocument)
         .filter(KnowledgeDocument.status == "active")
+        .filter(or_(KnowledgeDocument.doc_type.is_(None), KnowledgeDocument.doc_type != "folder"))
         .filter(KnowledgeDocument.id > start_id)
         .order_by(KnowledgeDocument.id.asc())
     )
@@ -118,6 +124,12 @@ def run_reindex(
         query = query.limit(limit)
     docs = query.all()
     stats.total_docs = len(docs)
+    stats.skipped_folders = (
+        db.query(KnowledgeDocument)
+        .filter(KnowledgeDocument.status == "active")
+        .filter(KnowledgeDocument.doc_type == "folder")
+        .count()
+    )
 
     if indexer is None:
         if not dry_run:

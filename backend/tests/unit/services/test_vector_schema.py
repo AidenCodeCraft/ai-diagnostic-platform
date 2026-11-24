@@ -92,7 +92,8 @@ def test_validate_schema_rejects_wrong_metric():
 
 
 def test_build_chunks_splits_sections_and_prefixes_title():
-    content = "# 现象\nGPS 不上报\n\n## 排查步骤\n1. 检查天线\n2. 检查固件版本\n"
+    # 正文需超过 MIN_SECTION_CHARS，短于该值的碎片按切分口径不单独成块
+    content = "# 现象\nGPS 长时间不上报平台\n\n## 排查步骤\n1. 检查天线是否接好\n2. 检查固件版本\n"
     title, chunks = VectorService._build_chunks(1, content, doc_title="L10 GPS 排查")
 
     assert title == "L10 GPS 排查"
@@ -111,7 +112,7 @@ def test_build_chunks_falls_back_to_first_line_as_title():
 
 
 def test_chunks_hash_is_stable():
-    content = "## 一节\n内容 A\n"
+    content = "## 一节\n这是一段足够长的章节正文内容\n"
     _, first = VectorService._build_chunks(3, content)
     _, second = VectorService._build_chunks(3, content)
     assert first[0]["content_hash"] == second[0]["content_hash"]
@@ -121,3 +122,10 @@ def test_primary_key_scheme_allows_plenty_of_chunks():
     """主键 = doc_id * MAX_CHUNKS_PER_DOC + i；上限必须够章节级切分用。"""
     assert MAX_CHUNKS_PER_DOC >= 10000
     assert (2 * MAX_CHUNKS_PER_DOC + 5) % MAX_CHUNKS_PER_DOC == 5
+
+
+def test_build_chunks_drops_too_short_sections():
+    """短于 MIN_SECTION_CHARS 的碎片不单独成块（与检索侧同一口径）。"""
+    content = "## 短\n无\n\n## 正常\n这一段正文长度足够单独成块了。\n"
+    _, chunks = VectorService._build_chunks(4, content)
+    assert [c["section"] for c in chunks] == ["正常"]

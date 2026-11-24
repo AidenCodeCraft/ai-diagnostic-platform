@@ -128,3 +128,18 @@ def test_dry_run_does_not_write(db_session, docs):
     assert stats.total_docs == 3
     assert stats.indexed_docs == 2  # 非空文档计数
     assert stats.total_chunks == 0
+
+
+def test_run_reindex_skips_folder_nodes(db_session):
+    """目录节点（doc_type=folder）不算文档，也不该被记成「正文为空」。"""
+    folder = KnowledgeDocument(title="Mango", content="", status="active", doc_type="folder")
+    legacy = KnowledgeDocument(title="历史文档", content="## 内容\n有正文\n", status="active")
+    db_session.add_all([folder, legacy])
+    db_session.commit()
+
+    stats = run_reindex(db_session, indexer=RecordingIndexer(chunks_per_doc=1))
+
+    assert stats.total_docs == 1          # 只有历史文档进遍历
+    assert stats.skipped_folders == 1
+    assert stats.empty_docs == 0          # 目录不再污染空文档计数
+    assert stats.indexed_docs == 1

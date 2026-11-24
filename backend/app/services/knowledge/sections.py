@@ -27,6 +27,27 @@ MIN_SECTION_CHARS = 12
 # 「进出站日志中搜索什么」被《线路》的「关键字」碎片顶掉）。
 MERGE_TINY_SECTION_CHARS = 80
 
+# 作者留的空壳章节：正文只有「（草稿未提供）」这类占位符。它们语义上不是知识，
+# 却因为「标题+正文」短、向量分虚高而挤掉真章节，索引和检索都必须排除。
+_AUTHOR_LINE_RE = re.compile(r"^\s*(\*\*)?作者(\*\*)?\s*[:：]")
+_PLACEHOLDER_TOKENS = ("草稿未提供", "待补充", "待完善", "暂无内容", "暂无", "todo", "tbd")
+
+
+def is_placeholder_section(body: str) -> bool:
+    """章节正文是否只有占位符（没有任何可用信息）。"""
+    lines = []
+    for raw in (body or "").splitlines():
+        line = re.sub(r"[*>#`_|\-\s]", "", raw)
+        if not line:
+            continue
+        if _AUTHOR_LINE_RE.match(line):
+            continue
+        lines.append(line.lower())
+    if not lines:
+        return True
+    return all(any(tok in line for tok in _PLACEHOLDER_TOKENS) for line in lines)
+
+
 # 章节名保留父级路径的层数上限（太长的路径反而看不清）
 MAX_PATH_DEPTH = 3
 

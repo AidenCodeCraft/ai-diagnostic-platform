@@ -80,7 +80,10 @@ def test_index_document_tags_section_chunks(monkeypatch):
     service = build_service(monkeypatch)
 
     count = service.index_document(
-        doc_id=5, content="# 4G 注册失败\n\n## 现象\n没网\n\n## 处理\n重插卡", title="4G 注册",
+        doc_id=5,
+        # 正文需超过 MIN_SECTION_CHARS，短片段按切分口径不成块
+        content="# 4G 注册失败\n\n## 现象\n设备一直没有网络信号，无法注册\n\n## 处理\n重新插拔 SIM 卡后重启设备再试\n",
+        title="4G 注册",
     )
     assert count >= 2
 
