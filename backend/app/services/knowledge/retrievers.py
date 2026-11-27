@@ -68,10 +68,11 @@ class BM25Retriever(IRetriever):
         return [
             SearchResult(
                 chunk=Chunk(
-                    id=f"bm25_{self._doc_ids[idx]}",
-                    text=self._corpus[idx][:500],
+                    id=f"bm25_{self._doc_ids[idx]}_{idx}",
+                    # 保留完整 chunk 文本：调用方据此提取命中章节作为 snippet
+                    text=self._corpus[idx],
                     doc_id=self._doc_ids[idx],
-                    granularity="document",
+                    granularity="section",
                 ),
                 score=float(score),
                 sparse_score=float(score),
@@ -208,8 +209,14 @@ class HybridRetriever(IRetriever):
                 r.score = rrf
                 fused[doc_id] = r
 
+        sparse_seen = set()
         for rank, r in enumerate(sparse_results):
             doc_id = r.chunk.doc_id
+            # 章节级索引下同一文档会有多个 chunk 命中，只按最佳名次计一次，
+            # 避免「章节多的长文档」靠数量堆分。
+            if doc_id in sparse_seen:
+                continue
+            sparse_seen.add(doc_id)
             rrf = 1.0 / (k + rank + 1)
             if doc_id in fused:
                 fused[doc_id].score += rrf
@@ -220,8 +227,12 @@ class HybridRetriever(IRetriever):
                 fused[doc_id] = r
 
         ranked = sorted(fused.values(), key=lambda x: x.score, reverse=True)
+        # 归一化到 0~1：RRF 原始分数量级只有 0.01 左右，会使
+        # high_score_threshold=0.3 永远不达标、相关度展示成 4%。
+        scale = float(k + 1)
         for i, r in enumerate(ranked):
             r.rank_position = i + 1
+            r.score = min(1.0, r.score * scale)
 
         elapsed = (time.time() - t0) * 1000
         logger.info(

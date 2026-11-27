@@ -147,6 +147,8 @@ class DiagnosticChatAgent:
         self.clarification_questions: List[Dict[str, Any]] = []
         self._last_search_partial: bool = False
         self._last_search_layer: str = ""
+        # 本次检索的章节级候选（用于多结果歧义澄清）
+        self._candidates: List[Dict[str, Any]] = []
 
     # ==================================================================
     # Pipeline Entry
@@ -237,6 +239,10 @@ class DiagnosticChatAgent:
                     log_analysis=log_analysis,
                 ), None
             else:
+                # 多章节得分接近 → 先问用户指的是哪一条
+                ambiguous = self._maybe_ask_ambiguity(cleaned, existing_messages)
+                if ambiguous:
+                    return ambiguous
                 # 知识库有匹配 → 直接走严格 RAG 模式（跳过追问，需要 LLM）
                 return self._assemble_rag_mode(
                     existing_messages, cleaned_input=cleaned,
@@ -250,6 +256,9 @@ class DiagnosticChatAgent:
         # Stage 4: Prompt 组装
         # 关键：是否走严格 RAG 取决于「知识库有没有匹配」，不取决于关键词分类
         if knowledge_context:
+            ambiguous = self._maybe_ask_ambiguity(cleaned, existing_messages)
+            if ambiguous:
+                return ambiguous
             return self._assemble_rag_mode(
                 existing_messages, cleaned_input=cleaned,
                 knowledge_context=knowledge_context,
@@ -419,12 +428,16 @@ class DiagnosticChatAgent:
         if not text.strip():
             return "", []
 
+        self._candidates = []
+
         try:
             # 使用通用预处理器；复合提问按问题单元逐个检索后合并
             # （每个子问题独立分词/独立意图校验，避免互相稀释）
             def search_fn(term: str, page_size: int) -> dict:
                 return self.knowledge.search(
-                    term, page=1, page_size=page_size, project_id=self.project_id,
+                    term, page=1, page_size=max(page_size, 12), project_id=self.project_id,
+                    # 草稿也参与召回（降权），章节级返回便于歧义澄清
+                    include_drafts=True, return_sections=True,
                 )
 
             search_result = process_multi_query(
@@ -434,6 +447,27 @@ class DiagnosticChatAgent:
                 high_score_threshold=0.3,
                 min_intent_match_ratio=0.3,
             )
+
+            # 完整问题本身的章节排序最可靠：优先保留，再用子词检索补充召回。
+            # 多词合并后会按「分×字面加成」重排并截断，容易把完整问题命中的
+            # 正确章节挤掉（曾导致「进出站」问题只看到文档第一节）。
+            primary: List[Dict[str, Any]] = []
+            try:
+                primary = self.knowledge.search(
+                    text, page=1, page_size=12, project_id=self.project_id,
+                    include_drafts=True, return_sections=True,
+                ).get("items", [])
+            except Exception:  # 兼容仅有 search_fn 的测试替身
+                logger.debug("[知识检索] 完整问题直检失败，回退多词结果", exc_info=True)
+            merged: List[Dict[str, Any]] = []
+            seen_keys = set()
+            for item in list(primary) + list(search_result.items):
+                key = item.get("key") or item.get("id")
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                merged.append(item)
+            search_result.items = merged
         except Exception as e:
             logger.error("[知识检索] 检索异常: %s\n%s", e, traceback.format_exc())
             return "", []
@@ -455,21 +489,31 @@ class DiagnosticChatAgent:
 
         items = all_items[:max_items]
 
-        # 获取完整文档内容（用于 snippet 提取，并定位章节/行号）
+        # 获取完整文档内容（用于图片匹配）；章节级检索结果已有正确
+        # snippet/section，不能再按查询词重新截取，否则会退回文档第一节。
         for item in items:
             doc_id = item.get("id")
-            if not item.get("_full_content"):
-                try:
-                    full_doc = self.knowledge.get(doc_id)
-                    item["_full_content"] = full_doc.content or ""
+            if item.get("_full_content"):
+                continue
+            try:
+                full_doc = self.knowledge.get(doc_id)
+                item["_full_content"] = full_doc.content or ""
+                if item.get("snippet") and item.get("section"):
+                    item["_section"] = {
+                        "section_title": item.get("section", ""),
+                        "section_key": "",
+                        "start_line": 0,
+                        "end_line": 0,
+                    }
+                else:
                     info = self.knowledge._extract_snippet_info(
                         item["_full_content"],
                         item.get("_matched_term") or search_result.matched_term,
                     )
                     item["snippet"] = info["snippet"]
                     item["_section"] = info
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
         self.references = []
         lines = []
@@ -507,6 +551,9 @@ class DiagnosticChatAgent:
                     "section_key": section.get("section_key", ""),
                     "start_line": section.get("start_line", 0),
                     "end_line": section.get("end_line", 0),
+                    # 供歧义澄清：章节标题/得分/发布状态
+                    "status": item.get("status") or "active",
+                    "score": round(float(score), 4),
                     "images": [
                         {
                             "id": img.id,
@@ -519,12 +566,47 @@ class DiagnosticChatAgent:
                         for img in images
                     ],
                 })
+                self._candidates.append({
+                    "doc_id": item.get("id"),
+                    "title": title,
+                    "section": section.get("section_title") or item.get("section") or "",
+                    "score": float(score),
+                    "status": item.get("status") or "active",
+                })
 
         # 记录部分匹配状态（供 _assemble_rag_mode 使用）
         self._last_search_partial = search_result.is_partial_match
         self._last_search_layer = search_result.matched_layer
 
         return "\n\n".join(lines) if lines else "", self.references
+
+    def _maybe_ask_ambiguity(self, query: str, existing_messages: List[Dict[str, str]]):
+        """多个章节得分接近时，先让用户确认要查哪一条，再按该条定位。"""
+        try:
+            from app.services.chat.clarification import (
+                ClarificationQuestion, build_clarification_reply,
+            )
+            from app.services.chat.retrieval_ambiguity import find_ambiguous_candidates
+
+            candidates = find_ambiguous_candidates(self._candidates, query)
+            if not candidates:
+                return None
+
+            question = ClarificationQuestion(
+                slot="knowledge",
+                label="知识库里有几处相近内容，请选择你要查的条目",
+                options=[c.option_label() for c in candidates],
+                hint="选择后我会按该条目回答",
+            )
+            self.clarification_questions = [question.to_dict()]
+            reply = build_clarification_reply([question])
+            return (
+                existing_messages + [{"role": "assistant", "content": reply}],
+                reply,
+            )
+        except Exception:
+            logger.debug("[enrich_messages] ambiguity clarification skipped", exc_info=True)
+            return None
 
     @staticmethod
     def _extract_section_anchor(snippet: str) -> str:

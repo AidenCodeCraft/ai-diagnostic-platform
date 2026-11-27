@@ -1,0 +1,158 @@
+# ============================================================================
+# AI Diagnostic Platform — 独立 Embedding 服务 Compose 覆盖文件（TEI）
+# ============================================================================
+#
+# 适用场景
+#   - 希望 backend / worker 镜像保持精简（不装 torch + sentence-transformers），
+#     但需要「真实语义嵌入」（BAAI/bge-small-zh-v1.5，512 维）；
+#   - 想把 embedding 作为独立可扩缩容/可独立升级模型的服务运行；
+#   - 离线部署：只读挂载宿主机已下载好的 HuggingFace 模型缓存，完全不联网。
+#
+# 与 docker-compose.bge.yml 的取舍
+#   - bge 覆盖文件：embedding 在 backend 进程内（镜像 +2GB+，无额外容器）；
+#   - 本文件：embedding 独立容器（backend 镜像不变，多一个服务 + 一次 HTTP 调用）。
+#   两者【不要同时叠加】。
+#
+# 前置条件（重要）
+#   1) 宿主机已缓存 BGE 模型到 HF 缓存根目录（其下须有 hub/models--BAAI--bge-small-zh-v1.5）：
+#        # Windows PowerShell
+#        $env:HF_ENDPOINT = 'https://hf-mirror.com'
+#        & ..\.venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; print(snapshot_download('BAAI/bge-small-zh-v1.5'))"
+#        # Linux/macOS
+#        HF_ENDPOINT=https://hf-mirror.com python -c "from huggingface_hub import snapshot_download; print(snapshot_download('BAAI/bge-small-zh-v1.5'))"
+#   2) HF_CACHE_DIR 必须指向「缓存根目录」（不是 hub 子目录）：
+#        Windows PowerShell : $env:HF_CACHE_DIR = "$env:USERPROFILE\.cache\huggingface"
+#        Linux/macOS        : export HF_CACHE_DIR="$HOME/.cache/huggingface"
+#      未设置时本文件会直接报错（compose 变量必填校验）。
+#
+# 使用命令（在仓库根目录执行；与基础 compose 叠加）
+#   Windows PowerShell:
+#     $env:HF_CACHE_DIR = "$env:USERPROFILE\.cache\huggingface"
+#     docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.embedding.yml config -q
+#     docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.embedding.yml up -d --build backend worker embedding
+#   Linux/macOS:
+#     export HF_CACHE_DIR="$HOME/.cache/huggingface"
+#     docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.embedding.yml up -d --build backend worker embedding
+#
+# 本文件对基础 compose 的改动（override 语义，不改基础文件）
+#   - 新增 embedding 服务：text-embeddings-inference（TEI）CPU 镜像，OpenAI 兼容
+#     /v1/embeddings 端点；只读挂载 HF 缓存并强制离线，不下载模型；
+#   - backend / worker：EMBEDDING_PROVIDER=api（不再尝试进程内 BGE）、
+#     EMBEDDING_API_URL 指向 embedding:80/v1/embeddings、EMBEDDING_DIM=MILVUS_DIM；
+#   - backend / worker：depends_on embedding（仅 service_started，不阻塞启动）。
+#
+# ⚠ 代码侧约束（backend/app/services/knowledge/embedding.py，改动需谨慎）
+#   1) EMBEDDING_API_URL 必须是【完整端点】，APIEmbedder 直接 POST 该地址，
+#      不会自动拼 /v1/embeddings；
+#   2) EMBEDDING_API_KEY 必须【非空】—— APIEmbedder.health_check() 为
+#      `bool(api_url and api_key)`，TEI 无鉴权也要填占位值（默认 dummy），
+#      否则会被判定不可用并静默回退 HashingEmbedder；
+#   3) 响应必须是 OpenAI 格式 {"data":[{"index":0,"embedding":[...]}]}
+#      （代码按 data[].index 排序后取 embedding）；
+#   4) EMBEDDING_DIM 不会向服务端查询，必须与模型真实维度、MILVUS_DIM、
+#      已有 collection 维度三者一致，否则 index_document 会打
+#      "Embedding dim mismatch" 并返回 0（静默不写入）。
+#
+# 验收判定
+#   1) 服务端冒烟（绕过后端，直接打 TEI）：
+#        curl -s -X POST http://localhost:8080/v1/embeddings \
+#             -H "Content-Type: application/json" \
+#             -d '{"model":"BAAI/bge-small-zh-v1.5","input":["USB 设备超时无响应"]}'
+#      期望：data[0].embedding 长度 512 且非全零；
+#   2) 后端 provider：
+#        curl -s http://localhost:8000/api/v1/vector/health
+#      期望 embedding_provider = APIEmbedder（不是 HashingEmbedder/BGEEmbedder）；
+#   3) 后端嵌入接口：
+#        curl -s -X POST http://localhost:8000/api/v1/vector/embed \
+#             -H "Content-Type: application/json" -d '{"text":"USB 设备超时无响应"}'
+#      期望 dimension=512；
+#   4) 日志：
+#        docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.embedding.yml logs backend | grep -E "API embedder|hash"
+#      出现 "[Embedding] Using API embedder" 即成功；出现「使用哈希嵌入兜底」说明不可用（多为 api_key 为空 / endpoint 写错）。
+#
+# 切换后必做：重建向量索引
+#   旧向量若由 HashingEmbedder 生成，与新语义向量不同空间（同维度时不会报错，只会静默乱序），
+#   必须重建一次（index_document 插入前会先 delete 该 doc 的旧块，因此不会残留）：
+#     curl -s -X POST http://localhost:8000/api/v1/vector/reindex-all
+#   注意：reindex_all 只处理 status='active' 的文档，草稿不会被索引。
+#
+# 回滚（恢复进程内 auto/hash 行为）
+#   不要叠加本文件即可：docker compose -f deploy/docker-compose.yml up -d backend worker
+#
+# 未验证项（首次使用请确认）
+#   - TEI 镜像 tag：这里用 cpu-latest 便于先跑通；确认可用后建议固定具体版本
+#     （与仓库「工具版本需锁定」的约定一致）；
+#   - 端口：TEI CPU 镜像默认监听容器内 80，宿主机映射到 127.0.0.1:8080 仅供本机调试；
+#     若镜像版本端口不同，请同步修改 ports 与 EMBEDDING_API_URL；
+#   - /v1/embeddings 为 OpenAI 兼容路由，需 TEI 1.5+；若镜像不支持，可改用 /embed
+#     并适配请求格式（当前 APIEmbedder 只支持 OpenAI 格式）；
+#   - 本服务未配置 healthcheck（不同版本镜像内是否有 curl 不确定，避免长期误报 unhealthy）；
+#     缓存只读挂载若被 TEI 拒绝写入，可去掉 read_only 或改挂 rw。
+# ============================================================================
+
+services:
+  # ═══════════════════════════════════════════════════════════
+  # Embedding — HuggingFace TEI（CPU），OpenAI 兼容 /v1/embeddings
+  # ═══════════════════════════════════════════════════════════
+  embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    container_name: ai-diagnostic-embedding
+    restart: always
+    # BGE 系列使用 CLS pooling（与 sentence-transformers 中的 Pooling 配置一致）
+    command:
+      - "--model-id"
+      - "BAAI/bge-small-zh-v1.5"
+      - "--pooling"
+      - "cls"
+    ports:
+      # 仅本机调试用；容器间通过 ai-diagnostic-net 内部访问 http://embedding:80
+      - "127.0.0.1:8080:80"
+    environment:
+      # 只读本地缓存，完全离线（避免 huggingface.co 被墙时元数据探测挂起）
+      HF_HOME: /data
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      # 长语法：兼容 Windows 盘符路径，且显式 read_only
+      - type: bind
+        source: "${HF_CACHE_DIR:?请先设置 HF_CACHE_DIR 指向 HuggingFace 缓存根目录。Windows PowerShell 示例: HF_CACHE_DIR=%USERPROFILE%\\.cache\\huggingface}"
+        target: /data
+        read_only: true
+    networks:
+      - ai-diagnostic-net
+
+  # ═══════════════════════════════════════════════════════════
+  # Backend — 走 HTTP 调用 embedding 服务（镜像保持精简）
+  # ═══════════════════════════════════════════════════════════
+  backend:
+    environment:
+      # 强制走 API 分支，避免 auto 在无 ST 依赖时静默回退 hash
+      EMBEDDING_PROVIDER: api
+      # 完整端点（APIEmbedder 直接 POST 此地址，不会拼接路径）
+      EMBEDDING_API_URL: "http://embedding:80/v1/embeddings"
+      # 必须非空：health_check() 要求 api_url 与 api_key 同时存在
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY:-dummy}"
+      EMBEDDING_API_MODEL: "BAAI/bge-small-zh-v1.5"
+      # 维度必须与模型 / collection 一致（bge-small-zh-v1.5 = 512）
+      EMBEDDING_DIM: "${MILVUS_DIM:-512}"
+      MILVUS_DIM: "${MILVUS_DIM:-512}"
+      # 可选：让 embedding 不可用时硬失败，而不是静默回退 hash（便于验收）
+      # EMBEDDING_HASH_FALLBACK: "false"
+    depends_on:
+      embedding:
+        condition: service_started
+
+  # ═══════════════════════════════════════════════════════════
+  # Worker — 与 backend 共用镜像，保持同一嵌入配置
+  # ═══════════════════════════════════════════════════════════
+  worker:
+    environment:
+      EMBEDDING_PROVIDER: api
+      EMBEDDING_API_URL: "http://embedding:80/v1/embeddings"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY:-dummy}"
+      EMBEDDING_API_MODEL: "BAAI/bge-small-zh-v1.5"
+      EMBEDDING_DIM: "${MILVUS_DIM:-512}"
+      MILVUS_DIM: "${MILVUS_DIM:-512}"
+    depends_on:
+      embedding:
+        condition: service_started

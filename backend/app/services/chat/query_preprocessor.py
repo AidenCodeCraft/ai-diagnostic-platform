@@ -591,7 +591,9 @@ class QueryPreprocessor:
                     continue
 
                 for item in items:
-                    doc_id = item.get("id")
+                    # key 存在时按「文档+章节」区分候选（章节级检索），
+                    # 否则退回文档 id 去重。
+                    doc_id = item.get("key") or item.get("id")
                     score = float(item.get("relevance_score", 0) or 0)
 
                     if score >= high_score_threshold:
@@ -629,7 +631,7 @@ class QueryPreprocessor:
                 except Exception:
                     continue
                 for item in items:
-                    doc_id = item.get("id")
+                    doc_id = item.get("key") or item.get("id")
                     if doc_id not in seen_ids:
                         seen_ids.add(doc_id)
                         all_items.append(item)
