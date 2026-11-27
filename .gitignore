@@ -44,3 +44,7 @@ Thumbs.db
 .docker/
 # 验证/回归报告（本地生成，不入库）
 backend/reports/
+
+# Local git worktrees（本地工作树，不得入库；分支通过远端共享）
+.worktrees/
+.agents/worktrees/
