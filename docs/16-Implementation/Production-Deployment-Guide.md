@@ -42,7 +42,7 @@
 | --- | --- |
 | `SECRET_KEY` | JWT 签名密钥，**必须是随机 64 字符**：`python -c "import secrets;print(secrets.token_urlsafe(48))"` |
 | `DATABASE_URL` | `postgresql://user:pass@host:5432/diagnostic` |
-| `DEEPSEEK_API_KEY` | 问答与截图识别共用；也可在管理后台「模型配置」里配（文件优先于环境变量的是后台值） |
+| `DEEPSEEK_API_KEY` | 问答与截图识别共用；也可在管理后台「模型配置」里按模型配。截图识别会从 `llm.models[]` 中按 `deepseek-flash` → `isDefault` → deepseek 条目的顺序取 Key/BaseURL（后台值优先于环境变量） |
 | `REDIS_URL` | `redis://host:6379/0` |
 
 ### 2.2 关键功能开关
@@ -62,6 +62,7 @@
 | `LOG_INDEX_MAX_CHUNKS` | `300` | 单份日志入向量库的证据块上限；CPU 上 2000 块要 8 分钟 |
 | `RERANKER_ENABLED` | **`false`** | 黄金集实测开启后 recall@5 1.000→0.889、MRR 0.849→0.733、耗时 9.5× |
 | `RATE_LIMIT_ENABLED` | 按需 | 公网部署建议开启 |
+| `DEEPSEEK_VISION_MODEL` | `deepseek-flash`（一般不用改） | 截图识别（OCR + 图像理解）用的模型；OCR 本身不依赖模型名，视觉兜底才用 |
 
 > ⚠️ **不要**把 `MILVUS_COLLECTION` 留成 `v2`：v2 schema 没有 `chunk_type`，
 > 检索无法强制过滤，日志报错文本会污染知识召回。

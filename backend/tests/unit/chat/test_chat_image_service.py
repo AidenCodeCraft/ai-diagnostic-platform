@@ -324,3 +324,104 @@ def test_provider_maps_ocr_status_codes(monkeypatch):
     with _pytest.raises(VisionProviderError) as exc:
         provider.ocr(b"x", "a.png")
     assert "413" in str(exc.value) and "文件过大" in str(exc.value)
+
+
+# ----------------------------------------------------------------------
+# 管理后台多模型配置的凭据解析
+# ----------------------------------------------------------------------
+
+
+def _admin_llm_config(monkeypatch, llm_cfg):
+    """替换后台配置文件读取，让凭据解析测试不依赖 data/raw。"""
+    from app.services.providers import deepseek_provider
+
+    monkeypatch.setattr(deepseek_provider, "_load_admin_llm_config", lambda: llm_cfg)
+
+
+def test_resolve_admin_llm_config_prefers_requested_model(monkeypatch):
+    from app.services.providers.deepseek_provider import resolve_admin_llm_config
+
+    _admin_llm_config(monkeypatch, {
+        "models": [
+            {"provider": "deepseek", "model": "deepseek-v4-pro", "api_key": "sk-pro", "base_url": "https://pro.example"},
+            {"provider": "deepseek", "model": "deepseek-flash", "api_key": "sk-flash", "base_url": "https://flash.example"},
+        ]
+    })
+    cfg = resolve_admin_llm_config("deepseek-flash")
+    assert cfg == {
+        "api_key": "sk-flash",
+        "base_url": "https://flash.example",
+        "model": "deepseek-flash",
+    }
+
+
+def test_resolve_admin_llm_config_falls_back_to_default_and_ignores_mask(monkeypatch):
+    from app.services.providers.deepseek_provider import resolve_admin_llm_config
+
+    _admin_llm_config(monkeypatch, {
+        "models": [
+            # 首选模型不存在 → 回退默认模型；掩码 key 不能当真实密钥
+            {"provider": "deepseek", "model": "deepseek-v4-flash", "api_key": "****abcd", "base_url": "", "isDefault": True},
+            {"provider": "deepseek", "model": "deepseek-v4-pro", "api_key": "sk-pro", "base_url": "https://api.deepseek.com"},
+        ]
+    })
+    cfg = resolve_admin_llm_config("deepseek-flash")
+    assert cfg["model"] == "deepseek-v4-flash"
+    assert cfg["api_key"] == "sk-pro"
+    assert cfg["base_url"] == "https://api.deepseek.com"
+
+
+def test_resolve_admin_llm_config_supports_legacy_single_model(monkeypatch):
+    from app.services.providers.deepseek_provider import resolve_admin_llm_config
+
+    _admin_llm_config(monkeypatch, {
+        "api_key": "sk-legacy",
+        "base_url": "https://legacy.example/v1/chat/completions",
+        "model": "deepseek-chat",
+    })
+    cfg = resolve_admin_llm_config("deepseek-flash")
+    assert cfg["api_key"] == "sk-legacy"
+    assert cfg["base_url"] == "https://legacy.example/v1/chat/completions"
+
+
+def test_vision_provider_reads_key_from_admin_models(monkeypatch):
+    """回归：后台按 models[] 保存 Key 后，截图识别必须能读到（原先只读顶层字段）。"""
+    from app.core.config import settings
+    from app.services.providers.vision import DeepSeekVisionProvider
+
+    _admin_llm_config(monkeypatch, {
+        "models": [
+            {
+                "provider": "deepseek",
+                "model": "deepseek-v4-flash",
+                "api_key": "sk-admin",
+                "base_url": "https://api.deepseek.com",
+                "isDefault": True,
+            }
+        ]
+    })
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
+    monkeypatch.delenv("DEEPSEEK_VISION_MODEL", raising=False)
+    monkeypatch.setattr(settings, "DEEPSEEK_API_KEY", "")
+
+    provider = DeepSeekVisionProvider()
+    assert provider.available is True
+    assert provider.api_key == "sk-admin"
+    assert provider.api_root == "https://api.deepseek.com/v1"
+    assert provider.model == "deepseek-flash"
+
+
+def test_vision_provider_missing_key_points_to_admin_config(monkeypatch):
+    from app.core.config import settings
+    from app.services.providers.vision import DeepSeekVisionProvider, VisionProviderError
+
+    _admin_llm_config(monkeypatch, {})
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setattr(settings, "DEEPSEEK_API_KEY", "")
+
+    provider = DeepSeekVisionProvider()
+    with pytest.raises(VisionProviderError) as exc:
+        provider.ocr(b"x", "a.png")
+    assert "管理后台" in str(exc.value)
+    assert "DEEPSEEK_API_KEY" in str(exc.value)

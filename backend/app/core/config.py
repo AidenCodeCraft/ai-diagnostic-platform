@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1/chat/completions"
     DEEPSEEK_MODEL: str = "deepseek-chat"
+    DEEPSEEK_VISION_MODEL: str = "deepseek-flash"  # 截图识别（OCR + 图像理解）模型
 
     # ── Milvus (Vector Database) ────────────────────────────
     MILVUS_HOST: str = "localhost"

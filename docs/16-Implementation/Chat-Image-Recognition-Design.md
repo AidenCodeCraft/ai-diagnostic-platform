@@ -173,3 +173,31 @@ created_at / updated_at
 | `purpose` 必填（`text_recognition` / `rich_layout_recognition`），多传字段返回 400 | 固定 `text_recognition`，只传两个字段 | 保持不变（截图走 text_recognition 已够） |
 
 新增 5 条回归测试覆盖：`/v1` 归一、200+error 抛错、截断页标记、413 等错误码提示、GIF/BMP/TIFF/WAV 判定。
+
+---
+
+## 附：凭据解析（2026-11-27，修复“未配置 DEEPSEEK_API_KEY”）
+
+**现象**：管理后台「模型配置」已填 DeepSeek Key，问答正常，但上传截图报
+「识别失败（可移除后重试）未配置 DEEPSEEK_API_KEY，无法调用 OCR」。
+
+**根因**：后台保存的是多模型结构
+`{"llm": {"models": [{"provider","model","api_key","base_url","isDefault"}]}}`，
+Key 在各模型条目里；问答经 `ProviderRegistry` 按条目显式传 `api_key`，所以正常。
+截图识别的 `DeepSeekVisionProvider` 原先只读顶层 `llm.api_key`（旧版单模型格式才有），
+于是 Key 解析为空，`available` 为 false，请求还没发出就抛错。
+
+**修复**：
+- `providers/deepseek_provider.py` 新增 `resolve_admin_llm_config(preferred_model)`：
+  按「指定模型 → `isDefault` → `provider=="deepseek"` → 列表其余 → 旧版顶层字段」
+  排序，对 `api_key`/`base_url`/`model` **逐字段**取第一个非空且非掩码（不含 `****`）的值。
+- `providers/vision.py` 用它解析凭据；模型名取 `DEEPSEEK_VISION_MODEL`（默认
+  `deepseek-flash`）。优先级：显式参数 → 后台配置 → 环境变量 → 默认值。
+  后台优先于环境变量，因为 `deploy/docker-compose.yml` 里 `DEEPSEEK_BASE_URL`
+  是硬编码的，环境变量优先会盖掉后台自定义网关。
+- 缺 Key 的报错改为直接指向修复入口（管理后台「模型配置」或 `DEEPSEEK_API_KEY`），
+  不再只说环境变量。
+
+**回归测试**（`tests/unit/chat/test_chat_image_service.py`）：
+指定模型命中、回退 `isDefault` 且忽略掩码、旧版单模型格式、
+`DeepSeekVisionProvider` 能从 `models[]` 读到 Key、缺 Key 文案含「管理后台」。

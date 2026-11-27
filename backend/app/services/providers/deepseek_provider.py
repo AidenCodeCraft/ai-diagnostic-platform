@@ -16,7 +16,7 @@ from app.services.providers.base import BaseProvider
 logger = logging.getLogger(__name__)
 
 
-def _load_admin_llm_config() -> Dict[str, str]:
+def _load_admin_llm_config() -> Dict[str, Any]:
     """Read LLM config from the admin panel's system_config.json.
 
     Uses same absolute path as admin API and ProviderRegistry.
@@ -32,6 +32,55 @@ def _load_admin_llm_config() -> Dict[str, str]:
     except (json.JSONDecodeError, OSError):
         pass
     return {}
+
+
+def _is_masked_secret(value: str) -> bool:
+    """后台接口返回的掩码占位（含 ****）不能当作真实密钥使用。"""
+    return "****" in value
+
+
+def resolve_admin_llm_config(preferred_model: str | None = None) -> Dict[str, str]:
+    """把后台配置归一成实际生效的 api_key / base_url / model。
+
+    后台「模型配置」保存的是多模型结构::
+
+        {"llm": {"models": [{"provider", "model", "api_key", "base_url", "isDefault"}]}}
+
+    顶层 ``llm.api_key`` 只存在于旧版单模型结构。截图识别之前只读顶层字段，
+    所以后台明明配好了 Key，VisionProvider 仍报“未配置 DEEPSEEK_API_KEY”。
+
+    取值顺序：指定模型 → ``isDefault`` → 其他 deepseek 模型 → 列表其余项 →
+    旧版顶层字段；每个字段独立回退，避免某个模型只填了 base_url 就丢掉别处的 key。
+    """
+    llm_cfg = _load_admin_llm_config()
+    models = [item for item in (llm_cfg.get("models") or []) if isinstance(item, dict)]
+
+    ordered = []
+    if preferred_model:
+        ordered.extend(item for item in models if str(item.get("model") or "") == preferred_model)
+    ordered.extend(item for item in models if item.get("isDefault"))
+    ordered.extend(
+        item for item in models if str(item.get("provider") or "").lower() == "deepseek"
+    )
+    ordered.extend(models)
+
+    def pick(field: str) -> str:
+        seen: set[int] = set()
+        for item in ordered:
+            if id(item) in seen:
+                continue
+            seen.add(id(item))
+            value = str(item.get(field) or "").strip()
+            if value and not _is_masked_secret(value):
+                return value
+        fallback = str(llm_cfg.get(field) or "").strip()
+        return "" if _is_masked_secret(fallback) else fallback
+
+    return {
+        "api_key": pick("api_key"),
+        "base_url": pick("base_url"),
+        "model": pick("model"),
+    }
 
 
 class DeepSeekProvider(BaseProvider):

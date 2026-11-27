@@ -19,7 +19,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
-from app.services.providers.deepseek_provider import _load_admin_llm_config
+from app.services.providers.deepseek_provider import resolve_admin_llm_config
 
 logger = get_logger(__name__)
 
@@ -41,17 +41,26 @@ class DeepSeekVisionProvider:
         model: Optional[str] = None,
         timeout: float = 90.0,
     ) -> None:
-        file_cfg = _load_admin_llm_config()
+        self.model = (
+            model
+            or os.getenv("DEEPSEEK_VISION_MODEL", "")
+            or str(getattr(settings, "DEEPSEEK_VISION_MODEL", "") or "")
+            or "deepseek-flash"
+        )
+        # 后台「模型配置」保存的是多模型结构（llm.models[]），Key/BaseURL
+        # 在模型条目里而不是顶层。只读顶层字段会导致后台配置后仍报
+        # “未配置 DEEPSEEK_API_KEY”。这里按模型名解析实际生效的凭据。
+        admin_cfg = resolve_admin_llm_config(self.model)
         self.api_key = (
             api_key
+            or admin_cfg.get("api_key")
             or os.getenv("DEEPSEEK_API_KEY", "")
             or str(getattr(settings, "DEEPSEEK_API_KEY", "") or "")
-            or file_cfg.get("api_key", "")
         )
         raw_base = (
             base_url
+            or admin_cfg.get("base_url")
             or os.getenv("DEEPSEEK_BASE_URL", "")
-            or file_cfg.get("base_url")
             or "https://api.deepseek.com/v1/chat/completions"
         )
         # 归一成 "…/v1" 根地址：/v1/chat/completions → /v1；
@@ -61,12 +70,6 @@ class DeepSeekVisionProvider:
         if not root.endswith("/v1"):
             root = f"{root}/v1"
         self.api_root = root
-        self.model = (
-            model
-            or os.getenv("DEEPSEEK_VISION_MODEL", "")
-            or str(getattr(settings, "DEEPSEEK_VISION_MODEL", "") or "")
-            or "deepseek-flash"
-        )
         self.timeout = max(float(timeout), 30.0)
 
     @property
@@ -90,6 +93,15 @@ class DeepSeekVisionProvider:
         detail = f"（{hint}）" if hint else ""
         return VisionProviderError(f"OCR 返回 {status_code}{detail}: {body_text[:300]}")
 
+    @staticmethod
+    def _missing_key_error(capability: str) -> "VisionProviderError":
+        """让报错直接指向可操作的修复入口，而不是只报环境变量缺失。"""
+        return VisionProviderError(
+            f"未配置截图识别所需的 API Key，无法调用{capability}："
+            "请在管理后台「模型配置」中为 DeepSeek 模型填写 API Key"
+            "（问答与截图识别共用），或设置环境变量 DEEPSEEK_API_KEY 后重启后端"
+        )
+
     # ------------------------------------------------------------------
     # OCR
     # ------------------------------------------------------------------
@@ -97,7 +109,7 @@ class DeepSeekVisionProvider:
     def ocr(self, data: bytes, filename: str) -> Dict[str, Any]:
         """识别图片中的文字（原样返回，不做任何清理）。"""
         if not self.available:
-            raise VisionProviderError("未配置 DEEPSEEK_API_KEY，无法调用 OCR")
+            raise self._missing_key_error("OCR")
 
         url = f"{self.api_root}{DEFAULT_OCR_PATH}"
         files = {"file": (filename or "image.png", data)}
@@ -142,7 +154,7 @@ class DeepSeekVisionProvider:
     def describe(self, data: bytes, mime: str, prompt: str) -> Dict[str, Any]:
         """让模型描述图片（用于 OCR 信息不足的场景）。"""
         if not self.available:
-            raise VisionProviderError("未配置 DEEPSEEK_API_KEY，无法调用视觉模型")
+            raise self._missing_key_error("视觉模型")
 
         encoded = base64.b64encode(data).decode("utf-8")
         data_url = f"data:{mime or 'image/png'};base64,{encoded}"
