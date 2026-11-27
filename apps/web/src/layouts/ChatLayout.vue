@@ -1160,6 +1160,7 @@ async function streamChat(text: string, chatId: number, reuseMsg?: any, imageIds
       if (replyMsg.content.includes('回答已达到模型输出长度上限')) return
       replyMsg.content += '\n\n> ⚠️ 回答已达到模型输出长度上限，内容可能不完整。'
     },
+    imageIds,
   )
 
   activeStreams.delete(chatId)

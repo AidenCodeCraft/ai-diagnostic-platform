@@ -150,8 +150,11 @@ def _bind_images(db: Session, body: Dict[str, Any], session_id: int, user_id: in
         ChatImageService(db).bind_to_session(
             [int(value) for value in image_ids], session_id, user_id,
         )
-    except Exception:  # noqa: BLE001 - 绑定失败不影响提问
-        logger.debug("[chat] bind image ids failed", exc_info=True)
+    except Exception:  # noqa: BLE001 - 绑定失败不影响提问，但必须可观测
+        logger.warning(
+            "[chat] bind image ids failed: session=%s ids=%s", session_id, image_ids,
+            exc_info=True,
+        )
 
 
 # AI Chat

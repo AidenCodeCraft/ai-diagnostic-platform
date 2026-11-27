@@ -154,7 +154,9 @@ class DiagnosticChatAgent:
         self.log_evidence: Optional[Dict[str, Any]] = None
         self.log_evidence_summary: str = ""
         # 用户截图的识别文本（现场证据，与日志证据并列注入）
-        self.image_evidence: List[Dict[str, Any]] = []
+        self.image_evidence: List[Dict[str, Any]] = list(
+            (log_context or {}).get("image_evidence") or []
+        )
 
     # ==================================================================
     # Pipeline Entry
@@ -585,14 +587,19 @@ class DiagnosticChatAgent:
         if evidence_text:
             lines.append(evidence_text)
 
-        # 对话界面截图：识别文本作为现场证据注入（不参与知识检索，只是上下文）
-        image_text = self._build_image_evidence_text()
-        if image_text:
-            lines.append(image_text)
-            # 只有日志证据、没有知识库命中时，也要基于证据作答，而不是拒答
-            return "\n\n".join(lines), self.references
+        # 对话界面截图：只加载为现场证据，不混入知识库检索结果。
+        # 混入会让严格 RAG 提示词把截图里的实际值（如 2.6.11.2）误当成知识库示例。
+        self._load_image_evidence()
 
         return "\n\n".join(lines) if lines else "", self.references
+
+    def _load_image_evidence(self) -> None:
+        """只登记会话内截图证据，不拼进知识库上下文。
+
+        严格 RAG 的「知识库检索结果」必须是纯知识库内容；截图来自用户现场，
+        混在一起会让模型把截图里的实际值当成知识库示例，反之亦然。
+        """
+        self.image_evidence = list((self.log_context or {}).get("image_evidence") or [])
 
     def _build_image_evidence_text(self) -> str:
         """把会话内截图的识别文本拼成证据块。
@@ -600,7 +607,7 @@ class DiagnosticChatAgent:
         为什么单列一块而不是塞进日志证据：截图来自用户，日志来自设备，
         两者可信度与用途不同；回答引用时要能区分"用户说"与"设备记录"。
         """
-        evidence = (self.log_context or {}).get("image_evidence") or []
+        evidence = self.image_evidence or (self.log_context or {}).get("image_evidence") or []
         if not evidence:
             return ""
         self.image_evidence = list(evidence)
@@ -638,7 +645,13 @@ class DiagnosticChatAgent:
             return ""
 
     def _maybe_ask_ambiguity(self, query: str, existing_messages: List[Dict[str, str]]):
-        """多个章节得分接近时，先让用户确认要查哪一条，再按该条定位。"""
+        """多个章节得分接近时，先让用户确认要查哪一条，再按该条定位。
+
+        例外：用户已附截图时不再追问知识库条目。截图本身就是现场证据，
+        用户问的是「这个日志里是多少」，把知识库条目列表丢回去只会打断回答。
+        """
+        if self.image_evidence:
+            return None
         try:
             from app.services.chat.clarification import (
                 ClarificationQuestion, build_clarification_reply,
@@ -970,6 +983,17 @@ class DiagnosticChatAgent:
         if analysis_context:
             system_prompt += f"\n\n---\n## 补充：日志分析结果\n{analysis_context}"
 
+        # 用户截图是现场证据，优先级高于知识库里的示例值
+        if self.image_evidence:
+            system_prompt += (
+                "\n\n---\n## 现场证据优先（本次提问附带用户截图）\n"
+                "本节是对铁则 1 的补充：截图识别文本是用户现场的真实数据，与知识库同为事实来源。\n"
+                "1. 截图与知识库冲突时，以截图为准。\n"
+                "2. 知识库中的版本号/参数只是格式示例，用来说明「怎么找」，不得直接当作本次日志的实际值。\n"
+                "3. 用户问「是多少/是什么」时，必须先从截图文本中取值并原样引用；截图确实没有时，再说明知识库里的查找方法。\n"
+                "4. 引用截图证据时写「（截图 #ID）」，不要用 ref:// 知识库链接。\n"
+            )
+
         # 复合提问：显式列出子问题，要求逐条作答（禁止只答第一条）
         sub_units = split_query_units(cleaned_input)
         sub_question_block = ""
@@ -988,6 +1012,15 @@ class DiagnosticChatAgent:
         image_context = self._build_image_context()
         if image_context:
             user_content += f"\n\n{image_context}"
+
+        image_evidence = self._build_image_evidence_text()
+        if image_evidence:
+            user_content += (
+                "\n\n## 用户截图（现场证据，优先于知识库示例）\n"
+                + image_evidence
+                + "\n\n> 截图中的实际值（版本号/关键字/状态）优先于知识库里的示例值；"
+                "知识库示例只用于说明格式与查找方法。"
+            )
 
         return [
             {"role": "system", "content": system_prompt},
@@ -1066,6 +1099,20 @@ class DiagnosticChatAgent:
             system_parts.append(self.GUIDING_HINT)
 
         structured_user = self._structure_user_message(cleaned_input, analysis)
+
+        # 截图是现场证据：即使知识库没有对应条目，也要先按截图里的实际值回答
+        image_evidence = self._build_image_evidence_text()
+        if image_evidence:
+            system_parts.append(
+                "\n## 现场证据（用户截图）\n"
+                "用户本次附带了截图，截图识别文本是现场真实数据。"
+                "用户询问截图中的具体数值/状态时，必须优先依据截图作答，"
+                "不得因为知识库没有同款示例就拒答；只有截图也未包含所需信息时，才按知识库缺失处理。"
+            )
+            structured_user += (
+                "\n\n## 用户截图（现场证据）\n" + image_evidence
+                + "\n\n> 截图中的实际值优先于任何示例值。"
+            )
 
         enriched: List[Dict[str, str]] = [
             {"role": "system", "content": "\n".join(system_parts)},
