@@ -143,6 +143,18 @@ def _bind_images(db: Session, body: Dict[str, Any], session_id: int, user_id: in
     """把本次提问附带的截图绑定到会话（上传时可能还没有会话）。"""
     image_ids = body.get("image_ids") or []
     if not image_ids:
+        # 兜底：前端先 saveMessage 再流式。若客户端漏传 image_ids，
+        # 从本会话最后一条用户消息里取，避免截图证据悄悄丢失（2026-11-27）。
+        from app.models import ChatMessage
+
+        last_user_message = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == session_id, ChatMessage.role == "user")
+            .order_by(ChatMessage.id.desc())
+            .first()
+        )
+        image_ids = list(getattr(last_user_message, "image_ids", None) or [])
+    if not image_ids:
         return
     try:
         from app.services.vision.image_service import ChatImageService
