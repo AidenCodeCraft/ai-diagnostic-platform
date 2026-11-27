@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import ChatSession, ChatMessage
+from app.models import ChatSession, ChatMessage, ChatImageUpload, RetrievalTrace
 from app.services.chat.diagnostic_chat_agent import DiagnosticChatAgent
 from app.services.chat.context_manager import ContextManager
 from app.services.chat.title_generator import should_generate_title
@@ -80,7 +80,14 @@ class ChatService:
 
     def delete_session(self, session_id: int, user_id: Optional[int] = None) -> None:
         s = self.get_session(session_id, user_id)
+        # 历史部署的外键没有 ON DELETE 规则：先清理引用，否则删除会话会 500。
+        self.db.query(RetrievalTrace).filter(
+            RetrievalTrace.session_id == session_id,
+        ).delete()
         self.db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
+        self.db.query(ChatImageUpload).filter(
+            ChatImageUpload.session_id == session_id,
+        ).delete()
         self.db.delete(s)
         self.db.commit()
 

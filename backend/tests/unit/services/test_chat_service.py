@@ -35,6 +35,31 @@ class TestChatService:
         assert result["deleted"] is True
         assert result["id"] == 42
 
+    def test_delete_session_clears_dependent_rows(self, db_session):
+        """删除会话要先清理消息/检索轨迹，否则线上外键（无 ON DELETE）会 500。"""
+        from app.models import ChatMessage, ChatSession, RetrievalTrace
+        from app.services.chat.chat_service import ChatService
+
+        session = ChatSession(title="t", user_id=1)
+        db_session.add(session)
+        db_session.commit()
+        db_session.refresh(session)
+
+        msg = ChatMessage(session_id=session.id, role="user", content="hi")
+        db_session.add(msg)
+        db_session.commit()
+        db_session.refresh(msg)
+        db_session.add(RetrievalTrace(
+            session_id=session.id, message_id=msg.id, question="hi",
+        ))
+        db_session.commit()
+
+        ChatService(db_session).delete_session(session.id, user_id=1)
+
+        assert db_session.query(ChatMessage).filter_by(session_id=session.id).count() == 0
+        assert db_session.query(RetrievalTrace).filter_by(session_id=session.id).count() == 0
+        assert db_session.query(ChatSession).filter_by(id=session.id).count() == 0
+
     def test_get_nonexistent_session_returns_404(self, db_session):
         """获取不存在的会话应抛出 ValueError（API 层映射为 404「会话不存在」）。"""
         from app.services.chat.chat_service import ChatService
