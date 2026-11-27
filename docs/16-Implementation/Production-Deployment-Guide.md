@@ -110,6 +110,31 @@ docker compose exec backend python -m scripts.check_knowledge_index
 docker compose logs backend | grep -i "seed complete"
 ```
 
+### 3.1 本地 BGE（CPU 版，本机已启用）
+
+生产镜像默认不带 torch；启用本地 `BAAI/bge-large-zh-v1.5`（1024 维）用 overlay 即可，文档不出内网：
+
+```bash
+# 0) requirements-ml.txt 已把 torch 固定在 CPU wheel（约 190MB），GPU 机器自行换 CUDA 版本
+# 1) 构建 ML 镜像（backend 与 worker 都要）
+export HF_CACHE_DIR=/path/to/huggingface          # Windows: C:/Users/<you>/.cache/huggingface
+docker buildx build --load --provenance=false -f backend/Dockerfile \
+  -t deploy-backend:latest --build-arg INSTALL_ML=true .
+BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -f deploy/docker-compose.yml \
+  -f deploy/docker-compose.bge.yml build worker
+# 2) 启动（必须 --force-recreate，否则容器仍是 base 镜像的 EMBEDDING_PROVIDER=auto）
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.bge.yml \
+  up -d --force-recreate backend worker
+# 3) 回填与校验
+docker compose exec backend python -m scripts.reindex_knowledge
+docker compose exec backend python -m scripts.reindex_knowledge --verify
+curl -s http://localhost:8000/api/v1/vector/health
+# 期望：embedding_provider=BGEEmbedder、embedding_dimension=1024、is_semantic=true、milvus_available=true
+```
+
+实测（2026-11-27，CPU-only）：镜像 4.07GB；`embed_batch` 约 55ms/条；136 个知识块回填约 1 分钟；语义改写问法（如「设备日志里哪个字段能看出固件版本号」）可稳定召回《设备端 · 日志搜索版本号》。
+两个已知坑：①`docker compose build` 可能因 attestation 不更新本地 tag，表现为容器里 `import torch` 失败，用上面的 `buildx --load` 或 `BUILDX_NO_DEFAULT_ATTESTATIONS=1`；②`RERANKER_ENABLED` 在 overlay 中默认 `false`（黄金集实测开启会掉点），需要对比时显式设 `true`。
+
 ## 4. Worker 部署要点
 
 worker 跑预处理链（`ingest` 队列）与向量化（`embed` 队列）：
