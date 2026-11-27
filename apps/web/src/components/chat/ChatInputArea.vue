@@ -43,7 +43,7 @@
 
     <!-- 输入框 -->
     <div class="input-box" :class="{ 'has-uploads': files.length > 0 || images.length > 0 }">
-      <textarea ref="textareaRef" v-model="model" placeholder="输入问题...（可直接粘贴截图）" class="msg-textarea" :rows="1"
+      <textarea ref="textareaRef" v-model="model" placeholder="输入问题..." class="msg-textarea" :rows="1"
         @keydown.enter.exact.prevent="$emit('send')" @input="autoResize" @paste="onPaste"></textarea>
       <div class="input-actions">
         <div class="actions-left">
@@ -294,8 +294,13 @@ function statusText(fa: FileAttachment): string {
   color: var(--chat-upload-icon, #6b7280);
 }
 
-.image-status.done { color: #16a34a; }
-.image-status.error { color: #dc2626; }
+.image-status.done {
+  color: #16a34a;
+}
+
+.image-status.error {
+  color: #dc2626;
+}
 
 .upload-area {
   display: flex;
@@ -551,6 +556,7 @@ function statusText(fa: FileAttachment): string {
   border: 1px solid #fca5a5;
   background: #fef2f2;
 }
+
 .stop-btn:hover {
   background: #fee2e2;
 }
