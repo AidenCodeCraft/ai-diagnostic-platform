@@ -14,9 +14,7 @@
           style="font-size:20px;font-weight:600;color:var(--kb-text)">
           <a @click="navigateToFolder(i)" style="cursor:pointer;color:var(--kb-link);text-decoration:none">{{ f.title }}</a>
         </el-breadcrumb-item>
-        <!-- 当前文件 -->
-        <el-breadcrumb-item v-if="viewState === 'preview'" style="font-size:20px;font-weight:600;color:var(--kb-text)">{{
-          form.title }}</el-breadcrumb-item>
+        <!-- 当前文件（预览页不显示标题，避免与正文 H1 重复） -->
         <el-breadcrumb-item v-if="viewState === 'edit'" style="font-size:20px;font-weight:600;color:var(--kb-text)">{{
           editingId ? form.title : createLabel }}</el-breadcrumb-item>
       </el-breadcrumb>
@@ -226,7 +224,7 @@
         <div class="editor-pane" @contextmenu="onEditorContextMenu">
           <v-md-editor :key="editorKey" ref="editorRef" v-model="form.content" height="100%"
             left-toolbar="undo redo | bold italic strikethrough | h2 h3 h4 | ul ol | link image | code quote | table hr | fullscreen"
-            right-toolbar="kb-quality preview toc | sync-scroll fullscreen" :toolbar="editorToolbar"
+            right-toolbar="preview kb-quality toc | sync-scroll fullscreen" :toolbar="editorToolbar"
             :disabled-menus="[]" @upload-image="handleUploadImage" />
         </div>
       </div>
@@ -471,7 +469,7 @@ const createLabel = computed(() => {
   return labels[form.value.doc_type] || '新建文件'
 })
 
-// ── 提交后检查（质量分/可发布状态显示在编辑器工具栏“预览”开关左侧） / AI 润色 / 模板说明 ──
+// ── 提交后检查（质量分/可发布状态显示在编辑器工具栏“预览”开关右侧） / AI 润色 / 模板说明 ──
 const previewResult = ref<any>(null)
 const previewMeta = ref<any>(null)
 
@@ -489,7 +487,7 @@ const previewQualityClass = computed(() => {
   return r.status_hint === 'active' ? 'kb-quality-chip kb-quality-ok' : 'kb-quality-chip kb-quality-draft'
 })
 
-/** v-md-editor 自定义工具栏项：质量分/可发布状态，显示在“预览”开关左侧（预览与目录导航按钮相邻） */
+/** v-md-editor 自定义工具栏项：质量分/可发布状态，显示在“预览”开关右侧（预览与目录导航按钮相邻） */
 const editorToolbar = {
   'kb-quality': {
     name: 'kb-quality',
@@ -1815,7 +1813,7 @@ function toggleSort() {
 .toc-float {
   position: absolute;
   /* 与 preview-body 右侧滚动条保持间距，避免遮挡滚动条影响操作 */
-  right: 30px;
+  right: 40px;
   top: 50%;
   transform: translateY(-50%);
   z-index: 10;
