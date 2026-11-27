@@ -20,6 +20,9 @@ dist/
 .env
 .env.*
 
+# 本机 Docker Compose 覆盖（本地 BGE 等，不入库）
+deploy/docker-compose.override.yml
+
 # Logs
 *.log
 logs/

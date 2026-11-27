@@ -135,6 +135,8 @@ curl -s http://localhost:8000/api/v1/vector/health
 实测（2026-11-27，CPU-only）：镜像 4.07GB；`embed_batch` 约 55ms/条；136 个知识块回填约 1 分钟；语义改写问法（如「设备日志里哪个字段能看出固件版本号」）可稳定召回《设备端 · 日志搜索版本号》。
 两个已知坑：①`docker compose build` 可能因 attestation 不更新本地 tag，表现为容器里 `import torch` 失败，用上面的 `buildx --load` 或 `BUILDX_NO_DEFAULT_ATTESTATIONS=1`；②`RERANKER_ENABLED` 在 overlay 中默认 `false`（黄金集实测开启会掉点），需要对比时显式设 `true`。
 
+**本机一键启动（可选）**：在 `deploy/` 下放两个本地文件（均已被 `.gitignore` 忽略）——`.env` 写 `HF_CACHE_DIR=...`，`docker-compose.override.yml` 写 `include: [docker-compose.bge.yml]` 并给 backend/worker 加 `build.provenance: false`。之后在 `deploy/` 目录直接执行 `docker compose up -d --build` 就会自动带上本地 BGE，不用每次加 `-f`。注意必须在 `deploy/` 目录执行；从仓库根目录用 `-f deploy/docker-compose.yml` 时 Compose 不会自动加载 override，会退回 `EMBEDDING_PROVIDER=auto` 的无 ML 镜像。
+
 ## 4. Worker 部署要点
 
 worker 跑预处理链（`ingest` 队列）与向量化（`embed` 队列）：
