@@ -16,6 +16,24 @@ export function formatDateTime(ts: string | null | undefined): string {
   }
 }
 
+export function formatKnowledgeDateTime(ts: string | null | undefined): string {
+  if (!ts) return ''
+
+  const timestamp = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(ts) ? ts : `${ts}Z`
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return ts
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
 export function analysisStatusLabel(status: string): string {
   const map: Record<string, string> = {
     pending: '排队中',

@@ -166,12 +166,12 @@ v1.0.0 — 企业版
 
 ### Commit 015 — 生产部署
 
-- Docker Compose 四服务编排（PostgreSQL + Redis + Backend + Frontend）
+- Docker Compose 多服务编排（PostgreSQL + Redis + Milvus + MinIO + Backend + Worker + Frontend + Prometheus + Grafana；Ollama 为可选 profile）
 - 一键启动：`docker compose up -d --build` → `http://localhost`
 - 多阶段 Docker 构建
 - Nginx 反向代理（SPA 路由 + /api/ 转发到后端）
 - 所有服务健康检查
-- 环境变量配置模板（.env.example）
+- 环境变量配置模板（`backend/.env.example`）
 - Alembic 启动时自动执行数据库迁移
 - 国内镜像加速（pip 清华源 + npm 淘宝源）
 
@@ -196,10 +196,10 @@ v1.0.0 — 企业版
 
 ## 测试覆盖
 
-**517 个测试已收集，498 passed / 19 skipped（2026-11-13 默认全量回归）**
+**后端 948 passed / 20 skipped（2026-11-27 全量回归）；前端 Vitest 80 passed / 17 files**
 
-> 真实环境套件（RUN_REAL_MILVUS/RUN_REAL_MINIO/RUN_REAL_BGE/RUN_REAL_PDF_API）：16 passed / 1 skipped。
-> 前端 Vitest：9 passed；`vue-tsc` 与 `npm run build` 通过。
+> 后端命令：`cd backend && ..\.venv\Scripts\python.exe -m pytest -q`（pytest==8.3.3）。
+> 真实环境套件（RUN_REAL_MILVUS/RUN_REAL_MINIO/RUN_REAL_BGE/RUN_REAL_PDF_API）需外部服务，单独执行。
 > 下方分模块数字为早期统计，最新以全量回归结果为准。
 
 | 模块 | 测试数 |
@@ -216,7 +216,7 @@ v1.0.0 — 企业版
 | 健康检查 & 配置 | 8 |
 | 集成测试 | 7 |
 | 单元测试（服务层） | ~150 |
-| **总计** | **417** |
+| **总计（早期统计）** | **417** |
 
 ---
 
@@ -278,24 +278,26 @@ v1.0.0 — 企业版
 apps/web/         — Vue3 前端应用（对话式界面 + 侧栏）
   src/
     layouts/      — ChatLayout（核心布局 + 设置弹窗）
-    views/        — ChatView / KnowledgeBase / PluginManager / ReportList
-    api/          — chat / knowledge / reports
-    router/       — 4 条路由
+    views/        — ChatView / KnowledgeBase / ReportList / admin/*（无插件页面）
+    api/          — chat / knowledge / reports / logs / auth 等
+    router/       — 约 14 条具名路由（/login、/chat、/knowledge、/reports、/admin/*）
 
 backend/          — FastAPI 后端
   app/
-    api/          — REST API（13 个模块）
+    api/          — REST API（auth/admin/chat/diagnostics/knowledge/quality/system 七大域，26 个 router）
     agents/       — Agent 框架（core / planner / tools）
-    models/       — SQLAlchemy 模型（7 张表）
+    models/       — SQLAlchemy 模型（约 26 个，对应 29 张业务表）
     schemas/      — Pydantic Schema
-    services/     — 业务逻辑（14 个服务）
-      parser/     — 可插拔解析引擎
+    services/     — 业务逻辑（auth/chat/diagnostics/knowledge/rag/vision 等；无插件机制）
+      parser/     — 解析器注册表（扩展点，非插件）
       providers/  — LLM Provider（DeepSeek / Mock / OpenAI Compatible）
-      prompts/    — Prompt 模板
+      prompts/    — 版本化 Prompt 模板
     database/     — 数据库会话管理
-  migrations/     — Alembic 迁移（11 个版本）
+  migrations/     — Alembic 迁移（13 个版本）
 
-deploy/           — Docker Compose + 部署文档
+deploy/           — Docker Compose（多服务）+ K8s + 监控 + 部署文档
+apps/mobile/      — 移动端占位（规划 Flutter，尚未实现）
+apps/desktop/     — 桌面端占位（规划 Tauri，尚未实现）
 ```
 
 ## 一键启动
@@ -309,31 +311,32 @@ docker compose up -d --build
 
 ---
 
-## 阶段三：核心对话功能完善 🚧
+## 阶段三：核心对话功能完善 ✅（已完成）
 
 > **归属**: v1.0 企业版  
 > **优先级**: 🔴 最高 — 打通平台核心价值链路  
 > **目标**: 实现真正的多轮 AI 诊断对话，v1.0 所有功能可正常使用  
+> **状态**: 已完成；下方「现状诊断」与任务清单保留为当时的历史记录。
 
-### 现状诊断
+### 现状诊断（当时）
 
 ```
 ┌─────────────────────────────────────────┐
 │  前端 ChatLayout    ← ChatGPT 风格 UI    │
 │  ✅ 侧栏 / 气泡 / 文件上传               │
-│  ❌ 消息存 localStorage，不调后端 chat    │
+│  ✅ 消息调用后端 chat API 并持久化         │
 └──────────────┬──────────────────────────┘
-               │ 断开的
+               │ 已连通
 ┌──────────────┴──────────────────────────┐
 │  后端 ChatSession CRUD  ← 完整持久化     │
 │  ✅ 会话/消息/级联删除/分页               │
-│  ❌ 没有 sendMessage → LLM 的方法        │
+│  ✅ sendMessage → LLM → SSE/非流式       │
 └──────────────┬──────────────────────────┘
-               │ 断开的
+               │ 已连通
 ┌──────────────┴──────────────────────────┐
 │  Agent + LLM Provider  ← 完整引擎        │
 │  ✅ BaseAgent / DeepSeek / OpenAI兼容    │
-│  ❌ 只支持一次性诊断，不支持 chat()       │
+│  ✅ 支持多轮 chat() 与 Function Calling   │
 └─────────────────────────────────────────┘
 ```
 
@@ -397,10 +400,10 @@ docker compose up -d --build
 | 🔴 P0 | 管理后台 | ✅ 完成 |
 | 🔴 P0 | 知识库管理 | ✅ 完成 |
 | 🟡 P1 | Bug 案例系统 | ✅ 完成 |
-| 🔴 P0 | 核心对话功能（阶段三） | 🚧 进行中 |
+| 🔴 P0 | 核心对话功能（阶段三） | ✅ 完成 |
 | 🟢 P2 | 开放 API | ✅ 完成 |
 
-### 阶段三 P0：基础多轮对话 — 🚧 进行中
+### 阶段三 P0：基础多轮对话 — ✅ 完成
 
 打通对话闭环，v1.0 所有功能正常可用。
 
@@ -412,7 +415,7 @@ docker compose up -d --build
 | `chat.ts` 新增 API 方法 | 前端 API | `createSession()` / `sendMessage()` / `getMessages()` |
 | `ChatLayout.sendMessage()` 改造 | 前端 UI | 从 localStorage 改为调用后端 chat API，服务端持久化 |
 
-### 阶段三 P1：流式输出 — ⏳
+### 阶段三 P1：流式输出 — ✅ 完成
 
 | 任务 | 说明 |
 |------|------|
@@ -420,7 +423,7 @@ docker compose up -d --build
 | `POST /chat-sessions/{id}/stream` | SSE 端点 |
 | 前端流式渲染 | 逐字打字效果 |
 
-### 阶段三 P2：诊断聊天智能化 — ⏳
+### 阶段三 P2：诊断聊天智能化 — ✅ 完成
 
 | 任务 | 说明 |
 |------|------|

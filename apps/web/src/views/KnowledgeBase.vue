@@ -387,6 +387,7 @@
 import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch, defineComponent, h } from 'vue'
 import { Search, UploadFilled } from '@element-plus/icons-vue'
 import { knowledgeApi, type KnowledgeTemplateInfo } from '@/api/knowledge'
+import { formatKnowledgeDateTime } from '@/utils/format'
 import { useUserStore } from '@/stores/user'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import VMdEditor from '@kangc/v-md-editor'
@@ -925,8 +926,7 @@ const MAX_PATH_LENGTH = 200
 const folderDepth = ref(0)
 
 // ============================================================
-const _kTimeFmt = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-function formatTime(ts: string) { if (!ts) return ''; try { return _kTimeFmt.format(new Date(ts)) } catch { return ts } }
+function formatTime(ts: string) { return formatKnowledgeDateTime(ts) }
 function formatSize(row: any) { if (row.doc_type === 'folder') return '—'; if (!row.content) return '—'; const bytes = new Blob([row.content]).size; return bytes < 1024 ? bytes + ' B' : (bytes / 1024).toFixed(1) + ' KB' }
 function typeLabel(docType: string) { const map: Record<string, string> = { note: '笔记', folder: '文件夹', manual: '手册', faq: 'FAQ', case: '现场问题示例', code_logic: '代码逻辑', knowledge: '基础知识', bug_report: 'Bug', datasheet: '数据手册' }; return map[docType] || docType || '—' }
 

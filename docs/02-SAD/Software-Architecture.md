@@ -1,5 +1,7 @@
 # Software Architecture Document
 
+> **现状提示**：本文含早期设计内容。插件机制已移除，桌面（Tauri）/移动（Flutter）仅为规划；向量库当前为 `knowledge_chunks_v3`（1024 维、BGE-large）。当前实现以根 `README.md`、`docs/16-Implementation/` 与代码/配置为准。
+
 # AI Diagnostic Platform
 
 Version: 1.0

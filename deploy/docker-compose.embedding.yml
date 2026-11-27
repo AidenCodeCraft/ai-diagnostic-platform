@@ -4,7 +4,7 @@
 #
 # 适用场景
 #   - 希望 backend / worker 镜像保持精简（不装 torch + sentence-transformers），
-#     但需要「真实语义嵌入」（BAAI/bge-small-zh-v1.5，512 维）；
+#     但需要「真实语义嵌入」（BAAI/bge-large-zh-v1.5，1024 维）；
 #   - 想把 embedding 作为独立可扩缩容/可独立升级模型的服务运行；
 #   - 离线部署：只读挂载宿主机已下载好的 HuggingFace 模型缓存，完全不联网。
 #
@@ -14,12 +14,12 @@
 #   两者【不要同时叠加】。
 #
 # 前置条件（重要）
-#   1) 宿主机已缓存 BGE 模型到 HF 缓存根目录（其下须有 hub/models--BAAI--bge-small-zh-v1.5）：
+#   1) 宿主机已缓存 BGE 模型到 HF 缓存根目录（其下须有 hub/models--BAAI--bge-large-zh-v1.5）：
 #        # Windows PowerShell
 #        $env:HF_ENDPOINT = 'https://hf-mirror.com'
-#        & ..\.venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; print(snapshot_download('BAAI/bge-small-zh-v1.5'))"
+#        & ..\.venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; print(snapshot_download('BAAI/bge-large-zh-v1.5'))"
 #        # Linux/macOS
-#        HF_ENDPOINT=https://hf-mirror.com python -c "from huggingface_hub import snapshot_download; print(snapshot_download('BAAI/bge-small-zh-v1.5'))"
+#        HF_ENDPOINT=https://hf-mirror.com python -c "from huggingface_hub import snapshot_download; print(snapshot_download('BAAI/bge-large-zh-v1.5'))"
 #   2) HF_CACHE_DIR 必须指向「缓存根目录」（不是 hub 子目录）：
 #        Windows PowerShell : $env:HF_CACHE_DIR = "$env:USERPROFILE\.cache\huggingface"
 #        Linux/macOS        : export HF_CACHE_DIR="$HOME/.cache/huggingface"
@@ -57,15 +57,15 @@
 #   1) 服务端冒烟（绕过后端，直接打 TEI）：
 #        curl -s -X POST http://localhost:8080/v1/embeddings \
 #             -H "Content-Type: application/json" \
-#             -d '{"model":"BAAI/bge-small-zh-v1.5","input":["USB 设备超时无响应"]}'
-#      期望：data[0].embedding 长度 512 且非全零；
+#             -d '{"model":"BAAI/bge-large-zh-v1.5","input":["USB 设备超时无响应"]}'
+#      期望：data[0].embedding 长度 1024 且非全零；
 #   2) 后端 provider：
 #        curl -s http://localhost:8000/api/v1/vector/health
 #      期望 embedding_provider = APIEmbedder（不是 HashingEmbedder/BGEEmbedder）；
 #   3) 后端嵌入接口：
 #        curl -s -X POST http://localhost:8000/api/v1/vector/embed \
 #             -H "Content-Type: application/json" -d '{"text":"USB 设备超时无响应"}'
-#      期望 dimension=512；
+#      期望 dimension=1024；
 #   4) 日志：
 #        docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.embedding.yml logs backend | grep -E "API embedder|hash"
 #      出现 "[Embedding] Using API embedder" 即成功；出现「使用哈希嵌入兜底」说明不可用（多为 api_key 为空 / endpoint 写错）。
@@ -101,7 +101,7 @@ services:
     # BGE 系列使用 CLS pooling（与 sentence-transformers 中的 Pooling 配置一致）
     command:
       - "--model-id"
-      - "BAAI/bge-small-zh-v1.5"
+      - "BAAI/bge-large-zh-v1.5"
       - "--pooling"
       - "cls"
     ports:
@@ -132,10 +132,10 @@ services:
       EMBEDDING_API_URL: "http://embedding:80/v1/embeddings"
       # 必须非空：health_check() 要求 api_url 与 api_key 同时存在
       EMBEDDING_API_KEY: "${EMBEDDING_API_KEY:-dummy}"
-      EMBEDDING_API_MODEL: "BAAI/bge-small-zh-v1.5"
-      # 维度必须与模型 / collection 一致（bge-small-zh-v1.5 = 512）
-      EMBEDDING_DIM: "${MILVUS_DIM:-512}"
-      MILVUS_DIM: "${MILVUS_DIM:-512}"
+      EMBEDDING_API_MODEL: "BAAI/bge-large-zh-v1.5"
+      # 维度必须与模型 / collection 一致（bge-large-zh-v1.5 = 1024）
+      EMBEDDING_DIM: "${MILVUS_DIM:-1024}"
+      MILVUS_DIM: "${MILVUS_DIM:-1024}"
       # 可选：让 embedding 不可用时硬失败，而不是静默回退 hash（便于验收）
       # EMBEDDING_HASH_FALLBACK: "false"
     depends_on:
@@ -150,9 +150,9 @@ services:
       EMBEDDING_PROVIDER: api
       EMBEDDING_API_URL: "http://embedding:80/v1/embeddings"
       EMBEDDING_API_KEY: "${EMBEDDING_API_KEY:-dummy}"
-      EMBEDDING_API_MODEL: "BAAI/bge-small-zh-v1.5"
-      EMBEDDING_DIM: "${MILVUS_DIM:-512}"
-      MILVUS_DIM: "${MILVUS_DIM:-512}"
+      EMBEDDING_API_MODEL: "BAAI/bge-large-zh-v1.5"
+      EMBEDDING_DIM: "${MILVUS_DIM:-1024}"
+      MILVUS_DIM: "${MILVUS_DIM:-1024}"
     depends_on:
       embedding:
         condition: service_started

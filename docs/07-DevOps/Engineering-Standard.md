@@ -1,5 +1,7 @@
 # Engineering Standard
 
+> **现状提示**：本文中的插件开发者、Flutter 规范与 `mobile/ desktop/ plugins/` 目录属于早期规划；当前仓库无插件机制，移动端/桌面端仅为占位目录。
+
 AI Diagnostic Platform
 
 Version: 1.0

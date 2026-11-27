@@ -5,6 +5,7 @@ import {
   analysisStatusType,
   formatBytes,
   formatDateTime,
+  formatKnowledgeDateTime,
 } from '@/utils/format'
 import { anchorCandidate, normalizeAnchorLine } from '@/utils/markdownLine'
 
@@ -18,6 +19,13 @@ describe('format utils', () => {
 
   it('formats empty datetime', () => {
     expect(formatDateTime('')).toBe('')
+  })
+
+  it('interprets timezone-naive knowledge timestamps as UTC', () => {
+    const naiveTimestamp = '2026-01-01T00:00:00'
+
+    expect(formatKnowledgeDateTime(naiveTimestamp)).toBe(formatKnowledgeDateTime(`${naiveTimestamp}Z`))
+    expect(formatKnowledgeDateTime('')).toBe('')
   })
 
   it('maps analysis status to label and tag type', () => {

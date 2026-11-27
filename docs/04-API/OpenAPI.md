@@ -1,5 +1,7 @@
 # OpenAPI Specification
 
+> **现状提示**：本文含早期接口设计。WebSocket `/api/v1/ws/analyze/{task_id}` 尚未实现（分析采用轮询），文中部分 CLI 示例与当前路由不一致。实际端点以 `/api/v1` 路由代码与根 `README.md` 为准。
+
 ## AI Diagnostic Platform
 
 Version: 1.0

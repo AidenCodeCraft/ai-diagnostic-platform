@@ -1,5 +1,7 @@
 # Open Source Governance Specification
 
+> **现状提示**：本文中的插件 SDK / 插件市场为早期规划，插件系统已按产品决策移除；新增日志解析器请扩展 `backend/app/services/parser/`。
+
 AI Diagnostic Platform
 
 Version: 1.0

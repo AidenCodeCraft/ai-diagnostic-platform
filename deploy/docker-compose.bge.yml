@@ -15,7 +15,7 @@
 #        & ..\.venv\Scripts\python.exe -c "from huggingface_hub import snapshot_download; print(snapshot_download('BAAI/bge-large-zh-v1.5'))"
 #        # Linux/macOS
 #        HF_ENDPOINT=https://hf-mirror.com python -c "from huggingface_hub import snapshot_download; print(snapshot_download('BAAI/bge-large-zh-v1.5'))"
-#      缓存根目录下应能看到：models--BAAI--bge-small-zh-v1.5/snapshots/<commit>/
+#      缓存根目录下应能看到：models--BAAI--bge-large-zh-v1.5/snapshots/<commit>/
 #      （默认路径：Windows %USERPROFILE%\.cache\huggingface；Linux ~/.cache/huggingface）
 #   2) HF_CACHE_DIR 必须指向「缓存根目录」（即包含 models--BAAI--... 的目录）：
 #        Windows PowerShell : $env:HF_CACHE_DIR = "$env:USERPROFILE\.cache\huggingface"
@@ -42,8 +42,8 @@
 #   - backend / worker：build.args.INSTALL_ML=true（基础 compose 默认 false，
 #     由 backend/Dockerfile 的 ARG INSTALL_ML 决定是否 pip install requirements-ml.txt）；
 #   - backend / worker：EMBEDDING_PROVIDER=local（强制本地 BGE，不走 api/auto 分支）；
-#   - backend / worker：EMBEDDING_LOAD_TIMEOUT=120（默认 30s 对 CPU 冷加载偏紧，
-#     超时会静默回退 hash 嵌入）；
+#   - backend / worker：EMBEDDING_LOAD_TIMEOUT=180（默认 30s 对 CPU 冷加载偏紧，
+#     超时会回退 API/hash；生产已设 EMBEDDING_HASH_FALLBACK=false，故不会静默降级）；
 #   - backend / worker：HF_HUB_OFFLINE=1 + TRANSFORMERS_OFFLINE=1（只读本地缓存，
 #     绝不访问 huggingface.co；注意：即使模型已缓存，transformers 对 repo id 仍会做
 #     adapter 元数据探测，被墙环境不设离线变量会长时间挂起）；
@@ -63,7 +63,7 @@
 #      期望：Milvus 可用、embedding 提供者为 BGEEmbedder（而非 HashingEmbedder）。
 #   3) 日志判定：
 #        docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.bge.yml logs backend | grep -E "Using local BGE|BGEEmbedder|hash"
-#      出现 "[Embedding] Using local BGE embedder (dim=512)" 即成功；
+#      出现 "[Embedding] Using local BGE embedder (dim=1024)" 即成功；
 #      若出现 "使用哈希嵌入兜底"，说明本地 BGE 未生效（检查镜像是否含
 #      sentence-transformers、缓存是否挂载、HF_HUB_OFFLINE 配置）。
 #   4) 构建参数核验（不启动容器）：
@@ -107,7 +107,7 @@ services:
       TRANSFORMERS_OFFLINE: "1"
       # 后备镜像：仅当显式关闭离线模式时才可能被使用
       HF_ENDPOINT: "${HF_ENDPOINT:-https://hf-mirror.com}"
-      # 可选：让本地 BGE 加载失败时硬失败（默认 true=静默回退 hash，便于先跑通）
+      # 生产建议显式硬失败（基础 compose 已设 false；如需临时允许 hash 兜底可改为 true）
       # EMBEDDING_HASH_FALLBACK: "false"
     volumes:
       # 只读挂载宿主机 HF 缓存（长语法：兼容 Windows 盘符路径，且显式 read_only）

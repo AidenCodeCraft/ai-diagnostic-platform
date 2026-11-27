@@ -1,5 +1,7 @@
 # Database Design Document
 
+> **现状提示**：本文中的 Elasticsearch 仅为早期设想，当前未部署也未接入；生产使用 PostgreSQL + Milvus + Redis + MinIO。
+
 ## AI Diagnostic Platform
 
 Version: 1.0

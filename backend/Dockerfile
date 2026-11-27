@@ -4,8 +4,8 @@
 # 优化：多阶段构建 + .dockerignore + 精简依赖
 #
 # 说明：
-#   - 生产环境使用云端 Embedding（EMBEDDING_PROVIDER=deepseek），
-#     因此默认不安装重型 ML 依赖（torch / sentence-transformers），镜像保持精简。
+#   - 生产环境本地 BGE 需通过 build-arg INSTALL_ML=true 构建；默认不安装重型 ML 依赖
+#     （torch / sentence-transformers），镜像保持精简；云端方案使用 EMBEDDING_PROVIDER=api。
 #   - 如需容器内本地 BGE：使用 build-arg `INSTALL_ML=true` 构建（compose 覆盖文件
 #     `deploy/docker-compose.bge.yml` 已封装：ML 依赖 + HF 缓存挂载 + 离线变量）。
 

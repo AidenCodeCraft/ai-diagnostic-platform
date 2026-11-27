@@ -1,5 +1,7 @@
 # BGE 本地嵌入真实链路验证
 
+> **历史快照提示**：本文记录 2026-11-12 当时的验证环境（BGE-small / 512 维 / `knowledge_docs`），数值仅代表当时状态。当前生产口径为 `BAAI/bge-large-zh-v1.5` / 1024 维 / `knowledge_chunks_v3`，以根 `README.md` 与 `deploy/docker-compose.bge.yml` 为准。
+
 - **日期**：2026-11-12
 - **执行**：Agent Team 成员 `bge-embedding`
 - **关联任务**：`task-4`（BGE 本地模型真实下载与语义嵌入验证）→ `task-9`（Docker 内本地 BGE 部署：compose 覆盖文件 + 文档）

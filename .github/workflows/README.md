@@ -12,7 +12,7 @@
 
 `golden-regression` 需要：
 
-- Milvus standalone 已加载 `knowledge_chunks_v2`（1024 维真实向量）；
+- Milvus standalone 已加载 `knowledge_chunks_v3`（1024 维真实向量）；
 - 自托管 BGE embedding 服务（CPU 推理，模型约 1.3GB）；
 - MinIO 中的黄金集 `replay_snapshot`（历史日志切片）。
 

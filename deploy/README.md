@@ -39,25 +39,50 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:9000/minio/health/live
 
 ## 本地 BGE 嵌入（容器内）
 
-后端镜像默认**不含** torch/sentence-transformers（`EMBEDDING_PROVIDER=auto` 在容器内会回退哈希嵌入）。
-如需容器内真实 BGE 语义嵌入（BAAI/bge-small-zh-v1.5，512 维），使用覆盖文件叠加构建：
+基础 compose 的 `EMBEDDING_HASH_FALLBACK=false`：后端镜像默认**不含** torch/sentence-transformers，
+若既无本地 BGE 也没配 `EMBEDDING_API_URL/KEY`，向量服务会直接报错，不会静默回退哈希向量。
+当前生产口径为 `BAAI/bge-large-zh-v1.5`、**1024 维**、集合 `knowledge_chunks_v3`。
+
+### 方式一：后端进程内加载 BGE（`docker-compose.bge.yml`）
 
 ```bash
-# 前置：宿主机已缓存模型（见 docs/20-Audit/verification/04-bge.md §5.3）
+# 前置：宿主机已缓存 BAAI/bge-large-zh-v1.5（约 1.3GB）
 $env:HF_CACHE_DIR = "$env:USERPROFILE\.cache\huggingface"        # PowerShell
 export HF_CACHE_DIR="$HOME/.cache/huggingface"                   # Linux/macOS
 
 docker compose -f docker-compose.yml -f docker-compose.bge.yml config -q
 docker compose -f docker-compose.yml -f docker-compose.bge.yml up -d --build backend worker
 
-# 验收：应输出 BGEEmbedder 512（而非 HashingEmbedder）
+# 验收：应输出 BGEEmbedder 1024
 docker compose -f docker-compose.yml -f docker-compose.bge.yml exec backend \
   python -c "from app.services.knowledge.embedding import get_embedder; e=get_embedder(); print(e.provider_name, e.dimension)"
+curl http://localhost:8000/api/v1/vector/health   # → is_semantic=true, embedding_dimension=1024
 ```
 
-覆盖文件会设置 `INSTALL_ML=true`（镜像 +2GB+）、`EMBEDDING_PROVIDER=local`、
-`EMBEDDING_LOAD_TIMEOUT=120`、`HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`，并只读挂载 HF 缓存；
-默认不叠加该文件时镜像保持精简。回滚：不叠加覆盖文件重新 `up -d --build backend worker`。
+覆盖文件设置 `INSTALL_ML=true`（镜像 +2 GB 以上）、`EMBEDDING_PROVIDER=local`、
+`EMBEDDING_LOAD_TIMEOUT=180`、`HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`，并只读挂载 HF 缓存。
+
+### 方式二：独立 TEI 服务（`docker-compose.embedding.yml`）
+
+把 embedding 拆成容器，后端保持精简镜像，通过 OpenAI 兼容 `/v1/embeddings` 调用：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.embedding.yml up -d --build backend worker embedding
+curl -s -X POST http://localhost:8080/v1/embeddings -H "Content-Type: application/json" \
+  -d '{"model":"BAAI/bge-large-zh-v1.5","input":["USB 设备超时无响应"]}'
+```
+
+该模板同样使用 `BAAI/bge-large-zh-v1.5` / 1024 维，与 `knowledge_chunks_v3` 一致；
+`EMBEDDING_API_KEY` 默认为 `dummy`（本地 TEI 无鉴权，但代码要求非空）。
+两种覆盖文件**不要同时叠加**。
+
+切换 embedding 后必须重建向量索引：
+
+```bash
+curl -s -X POST http://localhost:8000/api/v1/vector/reindex-all
+```
+
+回滚：不叠加覆盖文件，重新 `docker compose up -d --build backend worker`；如需禁用向量检索，将 `MILVUS_ENABLED=false`。
 
 ## 镜像版本与离线部署
 

@@ -1,5 +1,7 @@
 # Product Roadmap Specification
 
+> **现状提示**：本文中的插件生态为早期规划；插件系统已移除，当前不提供插件 SDK/管理。
+
 AI Diagnostic Platform
 
 Version: 1.0

@@ -1,5 +1,7 @@
 # Deployment Architecture Specification
 
+> **现状提示**：本文中的 Desktop（Tauri）与 Mobile（Flutter）属于 v2.0 规划，尚未实现；当前只有 Web 前端已交付。
+
 AI Diagnostic Platform
 
 Version: 1.0
