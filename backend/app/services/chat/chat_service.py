@@ -95,12 +95,14 @@ class ChatService:
         user_id: Optional[int] = None,
         versions: Optional[List[Dict[str, Any]]] = None,
         active_version: Optional[int] = None,
+        image_ids: Optional[List[int]] = None,
     ) -> ChatMessage:
         session = self.get_session(session_id, user_id)  # 归属校验
         msg = ChatMessage(
             session_id=session_id, role=role, content=content,
             sources=sources, thinking=thinking,
             versions=versions, active_version=active_version,
+            image_ids=image_ids or None,
         )
         self.db.add(msg)
         # 会话更新时间随消息刷新，侧栏「最近对话」按此倒序排列
@@ -122,7 +124,7 @@ class ChatService:
         )
         if not msg:
             raise ValueError("message not found")
-        allowed = {"content", "sources", "thinking", "versions", "active_version"}
+        allowed = {"content", "sources", "thinking", "versions", "active_version", "image_ids"}
         for key, value in (fields or {}).items():
             if key in allowed and value is not None:
                 setattr(msg, key, value)

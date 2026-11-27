@@ -366,7 +366,7 @@ class KnowledgeService:
                     continue
                 section_score = float(score) * self._section_boost(
                     query_text, str(doc.title or ""), chunk.section, chunk.content,
-                ) + self._section_bonus(query_text, chunk.section, chunk.content)
+                ) * (1.0 + self._section_bonus(query_text, chunk.section, chunk.content))
                 boosted.append((chunk, section_score, raw_score))
             ranked = sorted(boosted, key=lambda row: row[1], reverse=True)
             # 提权是相对校正，不应把分数推出 0~1：按最高分归一化，
@@ -806,12 +806,26 @@ class KnowledgeService:
         return fragments
 
     @classmethod
+    def _title_coverage(cls, title: str, query: str) -> float:
+        """文档标题字符被问题覆盖的比例（仅中文字符）。
+
+        用于识别「问题在问某份文档的主题」：例如问「程序版本号」时，
+        标题「设备端 · 日志搜索版本号」应比泛泛谈「关键字」的文档更相关。
+        """
+        title_cn = re.sub(r"[^\u4e00-\u9fff]", "", title or "")
+        query_cn = re.sub(r"[^\u4e00-\u9fff]", "", query or "")
+        if len(title_cn) < 3 or not query_cn:
+            return 0.0
+        hits = sum(1 for ch in set(title_cn) if ch in query_cn)
+        return hits / len(set(title_cn))
+
+    @classmethod
     def _section_boost(cls, query: str, title: str, heading: str, body: str) -> float:
         """章节结构提权（乘性）。
 
         三个信号：
           1. 章节标题的 n-gram 出现在问题里（标题覆盖率）
-          2. 问题在问「搜索/关键字」且章节含关键字清单
+          2. 文档标题被问题覆盖（问题就是在问这份文档）
           3. 文档标题直接出现在问题中
         """
         q = (query or "").lower()
@@ -828,20 +842,25 @@ class KnowledgeService:
                 1 for frag in cls._query_fragments(clean_heading, sizes=(2,))
                 if frag in q
             )
-            boost += min(2.0, long_hits * 0.8 + short_hits * 0.2)
+            boost += min(1.2, long_hits * 0.5 + short_hits * 0.1)
+
+        coverage = cls._title_coverage(f"{title} {heading}", q)
+        if coverage >= 0.45:
+            boost += min(1.6, (coverage - 0.35) * 4.0)
 
         if title and title.lower() in q:
             boost += 1.0
 
-        return boost
+        return min(3.0, boost)
 
     @classmethod
     def _section_bonus(cls, query: str, heading: str, body: str) -> float:
-        """结构加分（加性）。
+        """结构加分（乘性，作为 (1 + bonus) 与基分相乘）。
 
         针对「日志里搜什么 / 用什么关键字」这类问题：同时满足
         「章节含关键字清单」且「章节标题命中问题实体」时给强加分。
-        加性而非乘性——否则 BM25 基分低的正确章节永远追不上泛词章节。
+        必须乘性：加性 0.6 会直接盖过 RRF 融合分（~0.01-0.02），
+        把一批只含「关键字」泛词的章节全部顶到 1.0，反而挤掉对题章节。
         """
         q = (query or "").lower()
         if not any(

@@ -36,6 +36,9 @@
             </div>
             <div v-show="msg._thinkOpen !== false" class="think-body">{{ msg.thinking.text || '正在准备回答…' }}</div>
           </div>
+          <UserImageStrip
+            v-if="msg.role === 'user' && msg.imageIds && msg.imageIds.length"
+            :image-ids="msg.imageIds" />
           <div v-if="msg.files && msg.files.length > 0" class="msg-files">
             <div v-for="(f, i) in msg.files" :key="i" class="msg-file-card" @click="$emit('previewFile', f)"
               :title="'点击预览 ' + f.name">
@@ -204,6 +207,7 @@ import { useFormat } from '@/composables/useFormat'
 import { chatApi, type ChatImage } from '@/api/chat'
 import { knowledgeApi } from '@/api/knowledge'
 import KnowledgeImageGallery from './KnowledgeImageGallery.vue'
+import UserImageStrip from './UserImageStrip.vue'
 
 const { formatFileSize, fileIcon } = useFormat()
 

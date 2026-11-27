@@ -37,4 +37,6 @@ class ChatMessage(Base):
     # 编辑重发的版本历史：[{ content, sources?, thinking? }, ...]（content 始终等于当前版本）
     versions = Column(JSON, nullable=True)
     active_version = Column(Integer, nullable=True)  # versions 中当前展示的下标
+    # 提问附带的截图 id 列表（chat_images.id）：历史消息据此回显缩略图
+    image_ids = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

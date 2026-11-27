@@ -68,3 +68,49 @@ def test_get_image_returns_record(client, admin_headers, monkeypatch):
 
     assert resp.status_code == 200
     assert resp.json()["id"] == created["id"]
+
+
+def test_get_image_file_returns_bytes(client, admin_headers, monkeypatch):
+    stub_ocr(monkeypatch)
+    created = client.post(
+        "/api/v1/chat/images",
+        files={"file": ("log.png", PNG, "image/png")},
+        headers=admin_headers,
+    ).json()
+
+    resp = client.get(f"/api/v1/chat/images/{created['id']}/file", headers=admin_headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("image/png")
+    assert resp.content == PNG
+
+
+def test_get_image_file_404_for_unknown(client, admin_headers):
+    resp = client.get("/api/v1/chat/images/99999/file", headers=admin_headers)
+    assert resp.status_code == 404
+
+
+def test_user_message_persists_image_ids(client, admin_headers, monkeypatch):
+    """用户消息带上 image_ids 后，历史消息接口应原样返回。"""
+    stub_ocr(monkeypatch)
+    created = client.post(
+        "/api/v1/chat/images",
+        files={"file": ("log.png", PNG, "image/png")},
+        headers=admin_headers,
+    ).json()
+    session = client.post(
+        "/api/v1/chat-sessions", json={"title": "t"}, headers=admin_headers,
+    ).json()
+
+    saved = client.post(
+        f"/api/v1/chat-sessions/{session['id']}/messages",
+        json={"role": "user", "content": "看这张图", "image_ids": [created["id"]]},
+        headers=admin_headers,
+    )
+    assert saved.status_code == 201, saved.text
+    assert saved.json()["image_ids"] == [created["id"]]
+
+    messages = client.get(
+        f"/api/v1/chat-sessions/{session['id']}/messages", headers=admin_headers,
+    ).json()
+    assert messages[-1]["image_ids"] == [created["id"]]

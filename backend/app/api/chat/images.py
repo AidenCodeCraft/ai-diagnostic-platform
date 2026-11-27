@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, require_auth
@@ -64,3 +64,30 @@ def get_image(
     if record is None:
         raise HTTPException(status_code=404, detail="截图不存在")
     return _serialize(record)
+
+
+@router.get("/{image_id}/file")
+def get_image_file(
+    image_id: int,
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
+) -> Response:
+    """回显截图原图（历史消息缩略图用）。
+
+    走鉴权接口而不是公开 URL：截图里常含设备序列号/网络配置。
+    前端用 axios 带 Bearer 取 blob，再转 objectURL 渲染。
+    """
+    record = ChatImageService(db).get(image_id)
+    if record is None or not record.storage_ref:
+        raise HTTPException(status_code=404, detail="截图不存在")
+    if record.user_id is not None and record.user_id != user_id:
+        raise HTTPException(status_code=404, detail="截图不存在")
+
+    from app.services.diagnostics.log_storage import LogStorage, LogStorageError
+
+    try:
+        path = LogStorage().materialize(record.storage_ref)
+        data = path.read_bytes()
+    except (LogStorageError, OSError) as exc:
+        raise HTTPException(status_code=404, detail="截图文件不可用") from exc
+    return Response(content=data, media_type=record.mime or "application/octet-stream")

@@ -91,6 +91,14 @@ created_at / updated_at
 
 `sha256` 去重：同一张截图重复发送直接复用 `extracted_text`，不重复计费。
 
+**提问消息与截图的关联（2026-11-27 补充）**：`chat_messages` 新增 `image_ids JSON`
+列，保存该条用户提问附带的 `chat_images.id` 列表；前端提问时先调
+`POST /chat-sessions/{id}/messages` 落库（带 `image_ids`），再走流式接口，
+流式接口只负责把截图绑定到会话。历史回显时前端调用鉴权接口
+`GET /chat/images/{image_id}/file` 取原图（`<img>` 无法自带 Bearer token，故先用
+axios 取 blob 再转 objectURL），用户消息气泡按缩略图展示。存量消息 `image_ids`
+为 NULL，只能看到识别文本、看不到图，属于预期。
+
 ---
 
 ## 5. 与诊断链路的关系

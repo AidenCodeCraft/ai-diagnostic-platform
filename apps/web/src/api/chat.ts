@@ -23,6 +23,8 @@ export interface ChatMessage {
   versions?: ChatMessageVersion[]
   /** versions 中当前展示的下标 */
   active_version?: number
+  /** 提问附带的截图 id（chat_images.id），用于历史消息回显 */
+  image_ids?: number[]
   created_at: string
 }
 
@@ -69,8 +71,8 @@ export const chatApi = {
     return client.post<ChatReply>(`/chat-sessions/${sessionId}/chat`, { content, model })
   },
   /** Store a message directly (without LLM call) — for persisting analysis results */
-  saveMessage(sessionId: number, role: string, content: string, sources?: ChatSource[], thinking?: { text: string, elapsed: number }, versions?: ChatMessageVersion[], activeVersion?: number) {
-    return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, { role, content, sources, thinking, versions, active_version: activeVersion })
+  saveMessage(sessionId: number, role: string, content: string, sources?: ChatSource[], thinking?: { text: string, elapsed: number }, versions?: ChatMessageVersion[], activeVersion?: number, imageIds?: number[]) {
+    return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, { role, content, sources, thinking, versions, active_version: activeVersion, image_ids: imageIds })
   },
   /** 更新消息（编辑重发：content / versions / active_version 等） */
   updateMessage(sessionId: number, messageId: number, payload: {
@@ -196,6 +198,11 @@ export const chatApi = {
     form.append('file', file)
     if (sessionId) form.append('session_id', String(sessionId))
     return client.post<ChatImageUpload>('/chat/images', form, { timeout: 120000 })
+  },
+  /** 取截图原图（鉴权接口），返回可直接用于 <img> 的 objectURL */
+  async getChatImageFile(imageId: number): Promise<string> {
+    const { data } = await client.get(`/chat/images/${imageId}/file`, { responseType: 'blob' })
+    return URL.createObjectURL(data as Blob)
   },
 
   searchKnowledge(q: string) {

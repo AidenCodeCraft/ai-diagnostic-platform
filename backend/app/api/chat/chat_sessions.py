@@ -104,6 +104,7 @@ def add_message(
             session_id, role=body["role"], content=body["content"],
             sources=body.get("sources"), thinking=body.get("thinking"),
             versions=body.get("versions"), active_version=body.get("active_version"),
+            image_ids=body.get("image_ids"),
             user_id=user_id,
         )
     except ValueError as exc:

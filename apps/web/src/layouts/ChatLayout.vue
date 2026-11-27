@@ -469,6 +469,8 @@ async function selectChat(id: number, options: { navigate?: boolean; silent?: bo
         createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
         files: extractFiles(m),
         sources: activeVersion?.sources ?? m.sources ?? [],
+        // 历史提问附带的截图 id：由 UserImageStrip 按 id 取原图回显
+        imageIds: Array.isArray(m.image_ids) && m.image_ids.length ? m.image_ids : undefined,
         _persisted: true,
         _dbId: m.id,
         versions: hasVersions ? m.versions : undefined,
@@ -800,12 +802,15 @@ async function sendMessage() {
       ? `[上传文件: ${files.map(f => `${f.name} (${formatSizeStr(f.file.size)})`).join(', ')}]`
       : ''
     const userMsg = fileTag ? `${text}\n${fileTag}` : text
-    const userMsgObj = addMessage('user', userMsg, attachments, chatId)
+    const userMsgObj = addMessage('user', userMsg, attachments, chatId, imageIds)
 
-    // 用户消息先持久化，确保刷新后 selectChat 能恢复完整历史
+    // 用户消息先持久化，确保刷新后 selectChat 能恢复完整历史（含截图）
     if (chatId) {
       try {
-        const { data: saved } = await chatApi.saveMessage(chatId, 'user', userMsg)
+        const { data: saved } = await chatApi.saveMessage(
+          chatId, 'user', userMsg, undefined, undefined, undefined, undefined,
+          imageIds.length ? imageIds : undefined,
+        )
         if (saved?.id != null && userMsgObj) userMsgObj._dbId = saved.id
       } catch {
         ElMessage.warning('用户消息保存失败，刷新后可能无法恢复')
@@ -1209,7 +1214,7 @@ function onSelectClarification(value: string) {
   inputText.value = current ? `${current} ${value}` : value
 }
 
-function addMessage(role: string, content: string, files?: MsgAttachment[], chatId: number = currentChatId.value) {
+function addMessage(role: string, content: string, files?: MsgAttachment[], chatId: number = currentChatId.value, imageIds?: number[]) {
   // 生成唯一ID，避免时间戳冲突
   let id = Date.now().toString()
   let attempts = 0
@@ -1231,6 +1236,7 @@ function addMessage(role: string, content: string, files?: MsgAttachment[], chat
     content,
     createdAt: Date.now(),
     files,
+    imageIds: imageIds && imageIds.length ? imageIds : undefined,
   } as any
   
   ensureChatMessages(chatId).push(newMsg)

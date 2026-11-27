@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import delete, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
     require_admin, require_admin_user, require_developer, require_developer_user,
 )
 from app.database import session as session_module
-from app.models import User
+from app.models import (
+    ApiKey, ChatImageUpload, ChatSession, ClientLogEntry, GoldenSample, Log,
+    Organization, OrganizationMember, Project, SampleReview, User,
+)
 from app.schemas import UserCreate, UserResponse, UserListResponse
 from app.services import AuthService
 from app.services.system.audit_log import record_operation
+
+logger = logging.getLogger(__name__)
 
 
 def get_db_session():
@@ -161,10 +169,34 @@ def delete_user(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    if user.id == operator.id:
+        raise HTTPException(status_code=400, detail="不能删除当前登录账号")
 
     username = user.username
-    db.delete(user)
-    db.commit()
+    try:
+        # 先清理/解除引用再删用户。历史迁移里的外键没有 ON DELETE 规则，
+        # 直接 delete 会触发 ForeignKeyViolation → 500（线上 client_log_entries
+        # 是实际触发点）。这里显式处理，避免依赖各环境约束是否带级联。
+        db.execute(delete(ApiKey).where(ApiKey.user_id == user_id))
+        db.execute(delete(OrganizationMember).where(OrganizationMember.user_id == user_id))
+        db.execute(update(ChatSession).where(ChatSession.user_id == user_id).values(user_id=None))
+        db.execute(update(ChatImageUpload).where(ChatImageUpload.user_id == user_id).values(user_id=None))
+        db.execute(update(Log).where(Log.upload_user_id == user_id).values(upload_user_id=None))
+        db.execute(update(ClientLogEntry).where(ClientLogEntry.user_id == user_id).values(user_id=None))
+        db.execute(update(Organization).where(Organization.owner_id == user_id).values(owner_id=None))
+        db.execute(update(Project).where(Project.owner_id == user_id).values(owner_id=None))
+        db.execute(update(GoldenSample).where(GoldenSample.submitted_by == user_id).values(submitted_by=None))
+        db.execute(update(GoldenSample).where(GoldenSample.approved_by == user_id).values(approved_by=None))
+        db.execute(update(SampleReview).where(SampleReview.actor_id == user_id).values(actor_id=None))
+        db.delete(user)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        logger.warning("[users] delete user %s blocked by FK: %s", user_id, exc)
+        raise HTTPException(
+            status_code=409, detail="该用户仍被其他数据引用，无法删除",
+        ) from exc
+
     record_operation(
         db, operator, "user.delete", target_type="user", target_id=user_id,
         detail={"username": username}, request=request,

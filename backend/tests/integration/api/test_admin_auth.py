@@ -110,3 +110,92 @@ class TestAdminAuth:
 
         resp = client.delete(f"/api/v1/users/{victim.json()['id']}", headers=dev_headers)
         assert resp.status_code == 204
+
+    def test_developer_delete_user_clears_references(self, client, admin_headers):
+        """删除仍被日志/密钥引用的用户：先清理引用，不能 500。"""
+        from datetime import datetime, timezone
+
+        from app.database import session as session_module
+        from app.models import ApiKey, ClientLogEntry
+
+        victim = client.post(
+            "/api/v1/users",
+            json={
+                "username": "victim_ref",
+                "password": "Str0ng!Passw0rd",
+                "role": "user",
+                "is_active": True,
+            },
+            headers=admin_headers,
+        )
+        assert victim.status_code == 201, victim.text
+        victim_id = victim.json()["id"]
+
+        # 用客户端同一引擎的 session 直接造引用数据
+        db = session_module.SessionLocal()
+        try:
+            db.add(ApiKey(user_id=victim_id, name="k", key_hash="h", prefix="abcd1234"))
+            db.add(
+                ClientLogEntry(
+                    id="log-ref-1",
+                    timestamp=datetime.now(timezone.utc),
+                    level=3,
+                    category="user",
+                    message="hi",
+                    user_id=victim_id,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        dev = client.post(
+            "/api/v1/users",
+            json={
+                "username": "dev_ref",
+                "password": "Str0ng!Passw0rd",
+                "role": "developer",
+                "is_active": True,
+            },
+            headers=admin_headers,
+        )
+        assert dev.status_code == 201, dev.text
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "dev_ref", "password": "Str0ng!Passw0rd"},
+        )
+        dev_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        resp = client.delete(f"/api/v1/users/{victim_id}", headers=dev_headers)
+        assert resp.status_code == 204, resp.text
+
+        db = session_module.SessionLocal()
+        try:
+            assert db.query(ApiKey).filter(ApiKey.user_id == victim_id).count() == 0
+            entry = db.get(ClientLogEntry, "log-ref-1")
+            assert entry is not None  # 日志本身保留
+            assert entry.user_id is None
+        finally:
+            db.close()
+
+    def test_developer_cannot_delete_self(self, client, admin_headers):
+        dev = client.post(
+            "/api/v1/users",
+            json={
+                "username": "dev_self",
+                "password": "Str0ng!Passw0rd",
+                "role": "developer",
+                "is_active": True,
+            },
+            headers=admin_headers,
+        )
+        assert dev.status_code == 201, dev.text
+        dev_id = dev.json()["id"]
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "dev_self", "password": "Str0ng!Passw0rd"},
+        )
+        dev_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        resp = client.delete(f"/api/v1/users/{dev_id}", headers=dev_headers)
+        assert resp.status_code == 400

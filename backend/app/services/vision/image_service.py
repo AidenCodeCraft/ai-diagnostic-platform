@@ -125,7 +125,10 @@ class ChatImageService:
                 handle.write(data)
                 temp_path = Path(handle.name)
             reference = self.storage.save(temp_path, f"screenshot{suffix}", project_id=0)
-            temp_path.unlink(missing_ok=True)
+            # 本地存储时引用就是临时文件本身，删掉会让历史消息回显 404；
+            # 只有对象存储已接管（minio://）才清理本地临时文件。
+            if reference.startswith("minio://"):
+                temp_path.unlink(missing_ok=True)
             return reference
         except Exception as exc:  # noqa: BLE001 - 存储失败不影响识别
             logger.warning("[chat-image] 存储截图失败: %s", exc)

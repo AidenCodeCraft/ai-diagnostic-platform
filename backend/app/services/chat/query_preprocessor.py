@@ -649,10 +649,21 @@ class QueryPreprocessor:
         # 排序：检索分 × 字面重合加成
         # 纯按检索分排序会让"被大量宽泛词命中的文档"压过真正对题的文档
         # （RRF 分数只反映命中了多少个搜索词，不反映是否切题）。
-        all_items.sort(
-            key=lambda d: self._rank_score(d) * self._lexical_boost(query, d),
-            reverse=True,
-        )
+        # 逐词搜索时每条结果都按各自搜索的峰值归一化到 1.0，跨词合并后
+        # 完全不可比：下游「分数接近就问用户」会被这批假 1.0 全部触发。
+        # 用章节标题覆盖率重新缩放：问「程序版本」时，标题为「日志搜索
+        # 版本号」的章节应高于只被「关键字」命中的无关章节。
+        scored: List[tuple] = []
+        for item in all_items:
+            rel = float(item.get("relevance_score", 0) or 0)
+            coverage = self._heading_coverage(query, item)
+            boost = 1.0 + min(1.5, max(0.0, coverage - 0.45) * 3.0)
+            scored.append((item, rel * boost))
+        scored.sort(key=lambda pair: pair[1], reverse=True)
+        all_items = [item for item, _ in scored]
+        peak = max((score for _, score in scored), default=0.0) or 1.0
+        for item, score in scored:
+            item["relevance_score"] = round(score / peak, 6)
 
         return SearchResult(
             items=all_items[:8],
@@ -685,32 +696,20 @@ class QueryPreprocessor:
         return f"{item.get('id')}|{item.get('section') or ''}"
 
     @staticmethod
-    def _lexical_boost(query: str, item: Dict[str, Any]) -> float:
-        """字面重合加成（乘性，1.0 表示无加成）。
+    def _heading_coverage(query: str, item: Dict[str, Any]) -> float:
+        """查询中文字符被「文档标题 + 章节标题」覆盖的比例。
 
-        两条强信号：
-          1. 查询里直接出现了文档标题（问"设备端…"而文档就叫《设备端》）
-          2. 查询中的连续中文片段（≥4 字）出现在标题/摘要里
-        例：问"设备端日志搜索版本号什么关键字"，
-            《设备端》同时命中两条 → ×3.5，从第 8 名提到第 1 名；
-            而《长沙》《线路》等只被宽泛词命中的文档保持 ×1.0。
+        用于跨搜索词比较相关性：逐词搜索会把各自的第一名都归一化成 1.0，
+        但「日志搜索版本号」这种与问题主题重合的章节，应高于只命中
+        「关键字」泛词的章节。标题重合度是跨词可比的弱信号。
         """
-        q = (query or "").strip().lower()
-        if not q:
-            return 1.0
-        boost = 1.0
-        title = (item.get("title") or "").strip().lower()
-        if title and title in q:
-            boost += 1.5
-        text = f"{title} {(item.get('snippet') or '')}".lower()
-        if text.strip():
-            hits = 0
-            for run in re.findall(r"[一-鿿]{4,}", q):
-                for i in range(len(run) - 3):
-                    if run[i:i + 4] in text:
-                        hits += 1
-            boost += min(1.0, 0.3 * hits)
-        return boost
+        q_cn = re.sub(r"[^\u4e00-\u9fff]", "", (query or "").lower())
+        text = f"{item.get('title') or ''} {item.get('section') or ''}"
+        t_cn = re.sub(r"[^\u4e00-\u9fff]", "", text.lower())
+        if len(t_cn) < 3 or not q_cn:
+            return 0.0
+        chars = set(t_cn)
+        return sum(1 for ch in chars if ch in q_cn) / len(chars)
 
     # ------------------------------------------------------------------
     # Step 4: 结果校验

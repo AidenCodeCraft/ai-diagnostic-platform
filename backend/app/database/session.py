@@ -55,6 +55,7 @@ def _apply_compat_migrations() -> None:
         ("chat_sessions", "is_pinned", "BOOLEAN DEFAULT FALSE NOT NULL"),
         ("chat_messages", "versions", "JSON"),
         ("chat_messages", "active_version", "INTEGER"),
+        ("chat_messages", "image_ids", "JSON"),
         ("users", "theme", "VARCHAR(20)"),
     ]
 
