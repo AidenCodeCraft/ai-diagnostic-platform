@@ -12,10 +12,24 @@ CLIENT_LOG_PAYLOAD = {
 
 
 class TestKnowledgeReadRole:
-    def test_engineer_forbidden(self, client, engineer_headers):
-        assert client.get("/api/v1/knowledge", headers=engineer_headers).status_code == 403
-        assert client.get("/api/v1/knowledge/tree", headers=engineer_headers).status_code == 403
-        assert client.get("/api/v1/knowledge/search", params={"q": "x"}, headers=engineer_headers).status_code == 403
+    """知识库读权限：所有登录用户可读（对话里要能点开引用来源、看原文）。
+
+    写权限（新建/上传/编辑/删除/模板）仍限管理员，覆盖在
+    test_knowledge_read_permissions.py::test_user_cannot_write。
+    """
+
+    def test_engineer_can_read(self, client, engineer_headers):
+        assert client.get("/api/v1/knowledge", headers=engineer_headers).status_code == 200
+        assert client.get("/api/v1/knowledge/tree", headers=engineer_headers).status_code == 200
+        assert client.get("/api/v1/knowledge/search", params={"q": "x"}, headers=engineer_headers).status_code == 200
+
+    def test_engineer_cannot_write(self, client, engineer_headers):
+        assert client.post(
+            "/api/v1/knowledge", json={"title": "x", "content": "y"}, headers=engineer_headers,
+        ).status_code == 403
+        assert client.put(
+            "/api/v1/knowledge/1", json={"title": "z"}, headers=engineer_headers,
+        ).status_code == 403
 
     def test_admin_allowed(self, client, admin_headers):
         assert client.get("/api/v1/knowledge", headers=admin_headers).status_code == 200

@@ -138,6 +138,7 @@ class DiagnosticChatAgent:
     def __init__(
         self, db: Session, provider_name: str = "mock",
         project_id: Optional[int] = None,
+        log_context: Optional[Dict[str, Any]] = None,
     ):
         self.db = db
         self.provider_name = provider_name
@@ -149,6 +150,11 @@ class DiagnosticChatAgent:
         self._last_search_layer: str = ""
         # 本次检索的章节级候选（用于多结果歧义澄清）
         self._candidates: List[Dict[str, Any]] = []
+        self.log_context = log_context
+        self.log_evidence: Optional[Dict[str, Any]] = None
+        self.log_evidence_summary: str = ""
+        # 用户截图的识别文本（现场证据，与日志证据并列注入）
+        self.image_evidence: List[Dict[str, Any]] = []
 
     # ==================================================================
     # Pipeline Entry
@@ -437,7 +443,7 @@ class DiagnosticChatAgent:
                 return self.knowledge.search(
                     term, page=1, page_size=max(page_size, 12), project_id=self.project_id,
                     # 草稿也参与召回（降权），章节级返回便于歧义澄清
-                    include_drafts=True, return_sections=True,
+                    include_drafts=True, sections=True,
                 )
 
             search_result = process_multi_query(
@@ -447,27 +453,6 @@ class DiagnosticChatAgent:
                 high_score_threshold=0.3,
                 min_intent_match_ratio=0.3,
             )
-
-            # 完整问题本身的章节排序最可靠：优先保留，再用子词检索补充召回。
-            # 多词合并后会按「分×字面加成」重排并截断，容易把完整问题命中的
-            # 正确章节挤掉（曾导致「进出站」问题只看到文档第一节）。
-            primary: List[Dict[str, Any]] = []
-            try:
-                primary = self.knowledge.search(
-                    text, page=1, page_size=12, project_id=self.project_id,
-                    include_drafts=True, return_sections=True,
-                ).get("items", [])
-            except Exception:  # 兼容仅有 search_fn 的测试替身
-                logger.debug("[知识检索] 完整问题直检失败，回退多词结果", exc_info=True)
-            merged: List[Dict[str, Any]] = []
-            seen_keys = set()
-            for item in list(primary) + list(search_result.items):
-                key = item.get("key") or item.get("id")
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
-                merged.append(item)
-            search_result.items = merged
         except Exception as e:
             logger.error("[知识检索] 检索异常: %s\n%s", e, traceback.format_exc())
             return "", []
@@ -515,6 +500,15 @@ class DiagnosticChatAgent:
             except Exception:
                 pass
 
+        # 精排：向量+BM25 的融合分只反映「接近」，不判断「是否真的回答了问题」；
+        # Cross-Encoder 在这里把 (问题, 章节) 成对打分。缺依赖/推理失败一律跳过。
+        try:
+            from app.services.knowledge.rerank_service import rerank_items
+
+            items = rerank_items(text, items, keep=max_items)
+        except Exception:  # noqa: BLE001 - 精排异常绝不影响回答
+            logger.debug("[知识检索] 精排失败，保留召回顺序", exc_info=True)
+
         self.references = []
         lines = []
         for i, item in enumerate(items):
@@ -528,7 +522,14 @@ class DiagnosticChatAgent:
                 # 章节定位 + 图片关联（章节标题优先，回退到 snippet 解析）
                 # section_range：命中章节在文档中的行号区间，用于判断"图片属于哪个知识点"
                 section = item.get("_section") or {}
-                anchor = section.get("section_title") or self._extract_section_anchor(snippet)
+                # 章节标题优先取结构化字段，回退到检索结果的 section，
+                # 再回退到从 snippet 解析——三者都空时才留空字符串
+                section_title = (
+                    section.get("section_title")
+                    or item.get("section")
+                    or self._extract_section_anchor(snippet)
+                )
+                anchor = section_title
                 images = self._match_doc_images(
                     item.get("id"),
                     text,
@@ -547,13 +548,14 @@ class DiagnosticChatAgent:
                     "title": title,
                     "source": item.get("source") or "知识库",
                     "excerpt": snippet,
-                    "section": section.get("section_title", ""),
+                    "section": section_title or "",
+                    # 分数必须留下：归一化分用于展示，原始融合分用于排序与评估
+                    "score": float(item.get("relevance_score", 0) or 0),
+                    "fusion_score": item.get("fusion_score"),
                     "section_key": section.get("section_key", ""),
                     "start_line": section.get("start_line", 0),
                     "end_line": section.get("end_line", 0),
-                    # 供歧义澄清：章节标题/得分/发布状态
                     "status": item.get("status") or "active",
-                    "score": round(float(score), 4),
                     "images": [
                         {
                             "id": img.id,
@@ -569,7 +571,7 @@ class DiagnosticChatAgent:
                 self._candidates.append({
                     "doc_id": item.get("id"),
                     "title": title,
-                    "section": section.get("section_title") or item.get("section") or "",
+                    "section": section_title or item.get("section") or "",
                     "score": float(score),
                     "status": item.get("status") or "active",
                 })
@@ -578,7 +580,62 @@ class DiagnosticChatAgent:
         self._last_search_partial = search_result.is_partial_match
         self._last_search_layer = search_result.matched_layer
 
+        # P1 步骤 5：把「按知识库关键字在时间窗内定位到的日志」拼成证据块注入上下文
+        evidence_text = self._build_log_evidence_text(text, items)
+        if evidence_text:
+            lines.append(evidence_text)
+
+        # 对话界面截图：识别文本作为现场证据注入（不参与知识检索，只是上下文）
+        image_text = self._build_image_evidence_text()
+        if image_text:
+            lines.append(image_text)
+            # 只有日志证据、没有知识库命中时，也要基于证据作答，而不是拒答
+            return "\n\n".join(lines), self.references
+
         return "\n\n".join(lines) if lines else "", self.references
+
+    def _build_image_evidence_text(self) -> str:
+        """把会话内截图的识别文本拼成证据块。
+
+        为什么单列一块而不是塞进日志证据：截图来自用户，日志来自设备，
+        两者可信度与用途不同；回答引用时要能区分"用户说"与"设备记录"。
+        """
+        evidence = (self.log_context or {}).get("image_evidence") or []
+        if not evidence:
+            return ""
+        self.image_evidence = list(evidence)
+        lines = ["【用户提供的截图（现场证据）】"]
+        for item in evidence[:5]:
+            label = {"ocr": "OCR 识别", "vision": "图像理解", "ocr+vision": "OCR+图像理解"}.get(
+                str(item.get("path") or "ocr"), "OCR 识别",
+            )
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            lines.append(f"- 截图 #{item.get('image_id')}（{label}）：\n{text}")
+        return "\n".join(lines) if len(lines) > 1 else ""
+
+    def _build_log_evidence_text(self, text: str, items: List[Dict[str, Any]]) -> str:
+        """生成日志证据块（带行号），失败静默跳过——证据是增强项，不是依赖项。"""
+        if not self.log_context:
+            return ""
+        try:
+            from app.services.chat.log_evidence import build_log_evidence
+
+            evidence = build_log_evidence(
+                items,
+                self.log_context.get("data"),
+                start=self.log_context.get("start"),
+                end=self.log_context.get("end"),
+                question=text,
+                window_label=str(self.log_context.get("window_label") or ""),
+            )
+            self.log_evidence = evidence.to_dict()
+            self.log_evidence_summary = evidence.summary
+            return evidence.text
+        except Exception:  # noqa: BLE001
+            logger.debug("[知识检索] 日志证据组装失败", exc_info=True)
+            return ""
 
     def _maybe_ask_ambiguity(self, query: str, existing_messages: List[Dict[str, str]]):
         """多个章节得分接近时，先让用户确认要查哪一条，再按该条定位。"""

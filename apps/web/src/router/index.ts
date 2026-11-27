@@ -37,6 +37,8 @@ const router = createRouter({
         { path: 'projects', name: 'AdminProjects', component: () => import('@/views/admin/Projects.vue'), meta: { title: '项目管理' } },
         { path: 'logs', name: 'AdminLogs', component: () => import('@/views/admin/AdminLogs.vue'), meta: { title: '日志分析' } },
         { path: 'audit', name: 'AdminAudit', component: () => import('@/views/admin/Audit.vue'), meta: { title: '审核监控' } },
+        { path: 'quality', name: 'AdminQuality', component: () => import('@/views/admin/Quality.vue'), meta: { title: '质量回归' } },
+        { path: 'pipeline', name: 'AdminPipeline', component: () => import('@/views/admin/Pipeline.vue'), meta: { title: '运行监控' } },
         { path: 'audit-logs', name: 'AdminOperationLogs', component: () => import('@/views/admin/OperationLogs.vue'), meta: { title: '操作审计' } },
         { path: 'settings', name: 'AdminSettings', component: () => import('@/views/admin/Settings.vue'), meta: { title: '系统配置' } },
       ],

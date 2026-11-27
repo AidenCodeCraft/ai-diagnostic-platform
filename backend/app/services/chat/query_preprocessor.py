@@ -571,8 +571,10 @@ class QueryPreprocessor:
     ) -> SearchResult:
         """按分层计划执行搜索，逐层降级，最后按「检索分 × 字面重合加成」排序。"""
         all_items: List[Dict[str, Any]] = []
-        seen_ids: Set[int] = set()
-        high_score_ids: Set[int] = set()
+        # 去重键 = 章节，不是文档：同一文档的不同章节必须都能进候选，
+        # 否则「FAQ 有很多节，但只能留第一节」——正确章节会被同文档的其他节挤掉
+        seen_keys: Set[str] = set()
+        high_score_keys: Set[str] = set()
         matched_layer = "无匹配"
         matched_term = ""
         total_attempted = 0
@@ -591,24 +593,27 @@ class QueryPreprocessor:
                     continue
 
                 for item in items:
-                    # key 存在时按「文档+章节」区分候选（章节级检索），
-                    # 否则退回文档 id 去重。
-                    doc_id = item.get("key") or item.get("id")
+                    item_key = self._item_key(item)
                     score = float(item.get("relevance_score", 0) or 0)
 
                     if score >= high_score_threshold:
-                        high_score_ids.add(doc_id)
+                        high_score_keys.add(item_key)
 
-                    if doc_id in seen_ids:
-                        # 更新已有结果的最高分
+                    if item_key in seen_keys:
+                        # 更新已有结果：归一化分取大，原始分也取大（排序看原始分）
                         for existing in all_items:
-                            if existing.get("id") == doc_id:
+                            if self._item_key(existing) == item_key:
                                 if score > float(existing.get("relevance_score", 0) or 0):
                                     existing["relevance_score"] = score
+                                raw = item.get("fusion_score")
+                                if raw is not None and float(raw) > float(
+                                    existing.get("fusion_score", 0) or 0
+                                ):
+                                    existing["fusion_score"] = raw
                                 break
                         continue
 
-                    seen_ids.add(doc_id)
+                    seen_keys.add(item_key)
                     all_items.append(item)
                     layer_has_result = True
 
@@ -617,7 +622,7 @@ class QueryPreprocessor:
                     matched_term = term
 
                 # 找到高分结果且该层允许提前停止
-                if layer.stop_on_high_score and high_score_ids and len(all_items) >= 3:
+                if layer.stop_on_high_score and high_score_keys and len(all_items) >= 3:
                     break
 
         # 完整问题始终参与召回，避免宽泛词的无关结果阻断语义检索。
@@ -631,9 +636,9 @@ class QueryPreprocessor:
                 except Exception:
                     continue
                 for item in items:
-                    doc_id = item.get("key") or item.get("id")
-                    if doc_id not in seen_ids:
-                        seen_ids.add(doc_id)
+                    item_key = self._item_key(item)
+                    if item_key not in seen_keys:
+                        seen_keys.add(item_key)
                         all_items.append(item)
                         matched_layer = "完整问题搜索"
                         matched_term = term
@@ -645,8 +650,7 @@ class QueryPreprocessor:
         # 纯按检索分排序会让"被大量宽泛词命中的文档"压过真正对题的文档
         # （RRF 分数只反映命中了多少个搜索词，不反映是否切题）。
         all_items.sort(
-            key=lambda d: float(d.get("relevance_score", 0) or 0)
-            * self._lexical_boost(query, d),
+            key=lambda d: self._rank_score(d) * self._lexical_boost(query, d),
             reverse=True,
         )
 
@@ -656,6 +660,29 @@ class QueryPreprocessor:
             matched_term=matched_term,
             total_attempted=total_attempted,
         )
+
+    @staticmethod
+    def _rank_score(item: Dict[str, Any]) -> float:
+        """排序用分数：优先原始融合分。
+
+        relevance_score 是逐层归一化的（每层最高 1.0），多层合并后不可比；
+        fusion_score 是原始 RRF 分，跨层可比。
+        """
+        raw = item.get("fusion_score")
+        if raw is not None:
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                pass
+        return float(item.get("relevance_score", 0) or 0)
+
+    @staticmethod
+    def _item_key(item: Dict[str, Any]) -> str:
+        """候选去重键：优先用章节 key，退化为 (doc_id, section)。"""
+        key = item.get("key")
+        if key:
+            return str(key)
+        return f"{item.get('id')}|{item.get('section') or ''}"
 
     @staticmethod
     def _lexical_boost(query: str, item: Dict[str, Any]) -> float:

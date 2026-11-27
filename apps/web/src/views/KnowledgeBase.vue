@@ -31,7 +31,7 @@
         <div class="kb-header-right">
           <el-input v-model="searchQuery" placeholder="搜索文件..." class="kb-search" clearable
             @keyup.enter="doSearch" :prefix-icon="Search" />
-          <el-dropdown @command="handleCreateCommand" trigger="click">
+          <el-dropdown v-if="canManage" @command="handleCreateCommand" trigger="click">
             <el-button type="primary">新建</el-button>
             <template #dropdown>
               <el-dropdown-menu>
@@ -61,13 +61,13 @@
       <div v-if="!loading && items.length === 0" class="kb-empty">
         <div class="empty-icon">📂</div>
         <div class="empty-title">{{ currentFolder ? '此文件夹为空' : '知识库为空' }}</div>
-        <div class="empty-desc">{{ currentFolder ? '点击"新建"添加内容' : '点击"新建"开始创建文档或上传文件' }}</div>
+        <div class="empty-desc">{{ canManage ? (currentFolder ? '点击"新建"添加内容' : '点击"新建"开始创建文档或上传文件') : '这里还没有可查看的内容' }}</div>
       </div>
 
       <!-- 列表 -->
       <div v-else-if="viewMode === 'list'" class="kb-table-wrap" v-loading="loading">
         <el-table :data="items" stripe @selection-change="handleSelection">
-          <el-table-column type="selection" width="40" />
+          <el-table-column v-if="canManage" type="selection" width="40" />
           <el-table-column prop="title" label="名称" min-width="220">
             <template #default="{ row }">
               <div class="cell-name">
@@ -98,7 +98,7 @@
           <el-table-column label="大小" width="100"><template #default="{ row }">{{ formatSize(row)
               }}</template></el-table-column>
           <!-- 更多菜单 -->
-          <el-table-column label="" width="60" fixed="right">
+          <el-table-column v-if="canManage" label="" width="60" fixed="right">
             <template #default="{ row }">
               <el-dropdown trigger="click" @command="(cmd: string) => handleRowAction(cmd, row)">
                 <button class="row-more-btn">
@@ -163,7 +163,7 @@
             </span>
           </el-tooltip>
           <el-button @click="closePreview">关闭预览</el-button>
-          <el-button type="primary" @click="enterEdit">编辑</el-button>
+          <el-button v-if="canManage" type="primary" @click="enterEdit">编辑</el-button>
         </div>
       </div>
       <div class="preview-layout">
@@ -389,6 +389,7 @@
 import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch, defineComponent, h } from 'vue'
 import { Search, UploadFilled } from '@element-plus/icons-vue'
 import { knowledgeApi, type KnowledgeTemplateInfo } from '@/api/knowledge'
+import { useUserStore } from '@/stores/user'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import VMdEditor from '@kangc/v-md-editor'
 
@@ -551,6 +552,8 @@ function sectionHint(row: { key: string }) {
 }
 
 async function loadTemplates() {
+  // 模板接口仅管理员可读：普通用户走进来会 403，直接跳过
+  if (!canManage.value) return
   try {
     const { data } = await knowledgeApi.templates()
     templates.value = data.templates || []
@@ -908,6 +911,10 @@ function showSaveResult(resp: any) {
     ElMessage.success('已保存')
   }
 }
+
+/** 知识库是「全员可读、管理员可写」：普通用户只做浏览与引用溯源 */
+const userStore = useUserStore()
+const canManage = computed(() => userStore.isAdmin)
 
 const viewState = ref<'list' | 'preview' | 'edit'>('list')
 const currentFolder = ref<any>(null)

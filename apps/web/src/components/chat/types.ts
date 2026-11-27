@@ -16,6 +16,23 @@ export interface FileAttachment {
   progress: number
   status: 'pending' | 'uploading' | 'parsing' | 'done' | 'error'
   error?: string
+  /** 上传后的异步预处理进度（P2 链路） */
+  ingest?: { done: number; total: number; stage: string; failed: boolean }
+}
+
+/** 对话界面截图（OCR 识别文本作为现场证据参与诊断） */
+export interface ImageAttachment {
+  id: string
+  file: File
+  name: string
+  previewUrl: string
+  status: 'uploading' | 'done' | 'error'
+  /** 后端 chat_images.id（发送消息时用于绑定会话） */
+  imageId?: number
+  /** ocr | vision | ocr+vision */
+  path?: string
+  text?: string
+  error?: string
 }
 
 export interface MsgAttachment {

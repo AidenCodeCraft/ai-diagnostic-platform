@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -22,6 +24,60 @@ from app.core.logging_config import get_logger
 from app.services.knowledge.embedding import get_embedder
 
 logger = get_logger(__name__)
+
+# ── 章节级向量库 schema（v3）────────────────────────────────────────
+# 一条记录 = 文档的一个章节 或 一条日志证据块（用 chunk_type 区分）
+# 变更 schema 必须重建集合：_ensure_collection 检测到不匹配会明确报错，
+# 不做静默兼容——维度或度量不一致时的相似度分数没有意义。
+COLLECTION_SCHEMA_VERSION = "v3"
+MAX_CHUNKS_PER_DOC = 100000   # 主键 = doc_id * 100000 + chunk_index
+MAX_CONTENT_LENGTH = 8192
+
+# chunk_type 取值：知识库章节 / 日志错误事件 / 日志模板摘要
+CHUNK_TYPE_SECTION = "section"
+CHUNK_TYPE_ERROR = "error"
+CHUNK_TYPE_TEMPLATE = "template"
+KNOWLEDGE_CHUNK_TYPES = (CHUNK_TYPE_SECTION,)
+
+
+def build_collection_fields(dim: int):
+    """章节级 collection 字段定义（导入 pymilvus 后才能调用）。"""
+    from pymilvus import DataType, FieldSchema
+
+    return [
+        FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=False),
+        FieldSchema(name="doc_id", dtype=DataType.INT64),
+        FieldSchema(name="chunk_index", dtype=DataType.INT32),
+        FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=MAX_CONTENT_LENGTH),
+        FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=512),
+        FieldSchema(name="section", dtype=DataType.VARCHAR, max_length=512),
+        FieldSchema(name="content_hash", dtype=DataType.VARCHAR, max_length=64),
+        # 知识章节与日志证据块同集合存放，检索必须按 chunk_type 过滤，
+        # 否则日志里的报错文本会污染知识问答召回
+        FieldSchema(name="chunk_type", dtype=DataType.VARCHAR, max_length=16),
+        FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=128),
+        FieldSchema(name="ts", dtype=DataType.VARCHAR, max_length=32),
+        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
+    ]
+
+
+def build_index_params() -> Dict[str, Any]:
+    """HNSW + COSINE：十万~百万级召回比 IVF_FLAT 稳，且度量语义明确。"""
+    return {
+        "metric_type": "COSINE",
+        "index_type": "HNSW",
+        "params": {"M": 32, "efConstruction": 256},
+    }
+
+
+def build_search_params() -> Dict[str, Any]:
+    return {"metric_type": "COSINE", "params": {"ef": 64}}
+
+
+REQUIRED_FIELDS = (
+    "id", "doc_id", "chunk_index", "content", "title", "section",
+    "content_hash", "chunk_type", "source", "ts", "embedding",
+)
 
 # Milvus 相关导入
 _milvus_available = False
@@ -66,6 +122,7 @@ class VectorService:
         self._embedding_load_attempts = 0
         self._embedding_last_error: Optional[BaseException] = None
         self._dim = int(getattr(settings, "MILVUS_DIM", 512) or 512)
+        self._schema_error: Optional[str] = None
         self._connect()
         if self._connected:
             self._ensure_embedding()
@@ -226,23 +283,27 @@ class VectorService:
                 existing_dim = self._read_collection_dim()
                 if existing_dim:
                     self._dim = existing_dim
+                problem = self._validate_schema()
+                if problem:
+                    # 维度/度量/字段不一致时不允许继续：分数没有意义，且旧集合里是旧模型的向量
+                    self._schema_error = problem
+                    logger.error("[VectorService] 集合 %s 与当前配置不兼容：%s", self._COLLECTION_NAME, problem)
+                    self._connected = False
+                    self._collection = None
+                    return
                 logger.info(
                     "[VectorService] Collection '%s' exists (dim=%d), ensuring index",
                     self._COLLECTION_NAME, self._dim,
                 )
             else:
-                # 创建新的 collection
-                fields = [
-                    FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=False),
-                    FieldSchema(name="doc_id", dtype=DataType.INT64),
-                    FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=2000),
-                    FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=self._dim),
-                ]
-                schema = CollectionSchema(fields, description="Knowledge document embeddings")
+                schema = CollectionSchema(
+                    build_collection_fields(self._dim),
+                    description=f"Knowledge sections ({COLLECTION_SCHEMA_VERSION})",
+                )
                 self._collection = Collection(self._COLLECTION_NAME, schema)
                 logger.info(
-                    "[VectorService] Collection '%s' created (dim=%d)",
-                    self._COLLECTION_NAME, self._dim,
+                    "[VectorService] Collection '%s' created (%s, dim=%d)",
+                    self._COLLECTION_NAME, COLLECTION_SCHEMA_VERSION, self._dim,
                 )
 
             # 必须先建索引，后 load（Milvus 2.4+ 不允许无索引 load）
@@ -277,18 +338,53 @@ class VectorService:
         except Exception as exc:  # noqa: BLE001 - 读不到索引列表时尝试补建
             logger.warning("[VectorService] Read collection indexes failed: %s", exc)
 
-        # 创建 IVF_FLAT 索引（适合中等规模数据）
-        index_params = {
-            "metric_type": "IP",  # Inner Product (余弦相似度的代理)
-            "index_type": "IVF_FLAT",
-            "params": {"nlist": 128},
-        }
+        index_params = build_index_params()
         self._collection.create_index("embedding", index_params)
         logger.info(
-            "[VectorService] Created IVF_FLAT/IP index for collection '%s'",
-            self._COLLECTION_NAME,
+            "[VectorService] Created %s/%s index for collection '%s'",
+            index_params["index_type"], index_params["metric_type"], self._COLLECTION_NAME,
         )
         return True
+
+    def _validate_schema(self) -> Optional[str]:
+        """校验已有集合与当前配置是否兼容；返回问题描述，None 表示一致。
+
+        为什么不做兼容或自动迁移：旧集合里存的是旧模型（512 维哈希/BGE-small）的向量，
+        与新维度混算出来的相似度没有意义；度量不一致（IP vs COSINE）同理。
+        这种情况必须重建集合并回填，宁可明确报错也不要给出「看起来正常」的错误排名。
+        """
+        try:
+            fields = {field.name for field in self._collection.schema.fields}
+        except Exception as exc:  # noqa: BLE001
+            return f"无法读取集合 schema：{exc}"
+
+        missing = [name for name in REQUIRED_FIELDS if name not in fields]
+        if missing:
+            return (
+                f"缺少字段 {missing}：该集合是「整篇文档」旧版结构（schema {COLLECTION_SCHEMA_VERSION} 要求章节级字段），"
+                f"请重建集合 {self._COLLECTION_NAME} 并回填"
+            )
+
+        dim = self._read_collection_dim()
+        if dim and int(dim) != int(self._dim):
+            return (
+                f"向量维度 {dim} 与配置 MILVUS_DIM={self._dim} 不一致（模型已更换），"
+                f"请重建集合 {self._COLLECTION_NAME} 并回填"
+            )
+
+        expected_metric = str(build_index_params()["metric_type"])
+        try:
+            for index in self._collection.indexes:
+                params = getattr(index, "params", None) or {}
+                metric = params.get("metric_type")
+                if metric and str(metric).upper() != expected_metric:
+                    return (
+                        f"索引度量 {metric} 与期望 {expected_metric} 不一致，"
+                        f"请重建集合 {self._COLLECTION_NAME}"
+                    )
+        except Exception:  # noqa: BLE001 - 读不到索引信息时不阻断（后续 _ensure_vector_index 会补建）
+            logger.debug("[VectorService] 读取索引度量失败", exc_info=True)
+        return None
 
     def _read_collection_dim(self) -> Optional[int]:
         """读取已有 collection 的 embedding 维度。"""
@@ -304,12 +400,26 @@ class VectorService:
     # Public API
     # ==================================================================
 
+    @staticmethod
+    def _compose_filter(
+        filter_expr: Optional[str], chunk_types: Optional[List[str]],
+    ) -> Optional[str]:
+        """把 chunk_type 白名单合并进标量过滤表达式。"""
+        if not chunk_types:
+            return filter_expr
+        quoted = ", ".join(f'"{value}"' for value in chunk_types)
+        clause = f"chunk_type in [{quoted}]"
+        if not filter_expr:
+            return clause
+        return f"({filter_expr}) and ({clause})"
+
     def search(
         self,
         query: str,
         top_k: int = 5,
         _collection: Optional[str] = None,  # reserved for future multi-collection support
         filter_expr: Optional[str] = None,
+        chunk_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """向量相似度搜索。
 
@@ -318,6 +428,8 @@ class VectorService:
             top_k: 返回的最相关结果数
             collection: Milvus collection 名称
             filter_expr: 标量过滤表达式（如 "doc_id > 100"）
+            chunk_types: 只在这些 chunk_type 内检索；知识问答必须传 ("section",)，
+                否则日志证据块（error/template）会被当成知识召回
 
         Returns:
             [{"id": doc_id, "score": similarity, "content": "...", "doc_id": int}, ...]
@@ -349,16 +461,19 @@ class VectorService:
                 )
                 return []
 
-            # 2. 执行向量搜索
-            search_params = {"metric_type": "IP", "params": {"nprobe": 16}}
+            # 2. 执行向量搜索（COSINE + HNSW，与建索引时的度量保持一致）
+            search_params = build_search_params()
 
             results = self._collection.search(
                 data=[query_embedding],
                 anns_field="embedding",
                 param=search_params,
                 limit=top_k,
-                expr=filter_expr,
-                output_fields=["doc_id", "content"],
+                expr=self._compose_filter(filter_expr, chunk_types),
+                output_fields=[
+                    "doc_id", "content", "title", "section", "chunk_index",
+                    "chunk_type", "source", "ts",
+                ],
             )
 
             search_time = time.time() - start_time - embed_time
@@ -378,6 +493,12 @@ class VectorService:
                     "id": int(hit.entity.get("doc_id") or 0),
                     "score": float(hit.score),
                     "content": hit.entity.get("content") or "",
+                    "title": hit.entity.get("title") or "",
+                    "section": hit.entity.get("section") or "",
+                    "chunk_index": int(hit.entity.get("chunk_index") or 0),
+                    "chunk_type": hit.entity.get("chunk_type") or CHUNK_TYPE_SECTION,
+                    "source": hit.entity.get("source") or "",
+                    "ts": hit.entity.get("ts") or "",
                 }
                 for hit in results[0]
             ]
@@ -386,12 +507,54 @@ class VectorService:
             logger.error("[VectorService] Search error: %s", exc)
             return []
 
+    @staticmethod
+    def _build_chunks(doc_id: int, content: str, doc_title: str = "") -> Tuple[str, List[Dict[str, Any]]]:
+        """按 Markdown 章节切分，返回 (文档标题, chunks)。
+
+        索引文本 = 标题 + 章节标题 + 正文：标题前缀对「问的是哪个知识点」贡献最大，
+        也是此前 BM25 结构提权想做但做歪了的事。
+        """
+        from app.services.knowledge.sections import (
+            MIN_SECTION_CHARS,
+            content_hash as section_content_hash,
+            is_placeholder_section,
+            split_markdown_sections,
+        )
+
+        title = (doc_title or "").strip()
+        if not title:
+            for line in (content or "").splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                title = stripped.lstrip("#").strip()[:120] if stripped.startswith("#") else stripped[:120]
+                break
+
+        chunks: List[Dict[str, Any]] = []
+        for heading, body in split_markdown_sections(content or ""):
+            body = (body or "").strip()
+            # 与检索侧同一口径：过短碎片 + 占位章节一律不成块。
+            # 索引里若留着检索侧不认的块，dense top-k 会被它们占满后整段丢弃。
+            if len(body) < MIN_SECTION_CHARS or is_placeholder_section(body):
+                # 占位章节不进索引：写进去只会占满 dense top-k，
+                # 取回来又因为映射不到章节而被丢掉，等于让检索变瞎
+                continue
+            chunks.append({
+                "title": title,
+                "section": (heading or "").strip(),
+                "content": body,
+                "index_text": f"{title}\n{heading}\n{body}".strip(),
+                "content_hash": section_content_hash(title, heading or "", body),
+            })
+        return title, chunks
+
     def index_document(
         self,
         doc_id: int,
         content: str,
-        chunk_size: int = 500,
-        overlap: int = 50,
+        chunk_size: int = 500,  # noqa: ARG002 - 章节切分取代固定窗口，保留参数兼容旧调用
+        overlap: int = 50,      # noqa: ARG002
+        title: str = "",
     ) -> int:
         """索引一个文档（分块嵌入后插入 Milvus）。
 
@@ -421,12 +584,12 @@ class VectorService:
             # 1. 删除旧向量（如果存在）
             self.delete_document(doc_id)
 
-            # 2. 分块 + 嵌入
-            chunks = self._embedding._chunk_text(content, chunk_size, overlap)
+            # 2. 按章节切分（一条记录 = 一个章节，命中粒度=知识点）
+            doc_title, chunks = self._build_chunks(doc_id, content, doc_title=title)
             if not chunks:
                 return 0
 
-            embeddings = self._embedding.embed_batch(chunks)
+            embeddings = self._embedding.embed_batch([chunk["index_text"] for chunk in chunks])
             if embeddings and len(embeddings[0]) != self._dim:
                 logger.error(
                     "[VectorService] Embedding dim mismatch: got %d, expected %d; "
@@ -435,29 +598,34 @@ class VectorService:
                 )
                 return 0
 
-            # 3. 构建插入数据
-            # 使用 (doc_id, chunk_index) 组合作为主键
-            insert_ids = []
-            insert_doc_ids = []
-            insert_contents = []
-            insert_embeddings = []
-
+            # 3. 构建插入数据（主键 = doc_id * MAX_CHUNKS_PER_DOC + chunk_index）
+            ids, doc_ids, indexes, contents, titles, sections, hashes = (
+                [], [], [], [], [], [], [],
+            )
+            chunk_types = [CHUNK_TYPE_SECTION] * len(chunks)
+            sources = ["knowledge"] * len(chunks)
+            timestamps = [""] * len(chunks)
+            vectors = []
             for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
-                # 生成唯一主键：doc_id * 10000 + chunk_index
-                pk = doc_id * 10000 + i
-                insert_ids.append(pk)
-                insert_doc_ids.append(doc_id)
-                insert_contents.append(chunk[:2000])
-                insert_embeddings.append(emb)
+                ids.append(doc_id * MAX_CHUNKS_PER_DOC + i)
+                doc_ids.append(doc_id)
+                indexes.append(i)
+                contents.append(chunk["content"][:MAX_CONTENT_LENGTH])
+                titles.append(chunk["title"][:512])
+                sections.append(chunk["section"][:512])
+                hashes.append(chunk["content_hash"])
+                vectors.append(emb)
 
-            # 4. 插入 Milvus
-            entities = [insert_ids, insert_doc_ids, insert_contents, insert_embeddings]
-            self._collection.insert(entities)
+            # 4. 插入 Milvus（列顺序必须与 build_collection_fields 一致）
+            self._collection.insert([
+                ids, doc_ids, indexes, contents, titles, sections, hashes,
+                chunk_types, sources, timestamps, vectors,
+            ])
             self._collection.flush()
 
             logger.info(
-                "[VectorService] Indexed doc %d: %d chunks",
-                doc_id, len(chunks),
+                "[VectorService] Indexed doc %d: %d section chunks (title=%s)",
+                doc_id, len(chunks), doc_title[:40],
             )
             return len(chunks)
 
@@ -485,6 +653,73 @@ class VectorService:
         for doc_id, content in docs:
             total += self.index_document(doc_id, content, chunk_size, overlap)
         return total
+
+    def delete_by_expr(self, expr: str) -> bool:
+        """按标量表达式删除（日志证据块重新索引时先清旧数据）。"""
+        if not self.available or self._collection is None:
+            return False
+        try:
+            self._collection.delete(expr=expr)
+            self._collection.flush()
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[VectorService] delete_by_expr(%s) failed: %s", expr, exc)
+            return False
+
+    def index_log_chunks(self, log_id: int, chunks: List[Dict[str, Any]]) -> int:
+        """写入日志证据块（chunk_type = error / template）。
+
+        chunks: [{"chunk_type","ts","title","section","content","index_text","content_hash"}]
+
+        主键取负数（-(log_id * MAX_CHUNKS_PER_DOC + i)）：知识文档用正数，
+        日志块用负数，两边主键空间天然不重叠，也不会误删知识库向量。
+        """
+        if not chunks:
+            return 0
+        if not self.available or self._collection is None:
+            logger.debug("[VectorService] Milvus unavailable, skip log chunks %d", log_id)
+            return 0
+        if self._embedding is None:
+            logger.warning("[VectorService] Embedding unavailable, skip log chunks %d", log_id)
+            return 0
+
+        try:
+            embeddings = self._embedding.embed_batch([chunk["index_text"] for chunk in chunks])
+            if not embeddings or len(embeddings[0]) != self._dim:
+                logger.error(
+                    "[VectorService] Log chunk embedding dim mismatch (got %s, expected %d)",
+                    len(embeddings[0]) if embeddings else 0, self._dim,
+                )
+                return 0
+
+            source = f"log:{log_id}"
+            ids, doc_ids, indexes, contents, titles, sections, hashes = (
+                [], [], [], [], [], [], [],
+            )
+            chunk_types, sources, timestamps, vectors = [], [], [], []
+            for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+                ids.append(-(log_id * MAX_CHUNKS_PER_DOC + i))
+                doc_ids.append(0)                      # 0 = 不属于任何知识文档
+                indexes.append(i)
+                contents.append(chunk["content"][:MAX_CONTENT_LENGTH])
+                titles.append(chunk.get("title", "")[:512])
+                sections.append(chunk.get("section", "")[:512])
+                hashes.append(chunk.get("content_hash", ""))
+                chunk_types.append(chunk["chunk_type"])
+                sources.append(source)
+                timestamps.append(chunk.get("ts", "")[:32])
+                vectors.append(emb)
+
+            self._collection.insert([
+                ids, doc_ids, indexes, contents, titles, sections, hashes,
+                chunk_types, sources, timestamps, vectors,
+            ])
+            self._collection.flush()
+            logger.info("[VectorService] Indexed %d log chunks for log %d", len(chunks), log_id)
+            return len(chunks)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[VectorService] index_log_chunks(%d) failed: %s", log_id, exc)
+            return 0
 
     def delete_document(self, doc_id: int) -> bool:
         """删除文档的所有向量。
@@ -543,6 +778,11 @@ class VectorService:
         if self._collection is None or self._embedding is None:
             return False
         return self.health_check()
+
+    @property
+    def schema_error(self) -> Optional[str]:
+        """集合与配置不兼容的原因（None 表示兼容）。"""
+        return self._schema_error
 
     @property
     def collection_name(self) -> str:

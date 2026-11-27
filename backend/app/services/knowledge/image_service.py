@@ -223,23 +223,31 @@ class KnowledgeImageService:
 
         # 1) 章节区间过滤：图片属于哪个知识点，由它在文档中的位置决定
         start, end = section_range or (0, 0)
-        if content and start > 0 and end >= start:
+        ranged = (start, end) if start > 0 and end >= start else None
+        # 检索层返回的章节经常没有行号（_section 里 start_line/end_line 为 None），
+        # 而锚点「关键字解释」这类小节名在同一篇文档里会重复出现 N 次。
+        # 只按锚点匹配就会把同名小节里别的知识点的配图挂上来——所以有正文时先把区间算出来。
+        anchor_ambiguous = False
+        if content and anchor:
+            located = self._locate_section_range(content, anchor, query)
+            if located:
+                ranged = located
+            else:
+                # 有正文却定位不出这一节：多半是「关键字解释」这类同名小节重复出现。
+                # 此时锚点匹配毫无区分度（会把别的知识点的配图挂上来），只能靠主题重合度。
+                anchor_ambiguous = True
+        if content and ranged:
             inside: List[KnowledgeImage] = []
-            unknown: List[KnowledgeImage] = []
             for img in images:
                 line = self._image_line(content, img)
-                if line is None:
-                    unknown.append(img)
-                elif start <= line <= end:
+                if line is not None and ranged[0] <= line <= ranged[1]:
                     inside.append(img)
-                # 区间外 → 明确属于其它知识点，排除
-            if inside:
-                return self._rank_with_penalty(inside, penalties, top_k)
-            candidates = unknown  # 只有"定位不了"的图片才走下面的回退规则
+                # 区间外/定位不了 → 不属于这一节，排除
+            return self._rank_with_penalty(inside, penalties, top_k)
 
-        # 2) 章节锚点匹配
+        # 2) 章节锚点匹配（仅在拿不到正文、无法按行号定位时使用）
         a = (anchor or "").strip()
-        if a and candidates:
+        if a and candidates and not anchor_ambiguous:
             matched = [img for img in candidates if self._anchor_matches(img.anchor, a)]
             if matched:
                 return self._rank_with_penalty(matched, penalties, top_k)
@@ -286,6 +294,100 @@ class KnowledgeImageService:
                 return None  # 多处出现，无法唯一定位
             return content.count("\n", 0, first + len(tail)) + 1
         return None
+
+
+    # ── 章节定位（锚点 → 行号区间）────────────────────────────
+    _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+    _NUMBERING_RE = re.compile(r"^[0-9一二三四五六七八九十]+[.、．)）]\s*")
+
+    @classmethod
+    def _norm_heading(cls, text: str) -> str:
+        s = cls._NUMBERING_RE.sub("", (text or "").strip())
+        return re.sub(r"\s+", "", s)
+
+    @classmethod
+    def _heading_matches(cls, heading: str, segment: str) -> bool:
+        a, b = cls._norm_heading(heading), cls._norm_heading(segment)
+        if not a or not b:
+            return False
+        return a == b or a.endswith(b) or b.endswith(a)
+
+    def _headings(self, lines: list[str]) -> list[tuple[int, int, str]]:
+        """正文里所有标题：(0-based 行下标, 级别, 标题文字)。"""
+        out = []
+        for i, line in enumerate(lines):
+            m = self._HEADING_RE.match(line)
+            if m:
+                out.append((i, len(m.group(1)), m.group(2)))
+        return out
+
+    def _section_bounds(self, heads, h_i: int, level: int, window_end: int) -> int:
+        """从标题行往后找同级或更高级标题，返回该小节最后一行（0-based）。"""
+        for h2, level2, _text in heads:
+            if h2 > h_i and level2 <= level and h2 <= window_end:
+                return h2 - 1
+        return window_end
+
+    def _locate_section_range(
+        self, content: str, anchor: str, query: str = "",
+    ) -> Optional[Tuple[int, int]]:
+        """把章节锚点定位成 (start_line, end_line)（1-based，含行）。
+
+        锚点可能是层级标题（`4. TMP更新XML > 关键字解释`）：逐级收窄窗口，
+        子标题只在父标题范围内找，这样同名小节不会互相串台。
+        """
+        if not content or not anchor:
+            return None
+        lines = content.split(chr(10))
+        heads = self._headings(lines)
+        if not heads:
+            return None
+
+        window_start, window_end = 0, len(lines) - 1
+        found: Optional[Tuple[int, int]] = None
+        for segment in [s.strip() for s in re.split(r"[>›/]", anchor) if s.strip()]:
+            cands = [
+                h for h in heads
+                if window_start <= h[0] <= window_end and self._heading_matches(h[2], segment)
+            ]
+            if not cands:
+                return found
+            if len(cands) > 1:
+                best = self._pick_heading(cands, lines, query)
+                if best is None:
+                    # 同名小节且没有足够线索区分 → 不猜，宁可不给区间
+                    return found
+                cands = [best]
+            h_i, level, _text = cands[0]
+            end = self._section_bounds(heads, h_i, level, window_end)
+            found = (h_i + 1, end + 1)  # 转 1-based
+            window_start, window_end = h_i, end
+        return found
+
+    @classmethod
+    def _pick_heading(cls, cands, lines: list[str], query: str):
+        """多个同名小节时，用查询主题词在各自正文里的重合度挑唯一最优；挑不出来返回 None。"""
+        runs = [r for r in re.findall(r"[一-鿿]{4,}|[a-z0-9_]{4,}", (query or "").lower())]
+        if not runs:
+            return None
+        heads = [(i, len(m.group(1)), m.group(2)) for i, l in enumerate(lines)
+                 if (m := cls._HEADING_RE.match(l))]
+        scored = []
+        for h_i, level, _text in cands:
+            end = len(lines)
+            for h2, level2, _t2 in heads:
+                if h2 > h_i and level2 <= level:
+                    end = h2
+                    break
+            body = chr(10).join(lines[h_i + 1:end]).lower()
+            scored.append((sum(1 for r in runs if r in body), h_i))
+        scored.sort(reverse=True)
+        if not scored or scored[0][0] == 0:
+            return None
+        if len(scored) > 1 and scored[1][0] == scored[0][0]:
+            return None
+        target = scored[0][1]
+        return next((h for h in cands if h[0] == target), None)
 
     def _rank_with_penalty(
         self,
@@ -346,8 +448,14 @@ class KnowledgeImageService:
         例：查"设备端日志搜索版本号什么关键字"，图片上下文只有"日志搜索"（4 字）
             重合 → 判定不相关；查"线路运行方向相反"整段命中 → 相关。
         """
+        # 章节名与标题行不能算作「图片内容」：否则同名小节（关键字解释 ×N）
+        # 会让每张图都命中查询里的章节名，等价于没有区分度。
+        ctx = re.sub(r"(?m)^\s{0,3}#{1,6}.*$", " ", img.context_text or "")
+        anchor_text = (img.anchor or "").strip()
+        if anchor_text:
+            ctx = ctx.replace(anchor_text, " ")
         text = " ".join(
-            x for x in [img.caption or "", img.anchor or "", img.context_text or ""] if x
+            x for x in [img.caption or "", ctx] if x
         ).lower()
         q = (query or "").lower().strip()
         if not text or not q:

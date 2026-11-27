@@ -70,7 +70,8 @@ class ChatService:
         if is_pinned is not None:
             setattr(s, 'is_pinned', bool(is_pinned))
         if context is not None:
-            existing = s.context or {}
+            # 必须赋新 dict：SQLAlchemy 的 JSON 列不追踪原地修改，直接 update 会丢更新
+            existing = dict(s.context or {})
             existing.update(context)
             setattr(s, 'context', existing)
         self.db.commit()
@@ -150,6 +151,136 @@ class ChatService:
         session = self.get_session(session_id)
         ctx = session.context or {}
         return ctx.get("last_analysis")
+
+    def _check_log_slots(self, session_id: int, content: str) -> Optional[str]:
+        """附日志提问的槽位闸门（P1 步骤 1）。
+
+        缺项时返回追问文本，并把已抽到的槽位暂存到会话上下文，便于补答时合并；
+        齐全时清空暂存并写入 `active_slots` 供后续时间轴/定位阶段使用。
+
+        注意：**不允许**默认「现在」充当时间点——那会让日志定位范围发散。
+        """
+        from app.services.chat.slot_gate import (
+            build_slot_clarification,
+            extract_slots,
+            merge_slots,
+        )
+
+        session = self.get_session(session_id)
+        pending = (session.context or {}).get("pending_slots") or {}
+        extraction = extract_slots(content, has_attachment=True)
+        merged = merge_slots(pending, extraction.slots)
+
+        required = ("city", "device", "phenomenon", "time", "attachment")
+        missing = [key for key in required if not merged.get(key)]
+        if missing:
+            self.update_session(session_id, context={"pending_slots": merged})
+            return build_slot_clarification(missing)
+
+        self.update_session(
+            session_id, context={"pending_slots": {}, "active_slots": merged},
+        )
+        return None
+
+    def _check_time_window(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """时间点是否落在日志覆盖范围内（P1 步骤 3）。
+
+        不在范围内时返回 {reply, options}，并把候选时段暂存到上下文，
+        供下一轮「用户选时段」时续跑。
+        """
+        from app.services.chat.time_gate import check_time_window
+
+        session = self.get_session(session_id)
+        context = session.context or {}
+        result = check_time_window(
+            context.get("active_slots") or {},
+            context.get("last_analysis") or {},
+        )
+        if result:
+            self.update_session(session_id, context={
+                "pending_time_choice": result.get("options"),
+                "asked_time": result.get("asked"),
+            })
+        return result
+
+    def _record_time_mismatch_trace(self, session_id: int, content: str) -> None:
+        """时间不在日志范围的轨迹（conclusion=time_mismatch）。"""
+        try:
+            from app.services.quality.trace_service import (
+                CONCLUSION_TIME_MISMATCH, record_trace,
+            )
+
+            record_trace(
+                self.db,
+                session_id=session_id,
+                question=content,
+                clarification=[{"slot": "time_range"}],
+                conclusion=CONCLUSION_TIME_MISMATCH,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[chat] record time-mismatch trace failed", exc_info=True)
+
+    def _build_log_context(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """为本次提问装配日志时间窗与片段（无日志/无时间窗时返回 None）。
+
+        日志引用优先取分析结果里的字段；分析结果通常不含存储引用，
+        因此回退到会话绑定的 Log.file_path（上传时写入的 minio:// 或本地路径）。
+        """
+        try:
+            from app.services.chat.log_context import build_log_context
+
+            session = self.get_session(session_id)
+            context = session.context or {}
+            analysis = dict(context.get("last_analysis") or {})
+
+            if not any(analysis.get(key) for key in ("reference", "file_path", "stored_path")):
+                log_id = getattr(session, "log_id", None)
+                if log_id:
+                    from app.models import Log
+
+                    log = self.db.query(Log).filter(Log.id == log_id).first()
+                    if log and log.file_path:
+                        analysis["reference"] = str(log.file_path)
+
+            log_context = build_log_context(
+                context.get("active_slots") or {}, analysis, context,
+            )
+            payload = log_context.to_dict() if log_context else None
+
+            # 会话内截图（对话界面粘贴/上传）的识别文本，作为现场证据并列注入
+            images = self._session_image_evidence(session_id)
+            if images:
+                payload = dict(payload or {})
+                payload["image_evidence"] = images
+            return payload
+        except Exception:  # noqa: BLE001
+            logger.debug("[chat] build log context failed", exc_info=True)
+            return None
+
+    def _session_image_evidence(self, session_id: int) -> List[Dict[str, Any]]:
+        """最近成功的截图识别文本（失败静默返回空——证据是增强项）。"""
+        try:
+            from app.services.vision.image_service import ChatImageService
+
+            return ChatImageService(self.db).texts_for_session(session_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("[chat] load image evidence failed", exc_info=True)
+            return []
+
+    def _record_gate_trace(self, session_id: int, content: str) -> None:
+        """槽位缺失追问的轨迹（结论分支 ask_slot），便于黄金集统计负样本。"""
+        try:
+            from app.services.quality.trace_service import CONCLUSION_ASK_SLOT, record_trace
+
+            record_trace(
+                self.db,
+                session_id=session_id,
+                question=content,
+                clarification=[{"slot": "log_slots"}],
+                conclusion=CONCLUSION_ASK_SLOT,
+            )
+        except Exception:  # noqa: BLE001 - 观测附产物
+            logger.debug("[chat] record slot-gate trace failed", exc_info=True)
 
     def _build_messages(self, session_id: int) -> List[Dict[str, str]]:
         history = self.get_messages(session_id)
@@ -254,6 +385,29 @@ class ChatService:
             first_user = user_messages[0].get("content", "")[:20].strip()
             return first_user if first_user else "新对话"
 
+    def _record_retrieval_trace(
+        self, session_id: int, content: str, agent, direct_reply: Optional[str],
+    ) -> None:
+        """把本次检索轨迹落库（失败不影响对话）。"""
+        try:
+            from app.services.quality.trace_service import record_trace, resolve_conclusion
+
+            clarification = getattr(agent, "clarification_questions", None)
+            evidence = getattr(agent, "log_evidence", None) or {}
+            record_trace(
+                self.db,
+                session_id=session_id,
+                question=content,
+                references=getattr(agent, "references", None),
+                clarification=clarification,
+                conclusion=resolve_conclusion(direct_reply, clarification),
+                log_id=getattr(agent, "log_id", None),
+                log_patterns={"patterns": evidence.get("patterns") or []} if evidence else None,
+                log_blocks=(evidence.get("locate") or None) if evidence else None,
+            )
+        except Exception:  # noqa: BLE001 - 观测附产物，绝不影响主流程
+            logger.debug("[chat] record retrieval trace failed", exc_info=True)
+
     def send_message(
         self,
         session_id: int,
@@ -274,11 +428,30 @@ class ChatService:
         if log_analysis:
             self.update_session(session_id, context={"last_analysis": log_analysis})
 
+        # 附日志提问：先过槽位闸门，缺项直接追问（不检索、不调 LLM）
+        if resolved_analysis:
+            gate_reply = self._check_log_slots(session_id, content)
+            if gate_reply:
+                self.add_message(session_id, "assistant", gate_reply, user_id=user_id)
+                self._record_gate_trace(session_id, content)
+                return {"reply": gate_reply, "model": provider_name}
+
+            mismatch = self._check_time_window(session_id)
+            if mismatch:
+                self.add_message(session_id, "assistant", mismatch["reply"], user_id=user_id)
+                self._record_time_mismatch_trace(session_id, content)
+                return {
+                    "reply": mismatch["reply"], "model": provider_name,
+                    "time_options": mismatch.get("options") or [],
+                }
+
         # Enrich with diagnostic context（按会话所属项目过滤知识）
         agent = DiagnosticChatAgent(
             self.db, provider_name, project_id=getattr(session, "project_id", None),
+            log_context=self._build_log_context(session_id),
         )
         messages, direct_reply = agent.enrich_messages(session_id, content, messages, resolved_analysis)
+        self._record_retrieval_trace(session_id, content, agent, direct_reply)
 
         if direct_reply is not None:
             reply = direct_reply
@@ -316,12 +489,33 @@ class ChatService:
         if log_analysis:
             self.update_session(session_id, context={"last_analysis": log_analysis})
 
+        # 附日志提问：先过槽位闸门，缺项直接追问（不检索、不调 LLM）
+        if resolved_analysis:
+            gate_reply = self._check_log_slots(session_id, content)
+            if gate_reply:
+                self._record_gate_trace(session_id, content)
+                for char in gate_reply:
+                    yield f"data: {json.dumps({'token': char}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'done': True, 'model': provider_name})}\n\n"
+                return
+
+            mismatch = self._check_time_window(session_id)
+            if mismatch:
+                self._record_time_mismatch_trace(session_id, content)
+                yield f"data: {json.dumps({'time_options': mismatch.get('options') or []}, ensure_ascii=False)}\n\n"
+                for char in mismatch["reply"]:
+                    yield f"data: {json.dumps({'token': char}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'done': True, 'model': provider_name})}\n\n"
+                return
+
         # Enrich with diagnostic context (knowledge search + analysis)
         try:
             agent = DiagnosticChatAgent(
                 self.db, provider_name, project_id=getattr(session, "project_id", None),
+                log_context=self._build_log_context(session_id),
             )
             messages, direct_reply = agent.enrich_messages(session_id, content, messages, resolved_analysis)
+            self._record_retrieval_trace(session_id, content, agent, direct_reply)
             if agent.references:
                 yield f"data: {json.dumps({'sources': agent.references}, ensure_ascii=False)}\n\n"
             if getattr(agent, "clarification_questions", None):

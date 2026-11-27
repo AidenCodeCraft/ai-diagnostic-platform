@@ -55,6 +55,11 @@
 
     <!-- 帮助与反馈弹窗 -->
     <HelpDialog :visible="showHelp" @close="showHelp = false" />
+    <GoldenSampleDialog
+      v-model="annotateVisible"
+      :question="annotateQuestion"
+      :session-id="currentChatId"
+    />
 
     <!-- 下载客户端弹窗 -->
     <DownloadDialog :visible="showDownload" @close="showDownload = false" />
@@ -90,12 +95,15 @@
             :chatId="currentChatId"
             @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editSend="handleEditSend"
             @switchVersion="handleSwitchVersion"
+            @annotate="handleAnnotate"
             @selectClarification="onSelectClarification" />
           <div class="input-wrapper">
-            <ChatInputArea v-model="inputText" :files="attachedFiles" :selectedModel="selectedModel"
+            <ChatInputArea v-model="inputText" :files="attachedFiles" :images="attachedImages"
+              :selectedModel="selectedModel"
               :isUploading="isUploading" :canReport="canGenerateReport" :hasMessages="messages.length > 0"
               :isStreaming="loadingPhase === 'streaming'"
               @send="sendMessage" @stop="stopChatStream(currentChatId)" @fileInput="onFileInput"
+              @imageInput="onImageInput" @removeImage="removeImage"
               @removeFile="removeFile" @modelChange="onModelChange"
               @generateReport="generateDiagnosticReport" />
           </div>
@@ -126,6 +134,7 @@ import { adminApi } from '@/api/admin'
 import { useUserStore } from '@/stores/user'
 import { exportChat as exportChatUtil } from '@/utils/export'
 import { pollAnalysis } from '@/utils/analysisPoll'
+import { watchIngestProgress } from '@/utils/ingestProgress'
 import type { ExportMessage } from '@/utils/export'
 import { getActiveChatId, setActiveChatId, removeActiveChatId } from '@/utils/sessionState'
 
@@ -135,10 +144,11 @@ import ChatInputArea from '@/components/chat/ChatInputArea.vue'
 import UserMenu from '@/components/common/UserMenu.vue'
 import SettingsDialog from '@/components/common/SettingsDialog.vue'
 import HelpDialog from '@/components/common/HelpDialog.vue'
+import GoldenSampleDialog from '@/components/common/GoldenSampleDialog.vue'
 import DownloadDialog from '@/components/common/DownloadDialog.vue'
 import ReportDialog from '@/components/common/ReportDialog.vue'
 import BranchPanel from '@/components/common/BranchPanel.vue'
-import type { ChatRecord, FileAttachment, MsgAttachment } from '@/components/chat/types'
+import type { ChatRecord, FileAttachment, ImageAttachment, MsgAttachment } from '@/components/chat/types'
 import { useChatBranch } from '@/composables/useChatBranch'
 
 // ── State ──────────────────────────────────────────────────────
@@ -216,7 +226,7 @@ async function loadChatConcurrencyConfig() {
 // 按 createdAt 升序排列，使用 ID 去重（而非内容去重）
 const displayMessages = computed(() => {
   const seen = new Set<string>()
-  return [...messages.value]
+  const sorted = [...messages.value]
     .filter(m => {
       // 使用消息 ID 去重，而不是内容哈希
       // 这样即使内容相同，只要是不同的消息实例也能正常显示
@@ -225,10 +235,30 @@ const displayMessages = computed(() => {
       return true
     })
     .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+
+  // 编辑重发 = 从该提问处开新分支：新版本之后的旧对话不再属于当前分支。
+  // 版本项上记的 `truncates`（编辑时刻）就是分界：比它更早创建的后续消息属于旧分支，
+  // 只有切回旧版本时才显示（与 DeepSeek 网页版一致）。
+  const cuts: Array<{ boundary: number; cutAt: number }> = []
+  sorted.forEach((m, i) => {
+    if (m.role !== 'user') return
+    const version = m.versions?.[m.activeVersion ?? 0]
+    const cutAt = Number(version?.truncates || 0)
+    if (!cutAt) return
+    const boundary = sorted[i + 1]?.role === 'assistant' ? i + 1 : i
+    cuts.push({ boundary, cutAt })
+  })
+  if (!cuts.length) return sorted
+
+  return sorted.filter((m, idx) => {
+    const at = m.createdAt || 0
+    return !cuts.some(c => idx > c.boundary && at <= c.cutAt)
+  })
 })
 const messageIds = new Set<string>()
 
 const attachedFiles = ref<FileAttachment[]>([])
+const attachedImages = ref<ImageAttachment[]>([])
 const showUserMenu = ref(false)
 const showSettings = ref(false)
 const showHelp = ref(false)
@@ -621,6 +651,50 @@ async function deleteChat() {
 
 const MAX_FILE_SIZE = 200 * 1024 * 1024  // 200MB
 
+/** 截图上传 + 识别：识别文本落到后端 chat_images，发送时按 id 绑定会话 */
+async function onImageInput(files: File[]) {
+  const MAX_IMAGES = 5
+  const room = MAX_IMAGES - attachedImages.value.length
+  if (room <= 0) {
+    ElMessage.warning(`一次最多附带 ${MAX_IMAGES} 张截图`)
+    return
+  }
+  for (const file of files.slice(0, room)) {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    attachedImages.value.push({
+      id,
+      file,
+      name: file.name || '截图',
+      previewUrl: URL.createObjectURL(file),
+      status: 'uploading',
+    })
+    const target = () => attachedImages.value.find(i => i.id === id)
+    try {
+      const { data } = await chatApi.uploadChatImage(file, currentChatId.value || undefined)
+      const item = target()
+      if (!item) continue
+      item.imageId = data.id
+      item.path = data.recognize_path || undefined
+      item.text = data.text || ''
+      item.status = data.status === 'succeeded' ? 'done' : 'error'
+      if (data.status !== 'succeeded') item.error = data.error_message || '识别失败'
+    } catch (e: any) {
+      const item = target()
+      if (item) {
+        item.status = 'error'
+        item.error = formatApiError(e)
+      }
+    }
+  }
+}
+
+function removeImage(id: string) {
+  const idx = attachedImages.value.findIndex(i => i.id === id)
+  if (idx < 0) return
+  URL.revokeObjectURL(attachedImages.value[idx].previewUrl)
+  attachedImages.value.splice(idx, 1)
+}
+
 function onFileInput(e: Event) {
   const t = e.target as HTMLInputElement
   if (t.files) {
@@ -690,8 +764,13 @@ async function sendMessage() {
   setSending(chatId, true)
 
   const isNewChat = !chatId
+  const imageIds = attachedImages.value
+    .filter(i => i.status === 'done' && i.imageId)
+    .map(i => i.imageId as number)
   inputText.value = ''
   attachedFiles.value = []
+  attachedImages.value.forEach(i => URL.revokeObjectURL(i.previewUrl))
+  attachedImages.value = []
 
   try {
     if (isNewChat) {
@@ -742,7 +821,7 @@ async function sendMessage() {
       await reanalyzeWithClarification(userMsg, chatId)
     } else if (userMsg) {
       setLoadingPhase(chatId, 'streaming')
-      await streamChat(userMsg, chatId)
+      await streamChat(userMsg, chatId, undefined, imageIds)
     }
   } catch (e: any) {
     addMessage('assistant', `❌ 失败：${formatApiError(e)}`, undefined, chatId)
@@ -806,6 +885,9 @@ function waitForAnalysis(
   return pollAnalysis(chatApi, analysisId, { onProgress, timeoutMs })
 }
 
+/** 预处理进度轮询的停止函数，按 logId 存放（分析结束即停） */
+const ingestStops = new Map<number, () => void>()
+
 async function processFiles(files: FileAttachment[], text: string, chatId: number) {
   setLoadingPhase(chatId, 'uploading')
 
@@ -831,6 +913,21 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
         if (!logId || logId <= 0) {
           throw new Error(`服务器返回了无效的日志ID: ${resp.data?.id}`)
         }
+        // 上传成功后立刻跟预处理链的真实进度：解析 → 模板 → 压缩 → 收尾
+        ingestStops.set(
+          logId,
+          watchIngestProgress(
+            logId,
+            (id) => client.get(`/logs/${id}/ingest-status`).then((r) => r.data),
+            (progress) => {
+              fa.ingest = progress
+              if (progress.failed) {
+                fa.status = 'error'
+                fa.error = `预处理失败（${progress.stage || '未知阶段'}）`
+              }
+            },
+          ),
+        )
         return { fa, logId, ok: true }
       } catch (e: any) {
         fa.status = 'error'
@@ -951,6 +1048,8 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
           processingMsg.thinking.active = false
           canGenerateReport.value = true
           fa.status = 'done'
+          ingestStops.get(logId)?.()
+          ingestStops.delete(logId)
 
           // 保存消息时包含思维链数据
           const thinkingData = {
@@ -967,13 +1066,15 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
         processingMsg.thinking.active = false
         fa.status = 'error'
         fa.error = e.response?.data?.detail || e.message
+        ingestStops.get(logId)?.()
+        ingestStops.delete(logId)
       }
       if (currentChatId.value === chatId) msgListRef.value?.scrollToBottom()
     }),
   )
 }
 
-async function streamChat(text: string, chatId: number, reuseMsg?: any) {
+async function streamChat(text: string, chatId: number, reuseMsg?: any, imageIds?: number[]) {
   const thinkStart = Date.now()
   const aId = thinkStart.toString()
   messageIds.add(aId)
@@ -1144,6 +1245,24 @@ function addMessage(role: string, content: string, files?: MsgAttachment[], chat
 
 // ── Regenerate / Edit ────────────────────────────────────────
 
+// ── 标注为回归样本 ───────────────────────────────────────────
+const annotateVisible = ref(false)
+const annotateQuestion = ref('')
+
+/** 找到该回答对应的提问，打开标注弹窗（预填该提问当时的检索轨迹） */
+function handleAnnotate(assistantMsg: any) {
+  const idx = messages.value.findIndex((m: any) => m.id === assistantMsg.id)
+  const userMsg = idx >= 0
+    ? [...messages.value].slice(0, idx).reverse().find((m: any) => m.role === 'user')
+    : null
+  if (!userMsg) {
+    ElMessage.warning('未找到对应的提问，无法标注')
+    return
+  }
+  annotateQuestion.value = String(userMsg.content || '')
+  annotateVisible.value = true
+}
+
 async function handleRegenerate(assistantMsg: any) {
   const chatId = currentChatId.value
   if (sendingChatIds.has(chatId) || !chatId) return
@@ -1152,24 +1271,51 @@ async function handleRegenerate(assistantMsg: any) {
     ElMessage.warning(`最多支持 ${limit} 个对话同时提问，请等待进行中的对话完成`)
     return
   }
-  // 找到该 assistant 消息之前最近的 user 消息
-  const idx = messages.value.findIndex(m => m.id === assistantMsg.id)
-  const userMsg = [...messages.value].slice(0, idx).reverse().find(m => m.role === 'user')
+  const msgs = messagesByChat.get(chatId)
+  if (!msgs) return
+  const idx = msgs.findIndex((m: any) => m.id === assistantMsg.id)
+  if (idx < 0) return
+  const userMsg = [...msgs].slice(0, idx).reverse().find((m: any) => m.role === 'user')
   if (!userMsg) return
 
-  // 创建分支：保存截断前的消息状态
-  createBranch(messages.value, idx, `regen-${new Date().toLocaleTimeString()}`)
-
-  // 截断：移除该 assistant 消息及其之后的所有消息（对话分支）
-  const truncated = messages.value.slice(0, idx)
-  setChatMessages(chatId, truncated)
-  truncated.forEach((m: any) => messageIds.add(m.id))
+  // 旧回答归档成上一版本，然后在**同一条消息**上重新生成。
+  // 早期实现是把这条消息从本地列表截掉再新插一条：服务端旧行还在，
+  // 切走会话再回来重新拉取时旧回答就“复活”，还会与新回答并存。
+  const oldIdx = snapshotVersion(assistantMsg, assistantMsg.activeVersion ?? 0)
+  const newIdx = oldIdx + 1
+  assistantMsg.versions = [...(assistantMsg.versions || [])]
+  assistantMsg.versions[newIdx] = { content: '' }
+  assistantMsg.activeVersion = newIdx
+  assistantMsg.content = ''
+  assistantMsg.sources = []
+  assistantMsg.thinking = { elapsed: 0, text: '', active: true }
+  assistantMsg._versionedFrom = oldIdx
 
   setSending(chatId, true)
   setLoadingPhase(chatId, 'streaming')
+  // 先把「已清空 + 新版本下标」落库：生成中途切走再回来也不会看到旧回答
+  if (assistantMsg._dbId != null) {
+    chatApi.updateMessage(chatId, assistantMsg._dbId, {
+      content: '',
+      versions: assistantMsg.versions,
+      active_version: newIdx,
+    }).catch((e: any) => console.warn('[handleRegenerate] reset message failed:', e))
+  }
   try {
-    await streamChat(userMsg.content, chatId)
+    await streamChat(userMsg.content, chatId, assistantMsg)
   } finally {
+    // 一个 token 都没回来（失败/被立即取消）：回退旧版本，别留空回答在库里
+    if (!String(assistantMsg.content || '').trim()) {
+      applyVersion(assistantMsg, oldIdx)
+      if (assistantMsg._dbId != null) {
+        await chatApi.updateMessage(chatId, assistantMsg._dbId, {
+          content: assistantMsg.content,
+          sources: assistantMsg.sources,
+          versions: assistantMsg.versions,
+          active_version: oldIdx,
+        }).catch((e: any) => console.warn('[handleRegenerate] restore failed:', e))
+      }
+    }
     setLoadingPhase(chatId, 'idle')
     setSending(chatId, false)
   }
@@ -1200,6 +1346,9 @@ async function handleEditSend(userMsg: any, newText: string) {
   try {
     // 1. 提问消息版本化：保留修改前内容，追加修改后版本
     const newIdx = appendVersion(userMsg, newText)
+    // 该版本标记为「分支起点」：此刻之后仍属于旧分支的后续对话不再显示，
+    // 切回旧版本时恢复（DeepSeek 网页版语义）。
+    userMsg.versions[newIdx] = { ...(userMsg.versions[newIdx] || {}), content: newText, truncates: Date.now() }
     if (userMsg._dbId != null) {
       chatApi.updateMessage(chatId, userMsg._dbId, {
         content: newText,

@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.models import KnowledgeDocument, KnowledgeDocumentMeta
 from app.services.knowledge.templates import guess_section_key
@@ -17,6 +18,31 @@ logger = get_logger(__name__)
 
 # 向量索引后台线程池：保存知识时不必等待 Milvus 连接/embedding/insert/flush
 _INDEX_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="kb-index")
+
+# 章节级 BM25 索引缓存：按语料签名复用，避免每次检索重建全量索引
+_SECTION_INDEX_LOCK = __import__("threading").Lock()
+_SECTION_INDEX: Any = None
+_SECTION_INDEX_SIGNATURE: Optional[str] = None
+
+
+def _get_section_index(signature: str, chunks: List[Any], index_cls: Any) -> Any:
+    """返回按语料签名缓存的 BM25 索引（语料不变则复用）。"""
+    global _SECTION_INDEX, _SECTION_INDEX_SIGNATURE
+    with _SECTION_INDEX_LOCK:
+        if _SECTION_INDEX is None or _SECTION_INDEX_SIGNATURE != signature:
+            index = index_cls()
+            index.ensure(chunks, signature)
+            _SECTION_INDEX = index
+            _SECTION_INDEX_SIGNATURE = signature
+        return _SECTION_INDEX
+
+
+def reset_section_index_cache() -> None:
+    """测试用：清空 BM25 缓存。"""
+    global _SECTION_INDEX, _SECTION_INDEX_SIGNATURE
+    with _SECTION_INDEX_LOCK:
+        _SECTION_INDEX = None
+        _SECTION_INDEX_SIGNATURE = None
 
 
 def _index_document_in_background(doc_id: int) -> None:
@@ -39,6 +65,52 @@ def _remove_index_in_background(doc_id: int) -> None:
         get_vector_service().delete_document(doc_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[KnowledgeService] background index remove failed for doc %s: %s", doc_id, exc)
+
+
+def dedupe_by_content_hash(chunks: List[Any]) -> List[Any]:
+    """跨文档同内容去重：同一 hash 只保留排名最靠前的一条。
+
+    同一段知识在多个文档里各存一份时（FAQ 与专题文档常见），
+    重复条目会互相挤位，还让「命中哪个文档」变成随机结果。
+    """
+    seen: set = set()
+    unique: List[Any] = []
+    for chunk in chunks:
+        digest = getattr(chunk, "content_hash", "") or ""
+        if digest:
+            if digest in seen:
+                continue
+            seen.add(digest)
+        unique.append(chunk)
+    return unique
+
+
+def dedupe_triples_by_content_hash(rows: List[Any]) -> List[Any]:
+    """对 (chunk, normalized, raw) 序列按 content_hash 去重，保留排名靠前的一条。"""
+    seen: set = set()
+    unique: List[Any] = []
+    for chunk, normalized, raw in rows:
+        digest = getattr(chunk, "content_hash", "") or ""
+        if digest:
+            if digest in seen:
+                continue
+            seen.add(digest)
+        unique.append((chunk, normalized, raw))
+    return unique
+
+
+def dedupe_pairs_by_content_hash(pairs: List[Any]) -> List[Any]:
+    """对 (chunk, score) 序列按 content_hash 去重，保留排名靠前的一条。"""
+    seen: set = set()
+    unique: List[Any] = []
+    for chunk, score in pairs:
+        digest = getattr(chunk, "content_hash", "") or ""
+        if digest:
+            if digest in seen:
+                continue
+            seen.add(digest)
+        unique.append((chunk, score))
+    return unique
 
 
 class KnowledgeService:
@@ -207,22 +279,36 @@ class KnowledgeService:
         page: int = 1,
         page_size: int = 20,
         project_id: Optional[int] = None,
+        sections: bool = False,
         include_drafts: bool = False,
-        return_sections: bool = False,
+        return_sections: Optional[bool] = None,
     ) -> Dict[str, Any]:
-        """Run one consistent hybrid search for every caller.
+        """章节级混合检索：BM25 + 向量，按 RRF 融合。
 
-        Dense and sparse retrieval use different score scales, so they are
-        merged by rank rather than by comparing their raw scores.
+        - 统一在「章节」粒度检索与融合：BM25 索引、向量写入、snippet 展示同一切分；
+        - 分数只由名次决定（RRF），不比 BM25 与向量的原始分（量纲不可比）；
+        - `sections=False` 按文档去重（管理端列表用），`True` 保留每个命中章节
+          （对话回答用，模型需要精确到节）。
 
-        include_drafts=True 时草稿也参与召回（降权 8%），用于 AI 问答：
+        这是此前「整篇文档建索引 + 章节提权」的替代实现：提权规则已删除，
+        命中粒度本身就是修正。
+
+        `include_drafts=True` 时草稿也参与召回（降权 8%），用于 AI 问答：
         知识库里常有尚未发布的准确条目，完全排除会让回答只能命中旧文档。
+        `return_sections` 为旧调用方保留的别名（等价于 sections=True）。
         """
+        if return_sections is not None:
+            sections = bool(return_sections)
+        empty = {"items": [], "total": 0, "page": page, "page_size": page_size}
+        if not (query_text or "").strip():
+            return empty
+
         try:
-            from app.services.knowledge.retrievers import (
-                BM25Retriever,
-                HybridRetriever,
-                MilvusRetriever,
+            from app.services.knowledge.section_search import (
+                SectionBM25Index,
+                build_section_chunks,
+                corpus_signature,
+                rank_sections,
             )
 
             docs_query = self.db.query(KnowledgeDocument)
@@ -234,103 +320,117 @@ class KnowledgeService:
                 docs_query = docs_query.filter(KnowledgeDocument.status == "active")
             docs_query = self._apply_project_filter(docs_query, project_id)
             docs = docs_query.order_by(KnowledgeDocument.updated_at.desc()).limit(1000).all()
-            # 章节级索引：长文档不再被整体长度归一化稀释，命中粒度=知识点
-            chunks = self._document_sections(docs)
+            if not docs:
+                return empty
+
+            chunks = build_section_chunks(docs)
             if not chunks:
-                chunks = [
-                    (int(d.id), f"{d.title or ''}\n{d.content or ''}", "", str(d.content or ""))
-                    for d in docs
-                ]
-            chunk_meta = {text: (heading, body) for _, text, heading, body in chunks}
+                items = self._keyword_search_bm25(query_text, page_size, project_id=project_id)
+                return {
+                    "items": items[:page_size], "total": len(items),
+                    "page": page, "page_size": page_size,
+                }
+
+            bm25_index = _get_section_index(corpus_signature(docs), chunks, SectionBM25Index)
+            dense_hits = self._dense_hits(query_text, top_k=max(page_size * 3, 30))
+            ranked = rank_sections(
+                chunks, query=query_text, dense_hits=dense_hits, bm25_index=bm25_index,
+                rrf_k=int(getattr(settings, "RRF_K", 60) or 60),
+                weights=[
+                    float(getattr(settings, "RRF_WEIGHT_SPARSE", 1.0) or 1.0),
+                    float(getattr(settings, "RRF_WEIGHT_DENSE", 1.0) or 1.0),
+                ],
+                with_raw=True,
+            )
+
+            if not ranked:
+                items = self._keyword_search_bm25(query_text, page_size, project_id=project_id)
+                return {
+                    "items": items[:page_size], "total": len(items),
+                    "page": page, "page_size": page_size,
+                }
 
             doc_map = {int(doc.id): doc for doc in docs}
-
-            sparse = BM25Retriever()
-            sparse.index([(doc_id, text) for doc_id, text, _, _ in chunks])
-            # 直接在章节 chunk 上检索：若走 HybridRetriever，它会按 doc_id
-            # 融合，导致同一文档只剩一个章节（通常不是用户要的那节）。
-            # 全量参与结构重排：正确章节可能因缺少泛词而 BM25 排名靠后，
-            # 先截断会让结构加分永远没机会生效。
-            section_hits = sparse.retrieve(query_text, top_k=len(chunks))
-
-            # 语义检索（Milvus 可用时）作为文档级加分项
-            dense_scores: Dict[int, float] = {}
-            try:
-                for hit in MilvusRetriever().retrieve(query_text, top_k=max(page_size, 10)):
-                    dense_scores[int(hit.chunk.doc_id)] = float(hit.score)
-            except Exception:
-                dense_scores = {}
-
-            max_bm25 = max((float(hit.score) for hit in section_hits), default=0.0) or 1.0
-
-            # 章节结构提权：命中章节标题与问题高度重合、或命中「关键字」类
-            # 章节时优先，避免被大量泛词命中的长文档压过真正对题的章节。
-            scored = []
-            for hit in section_hits:
-                doc = doc_map.get(int(hit.chunk.doc_id))
-                if not doc:
+            items: List[Dict[str, Any]] = []
+            seen_docs: set = set()
+            # 跨文档同内容去重：同一段知识在 FAQ 与专题文档里各存一份时，
+            # 两条都进候选只会互相挤位，还让「命中哪个文档」变成随机结果
+            ranked = dedupe_triples_by_content_hash(ranked)
+            # 标题/结构提权：纯 RRF 只看词频，长文档里「日志搜索」这类泛词
+            # 会把真正对题的短章节压下去（如「查看设备是否有进出站」）。
+            # 归一化分保留 RRF 的主体排序，再用章节标题重合度做轻量校正。
+            boosted = []
+            for chunk, score, raw_score in ranked:
+                doc = doc_map.get(chunk.doc_id)
+                if doc is None:
                     continue
-                heading, body = chunk_meta.get(hit.chunk.text, ("", ""))
-                base = float(hit.score) / max_bm25
-                base += dense_scores.get(int(doc.id), 0.0) * 0.3
-                score = base * self._section_boost(
-                    query_text, str(doc.title or ""), heading, body,
-                ) + self._section_bonus(query_text, heading, body)
-                if doc.status != "active":
-                    score *= 0.85  # 草稿可参与，但同等条件下明显让位给正式文档
-                scored.append((score, doc, heading, body))
-            scored.sort(key=lambda row: row[0], reverse=True)
-            # 相对归一化：最高分=1.0，其余按比例保留差距。
-            # 不能逐个截断到 1.0——那会把多个候选压成并列，误触发歧义澄清。
-            top_score = scored[0][0] if scored else 1.0
-            if top_score <= 0:
-                top_score = 1.0
-
-            results = []
-            seen_keys = set()
-            per_doc: Dict[int, int] = {}
-            for score, doc, heading, body in scored:
-                # 聊天侧按「文档+章节」返回独立候选（同文档可有多条），
-                # 管理端检索仍按文档去重，避免列表出现重复文件。
-                key = (doc.id, heading) if return_sections else doc.id
-                if key in seen_keys:
+                section_score = float(score) * self._section_boost(
+                    query_text, str(doc.title or ""), chunk.section, chunk.content,
+                ) + self._section_bonus(query_text, chunk.section, chunk.content)
+                boosted.append((chunk, section_score, raw_score))
+            ranked = sorted(boosted, key=lambda row: row[1], reverse=True)
+            # 提权是相对校正，不应把分数推出 0~1：按最高分归一化，
+            # 既保留排序差异，也让前端相关度条/阈值判断仍有意义。
+            peak = max((float(row[1]) for row in ranked), default=0.0)
+            scale = peak if peak > 0 else 1.0
+            ranked = [(chunk, float(score) / scale, raw_score) for chunk, score, raw_score in ranked]
+            for chunk, score, raw_score in ranked:
+                doc = doc_map.get(chunk.doc_id)
+                if doc is None:
                     continue
-                # 章节级模式下跳过无法定位章节的 chunk（如目录/前言），
-                # 否则 snippet 会退化成文档开头，误导模型。
-                if return_sections and not body:
-                    continue
-                # 单文档最多 3 节，防止一份大 FAQ 占满候选位
-                if return_sections and per_doc.get(int(doc.id), 0) >= 3:
-                    continue
-                seen_keys.add(key)
-                per_doc[int(doc.id)] = per_doc.get(int(doc.id), 0) + 1
-                snippet = (
-                    self._section_snippet(heading, body)
-                    if body else self._extract_snippet(str(doc.content), query_text)
-                )
-                results.append({
-                    "id": doc.id, "title": doc.title,
-                    "category": doc.category, "doc_type": doc.doc_type, "source": doc.source,
-                    "status": doc.status,
-                    "section": heading,
-                    "key": f"{doc.id}:{heading}" if return_sections else str(doc.id),
-                    "relevance_score": round(float(score) / top_score, 4),
-                    "snippet": snippet,
+                if not sections:
+                    if chunk.doc_id in seen_docs:
+                        continue
+                    seen_docs.add(chunk.doc_id)
+                # 草稿可参与，但同等条件下明显让位给正式文档
+                display_score = float(score) * (0.92 if doc.status != "active" else 1.0)
+                items.append({
+                    "id": doc.id,
+                    "title": doc.title,
+                    "category": doc.category,
+                    "doc_type": doc.doc_type,
+                    "source": doc.source,
+                    "section": chunk.section,
+                    "key": chunk.key,
+                    "relevance_score": round(display_score, 4),
+                    # 原始 RRF 分：跨层可比，排序调优用这个
+                    "fusion_score": round(float(raw_score), 6),
+                    "snippet": (
+                        f"## {chunk.section}\n\n{chunk.content}"[:1000]
+                        if sections else self._extract_snippet(
+                            str(doc.content), query_text,
+                        )
+                    ),
                 })
-            if results:
-                return {"items": results[:page_size], "total": len(results), "page": page, "page_size": page_size}
-        except Exception as exc:
-            logger = __import__("app.core.logging_config", fromlist=["get_logger"]).get_logger(__name__)
-            logger.debug("[KnowledgeService] Hybrid search unavailable, falling back to keyword: %s", exc)
+                if len(items) >= page_size:
+                    break
 
-        items = self._keyword_search_bm25(
-            query_text, page_size, project_id=project_id, include_drafts=include_drafts,
-        )
-        if items:
-            total = len(items)
-            return {"items": items[:page_size], "total": total, "page": page, "page_size": page_size}
+            return {"items": items, "total": len(items), "page": page, "page_size": page_size}
+        except Exception as exc:  # noqa: BLE001 - 检索失败退回关键词，不让问答崩
+            logger.error(
+                "[KnowledgeService] 章节检索失败，已退回关键词检索（会显著降低召回，"
+                "通常是代码缺陷而非数据问题）: %s", exc,
+                exc_info=True,
+            )
+            items = self._keyword_search_bm25(query_text, page_size, project_id=project_id)
+            return {
+                "items": items[:page_size], "total": len(items),
+                "page": page, "page_size": page_size,
+            }
 
-        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+    @staticmethod
+    def _dense_hits(query_text: str, top_k: int) -> List[Dict[str, Any]]:
+        """向量一路的章节命中；Milvus 不可用时不参与融合（不报错）。"""
+        try:
+            from app.services.knowledge.vector_service import get_vector_service
+
+            service = get_vector_service()
+            if not getattr(service, "available", False):
+                return []
+            return service.search(query_text, top_k=top_k)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[KnowledgeService] dense search unavailable: %s", exc)
+            return []
 
     def search_by_title(
         self,
@@ -374,7 +474,6 @@ class KnowledgeService:
 
     def _keyword_search_bm25(
         self, query_text: str, limit: int = 5, project_id: Optional[int] = None,
-        include_drafts: bool = False,
     ) -> List[Dict[str, Any]]:
         """BM25 关键词检索 — 替换旧的 ILIKE 短语+分词回退。
 
@@ -385,70 +484,40 @@ class KnowledgeService:
 
         try:
             # 获取所有活跃文档
-            docs_query = self.db.query(KnowledgeDocument)
-            if include_drafts:
-                docs_query = docs_query.filter(
-                    KnowledgeDocument.status.in_(["active", "draft"]),
-                )
-            else:
-                docs_query = docs_query.filter(KnowledgeDocument.status == "active")
+            docs_query = (
+                self.db.query(KnowledgeDocument)
+                .filter(KnowledgeDocument.status == "active")
+            )
             docs_query = self._apply_project_filter(docs_query, project_id)
             docs = docs_query.order_by(KnowledgeDocument.updated_at.desc()).limit(1000).all()
             if not docs:
                 return []
 
             from app.services.knowledge.retrievers import BM25Retriever
-            chunks = self._document_sections(docs)
-            if not chunks:
-                return []
-            chunk_meta = {text: (heading, body) for _, text, heading, body in chunks}
-
             bm25 = BM25Retriever()
-            bm25.index([(doc_id, text) for doc_id, text, _, _ in chunks])
+            bm25.index([
+                (int(doc.id), f"{doc.title or ''}\n{doc.content or ''}")
+                for doc in docs
+            ])
 
-            results = bm25.retrieve(query_text, top_k=max(limit * 10, 80))
+            results = bm25.retrieve(query_text, top_k=limit)
             doc_map = {int(d.id): d for d in docs}
-            max_score = max((float(r.score) for r in results), default=0.0) or 1.0
-
-            scored = []
-            for r in results:
-                doc = doc_map.get(r.chunk.doc_id)
-                if not doc:
-                    continue
-                heading, body = chunk_meta.get(r.chunk.text, ("", ""))
-                score = (
-                    (float(r.score) / max_score)
-                    * self._section_boost(query_text, str(doc.title or ""), heading, body)
-                )
-                if doc.status != "active":
-                    score *= 0.85
-                scored.append((score, doc, heading, body))
-            scored.sort(key=lambda row: row[0], reverse=True)
-            top_score = scored[0][0] if scored else 1.0
-            if top_score <= 0:
-                top_score = 1.0
 
             items = []
-            seen = set()
-            for score, doc, heading, body in scored:
-                if doc.id in seen:
-                    continue
-                seen.add(doc.id)
-                snippet = (
-                    self._section_snippet(heading, body)
-                    if body else self._extract_snippet(str(doc.content), query_text)
-                )
-                items.append({
-                    "id": doc.id,
-                    "title": doc.title,
-                    "category": doc.category,
-                    "doc_type": doc.doc_type,
-                    "source": doc.source,
-                    "status": doc.status,
-                    # 归一化到 0~1，与混合检索的展示口径保持一致
-                    "relevance_score": round(float(score) / top_score, 4),
-                    "snippet": snippet,
-                })
+            for r in results:
+                doc = doc_map.get(r.chunk.doc_id)
+                if doc:
+                    items.append({
+                        "id": doc.id,
+                        "title": doc.title,
+                        "category": doc.category,
+                        "doc_type": doc.doc_type,
+                        "source": doc.source,
+                        "relevance_score": round(r.score, 2),
+                        "snippet": self._extract_snippet(
+                            str(doc.content), query_text,
+                        ),
+                    })
             return items or self._keyword_search_phrase(query_text, limit, project_id=project_id)
         except Exception as e:
             logger = __import__("app.core.logging_config", fromlist=["get_logger"]).get_logger(__name__)
@@ -795,34 +864,6 @@ class KnowledgeService:
         ):
             bonus += 0.8
         return bonus
-
-    @staticmethod
-    def _document_sections(docs: list) -> list:
-        """把文档切成章节级索引条目：(doc_id, 索引文本, 章节标题, 章节正文)。"""
-        from app.services.knowledge.sections import split_markdown_sections
-
-        chunks = []
-        for doc in docs:
-            title = str(doc.title or "")
-            for heading, body in split_markdown_sections(str(doc.content or "")):
-                clean_body = (body or "").strip()
-                # 跳过目录/占位/过短章节：这类 chunk 只有泛词命中，
-                # 却会因文本短而在 BM25 中虚高，挤掉真正对题的章节。
-                if len(clean_body) < 20:
-                    continue
-                if "[TOC]" in clean_body[:40] or heading.strip() in {"目录", "[TOC]"}:
-                    continue
-                index_text = f"{title}\n{heading}\n{clean_body}".strip()
-                chunks.append((int(doc.id), index_text, heading, clean_body))
-        return chunks
-
-    @staticmethod
-    def _section_snippet(heading: str, body: str, limit: int = 800) -> str:
-        """命中章节渲染为 snippet，保留标题便于用户/LLM 定位。"""
-        body = (body or "").strip()
-        if len(body) > limit:
-            body = body[:limit] + "..."
-        return f"## {heading}\n{body}".strip() if heading else body
 
     @staticmethod
     def _relevance_score(doc: KnowledgeDocument, query: str) -> float:

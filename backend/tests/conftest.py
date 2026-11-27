@@ -12,6 +12,11 @@ import os
 # 测试环境强制使用确定性哈希嵌入：避免下载 BGE 模型导致离线/CI 阻塞
 os.environ.setdefault("EMBEDDING_PROVIDER", "hash")
 os.environ.setdefault("EMBEDDING_HASH_FALLBACK", "true")
+# 测试环境不连 broker：上传时才不会因 Redis 不可用而重试等待（会拖慢整条测试套件）
+os.environ.setdefault("CELERY_ASYNC_INGEST", "false")
+# 测试不加载精排模型：装上 sentence-transformers 后 bge-reranker 真的会被加载，
+# 每个用例多等几十秒且与断言语义无关
+os.environ.setdefault("RERANKER_ENABLED", "false")
 
 import pytest
 from fastapi.testclient import TestClient

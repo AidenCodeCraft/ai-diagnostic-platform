@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy.orm import Session
@@ -62,6 +62,28 @@ def list_logs(
 ) -> List[Log]:
     """List uploaded logs (optionally filtered by project)."""
     return LogService(db).list_logs(project_id=project_id)
+
+
+@router.get("/pipeline/health")
+def pipeline_health(
+    window_hours: int = Query(24, ge=1, le=720),
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """预处理链 + 检索质量 + 向量库的运维快照（P3 观测）。
+
+    只读数据库与本进程状态，不访问 broker；broker 挂了也应该能打开这个接口。
+    """
+    from app.services.diagnostics.pipeline_metrics import PipelineMetrics
+
+    return PipelineMetrics(db).snapshot(window_hours=window_hours)
+
+
+@router.get("/{log_id}/ingest-status")
+def ingest_status(log_id: int, db: Session = Depends(get_db_session)) -> Dict[str, Any]:
+    """异步预处理链进度（P2）：按 stage 汇总 succeeded/failed/running。"""
+    from app.worker.task_state import TaskStateStore
+
+    return TaskStateStore(db).summary(log_id)
 
 
 @router.get("/{log_id}", response_model=LogResponse)

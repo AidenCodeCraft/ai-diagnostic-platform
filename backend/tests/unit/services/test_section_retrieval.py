@@ -65,8 +65,12 @@ class TestSectionRetrieval:
 
 class TestSectionSplit:
     def test_split_by_headings(self):
-        sections = split_markdown_sections("# A\ntext a\n## B\ntext b")
+        sections = split_markdown_sections("# A\ntext a\n## B\ntext b", with_path=False)
         assert [heading for heading, _ in sections] == ["A", "B"]
+
+    def test_split_keeps_parent_path(self):
+        sections = split_markdown_sections("# A\ntext a\n## B\ntext b")
+        assert [heading for heading, _ in sections] == ["A", "A > B"]
 
     def test_preamble_kept(self):
         sections = split_markdown_sections("前言\n\n# A\ntext")

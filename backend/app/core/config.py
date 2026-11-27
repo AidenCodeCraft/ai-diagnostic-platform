@@ -42,21 +42,35 @@ class Settings(BaseSettings):
     # ── Milvus (Vector Database) ────────────────────────────
     MILVUS_HOST: str = "localhost"
     MILVUS_PORT: int = 19530
-    MILVUS_COLLECTION: str = "knowledge_docs"
-    MILVUS_DIM: int = 512  # embedding dimension（需与 EMBEDDING 模型维度一致）
+    MILVUS_COLLECTION: str = "knowledge_chunks_v3"  # v3：章节 + chunk_type/source/ts；旧集合需重建后回填
+    MILVUS_DIM: int = 1024  # embedding dimension（需与 EMBEDDING 模型维度一致）
     MILVUS_ENABLED: bool = False  # 启用 Milvus（未部署时自动回退到关键词搜索）
     MILVUS_USER: str = ""
     MILVUS_PASSWORD: str = ""
 
     # ── Embedding ────────────────────────────────────────────
     EMBEDDING_PROVIDER: str = "auto"      # auto | local(BGE) | api | hash
+    EMBEDDING_MODEL: str = "BAAI/bge-large-zh-v1.5"  # 本地 BGE 模型（1024 维）
     EMBEDDING_BATCH_SIZE: int = 32        # 批量嵌入大小
     EMBEDDING_API_URL: str = ""           # OpenAI 兼容 /embeddings 端点
     EMBEDDING_API_KEY: str = ""
     EMBEDDING_API_MODEL: str = "text-embedding-3-small"
-    EMBEDDING_DIM: int = 512              # 嵌入维度（需与 MILVUS_DIM 一致）
+    EMBEDDING_DIM: int = 1024             # 嵌入维度（必须与 MILVUS_DIM 一致）
     EMBEDDING_HASH_FALLBACK: bool = True  # 无 BGE/API 时使用确定性哈希嵌入兜底
     EMBEDDING_LOAD_TIMEOUT: float = 30.0  # BGE 模型加载超时（秒），超时回退
+
+    # ── Reranker（Cross-Encoder 精排）──────────────────────────
+    # 章节级 RRF 融合参数（调优入口；改动需跑黄金集回归对照）
+    RRF_K: int = 60
+    RRF_WEIGHT_SPARSE: float = 1.0   # BM25 一路权重
+    RRF_WEIGHT_DENSE: float = 1.5    # 向量一路权重（黄金集扫描：1.5 时 MRR 0.897→0.921）
+
+    # V6 黄金集实测（45 条正样本）：开启后 recall@5 1.000→0.889、MRR 0.849→0.733，
+    # 耗时 56s→532s，明确变差 —— 默认关闭。要重开请先用「全文而非 snippet」再测一轮。
+    RERANKER_ENABLED: bool = False                    # 无 sentence-transformers 时自动跳过
+    RERANKER_MODEL: str = "BAAI/bge-reranker-base"    # 278M，CPU 单批 30 条约 300~500ms
+    RERANKER_TOP_N: int = 30                          # 参与精排的候选数
+    RERANKER_SCORE_THRESHOLD: float = 0.0             # 归一化后低于该分的候选不展示
 
     # ── MinIO (Object Storage) ──────────────────────────────
     MINIO_ENABLED: bool = False
@@ -79,6 +93,18 @@ class Settings(BaseSettings):
     # ── Worker (Celery) ─────────────────────────────────────
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+    CELERY_TASK_TIME_LIMIT: int = 900        # 单任务硬超时（秒）
+    CELERY_VISIBILITY_TIMEOUT: int = 3600    # ≥ 单步最长耗时×2，Redis 队列必设
+    CELERY_MAX_TASKS_PER_CHILD: int = 50     # worker 子进程回收阈值
+    # 上传后是否投递异步预处理链；broker 不可用时仅记日志，不影响上传
+    CELERY_ASYNC_INGEST: bool = True
+    # 单份日志写入向量库的证据块上限：CPU 上 BGE 约 4 块/秒，
+    # 2000 块要 8 分钟（V4 实测），300 块约 1 分钟且信息量足够
+    LOG_INDEX_MAX_CHUNKS: int = 300
+
+    # ── Object storage ───────────────────────────────────────
+    # 预签名 URL 有效期：15 分钟（文档 P3.4 口径）；桶必须私有
+    MINIO_PRESIGN_TTL_SECONDS: int = 900
 
     # ── Security ─────────────────────────────────────────────
     SECRET_KEY: str = "CHANGE_ME_IN_PRODUCTION_GENERATE_RANDOM_64_CHAR"

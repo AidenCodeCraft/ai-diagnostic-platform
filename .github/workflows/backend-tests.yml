@@ -1,0 +1,42 @@
+name: backend-tests
+
+# 每次 push / PR 跑后端全量单测（内存 SQLite + mock LLM + 关闭 Milvus，无需外部服务）
+on:
+  push:
+    branches: ["master", "feat/**", "feature-*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: backend-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: backend
+      MILVUS_ENABLED: "false"
+      EMBEDDING_PROVIDER: "hash"
+      EMBEDDING_HASH_FALLBACK: "true"
+      LLM_PROVIDER: "mock"
+      MINIO_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pytest
+        working-directory: backend
+        run: python -m pytest -q --maxfail=20

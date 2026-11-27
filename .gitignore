@@ -42,3 +42,5 @@ Thumbs.db
 
 # Docker
 .docker/
+# 验证/回归报告（本地生成，不入库）
+backend/reports/
