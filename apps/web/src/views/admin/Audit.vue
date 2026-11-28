@@ -1,39 +1,8 @@
 <template>
   <div class="audit-page">
-    <h2 class="page-title">审核与日志监控</h2>
+    <h2 class="page-title">内容审核</h2>
 
     <el-tabs v-model="activeTab" class="audit-tabs">
-      <!-- 分析任务监控 -->
-      <el-tab-pane label="分析任务监控" name="analyses">
-        <div class="tab-header">
-          <el-select v-model="analysisStatus" placeholder="状态筛选" clearable style="width:140px" @change="fetchAnalyses">
-            <el-option label="运行中" value="running" />
-            <el-option label="已完成" value="completed" />
-            <el-option label="失败" value="failed" />
-          </el-select>
-        </div>
-        <div class="audit-table-wrap">
-          <el-table :data="analyses" stripe v-loading="analysesLoading">
-            <el-table-column prop="id" label="ID" width="60" />
-            <el-table-column prop="log_id" label="日志ID" width="80" />
-            <el-table-column prop="status" label="状态" width="90">
-              <template #default="{ row }">
-                <el-tag :type="statusTag(row.status)" size="small">{{ row.status }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="model" label="模型" width="100"><template #default="{ row }">{{ row.model || '—' }}</template></el-table-column>
-            <el-table-column prop="confidence" label="置信度" width="90">
-              <template #default="{ row }">{{ row.confidence != null ? (row.confidence * 100).toFixed(0) + '%' : '—' }}</template>
-            </el-table-column>
-            <el-table-column prop="error_message" label="错误信息" min-width="180"><template #default="{ row }">{{ row.error_message || '—' }}</template></el-table-column>
-            <el-table-column prop="created_at" label="创建时间" width="170">
-              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
-            </el-table-column>
-          </el-table>
-          <div v-if="!analysesLoading && analyses.length === 0" class="empty-hint">暂无分析任务</div>
-        </div>
-      </el-tab-pane>
-
       <!-- Bug 案例审核 -->
       <el-tab-pane label="Bug 案例" name="bugs">
         <div class="audit-table-wrap">
@@ -130,19 +99,15 @@ import { ref, onMounted } from 'vue'
 import client from '@/api/client'
 import { ElMessage } from 'element-plus'
 
-const activeTab = ref('analyses')
+const activeTab = ref('bugs')
 
-const analyses = ref<any[]>([])
 const bugCases = ref<any[]>([])
 const rules = ref<any[]>([])
 const drafts = ref<any[]>([])
 
-const analysesLoading = ref(false)
 const bugsLoading = ref(false)
 const rulesLoading = ref(false)
 const draftsLoading = ref(false)
-
-const analysisStatus = ref('')
 
 /** 使用 Intl.DateTimeFormat 统一处理时区（浏览器本地时区） */
 const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
@@ -156,32 +121,10 @@ function formatTime(ts: string) {
   try { return timeFormatter.format(new Date(ts)) } catch { return ts }
 }
 
-function statusTag(s: string) {
-  if (s === 'completed') return 'success'
-  if (s === 'failed') return 'danger'
-  if (s === 'running') return 'warning'
-  return 'info'
-}
-
 function severityTag(s: string) {
   if (s === 'critical') return 'danger'
   if (s === 'high') return 'warning'
   return 'info'
-}
-
-async function fetchAnalyses() {
-  analysesLoading.value = true
-  try {
-    const params: any = { page_size: 50 }
-    if (analysisStatus.value) params.status = analysisStatus.value
-    const { data } = await client.get('/analyses', { params })
-    analyses.value = data.items || []
-  } catch (e: any) {
-    analyses.value = []
-    console.error('[Audit] fetchAnalyses failed:', e?.response?.data?.detail || e?.message || e)
-  } finally {
-    analysesLoading.value = false
-  }
 }
 
 async function fetchBugCases() {
@@ -273,7 +216,6 @@ async function openDraft(row: any) {
 }
 
 onMounted(() => {
-  fetchAnalyses()
   fetchBugCases()
   fetchRules()
   fetchDrafts()

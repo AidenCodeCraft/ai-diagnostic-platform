@@ -1,6 +1,6 @@
 <template>
   <div class="overview-page">
-    <h2 class="page-title">系统概览</h2>
+    <h2 class="page-title">概览</h2>
 
     <!-- 加载/错误状态 -->
     <div v-if="loading" class="panel-empty">加载中...</div>

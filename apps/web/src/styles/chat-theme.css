@@ -369,10 +369,13 @@ html[data-theme='dark'] {
    ============================================================ */
 :root {
   --adm-page-bg: #f3f4f6;
+  /* 移动端侧栏遮罩 */
+  --adm-overlay-bg: rgba(0, 0, 0, 0.3);
 }
 
 [data-theme='dark'] {
   --adm-page-bg: #171719;
+  --adm-overlay-bg: rgba(0, 0, 0, 0.55);
 }
 
 /* 后台弹窗：显式 class，避免依赖 Element Plus 变量被其他页面覆盖 */

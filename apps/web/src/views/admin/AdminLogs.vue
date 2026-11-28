@@ -1,7 +1,7 @@
 <template>
   <div class="admin-logs">
     <div class="page-header">
-      <h2 class="page-title">日志分析</h2>
+      <h2 class="page-title">日志与任务</h2>
       <div class="header-actions">
         <el-button size="small" :loading="loading" @click="fetchLogs">刷新</el-button>
         <el-button type="primary" size="small" :disabled="!selectedIds.length" :loading="batching" @click="runBatch">

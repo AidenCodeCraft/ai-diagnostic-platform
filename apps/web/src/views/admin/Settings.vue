@@ -145,23 +145,6 @@
           </div>
         </div>
       </el-tab-pane>
-
-      <!-- 关于 -->
-      <el-tab-pane label="关于系统" name="about">
-        <div class="config-section">
-          <div class="about-grid">
-            <div class="about-item"><span class="about-key">产品名称</span><span class="about-val">AI Diagnostic Platform</span></div>
-            <div class="about-item"><span class="about-key">当前版本</span><span class="about-val">v1.0.0</span></div>
-            <div class="about-item"><span class="about-key">后端框架</span><span class="about-val">FastAPI + SQLAlchemy</span></div>
-            <div class="about-item"><span class="about-key">前端框架</span><span class="about-val">Vue 3 + Element Plus</span></div>
-            <div class="about-item"><span class="about-key">数据库</span><span class="about-val">PostgreSQL</span></div>
-            <div class="about-item"><span class="about-key">AI 引擎</span><span class="about-val">DeepSeek / OpenAI Compatible</span></div>
-            <div class="about-item"><span class="about-key">向量数据库</span><span class="about-val">Milvus (可选)</span></div>
-            <div class="about-item"><span class="about-key">部署方式</span><span class="about-val">Docker Compose / Kubernetes</span></div>
-            <div class="about-item"><span class="about-key">许可证</span><span class="about-val">MIT</span></div>
-          </div>
-        </div>
-      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -443,13 +426,7 @@ onMounted(() => {
 .cleanup-info p { margin: 0; font-size: 12px; color: var(--chat-source-muted); }
 .cleanup-action { display: flex; align-items: center; flex-shrink: 0; }
 
-.about-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.about-item { display: flex; justify-content: space-between; padding: 10px 14px; background: var(--chat-source-bg); border-radius: 8px; }
-.about-key { font-size: 13px; color: var(--chat-source-muted); }
-.about-val { font-size: 13px; color: var(--chat-layout-text); font-weight: 500; }
-
 @media (max-width: 768px) {
-  .about-grid { grid-template-columns: 1fr; }
   .config-item { flex-direction: column; align-items: flex-start; gap: 6px; }
   .config-label { text-align: left; }
   .cleanup-card { flex-direction: column; align-items: flex-start; gap: 12px; }

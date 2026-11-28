@@ -1,7 +1,7 @@
 <template>
   <div class="quality-page">
     <div class="page-head">
-      <h2 class="page-title">质量回归 · 黄金集</h2>
+      <h2 class="page-title">黄金集回归</h2>
       <div class="head-actions">
         <el-button size="small" @click="downloadExport">导出 CI 样本</el-button>
         <el-button size="small" @click="reloadAll">刷新</el-button>

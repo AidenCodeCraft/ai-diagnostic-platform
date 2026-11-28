@@ -1,7 +1,7 @@
 <template>
   <div class="pipeline-page">
     <div class="page-head">
-      <h2 class="page-title">运行监控 · 流水线与成本</h2>
+      <h2 class="page-title">运行监控</h2>
       <div class="head-actions">
         <el-select v-model="windowHours" size="small" style="width: 120px" @change="load">
           <el-option :value="24" label="近 24 小时" />

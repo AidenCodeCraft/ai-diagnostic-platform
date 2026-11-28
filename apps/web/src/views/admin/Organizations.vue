@@ -1,7 +1,7 @@
 <template>
   <div class="admin-page">
     <div class="page-header">
-      <h2 class="page-title">组织管理</h2>
+      <h2 class="page-title">组织与成员</h2>
       <el-button type="primary" @click="openCreate">新建组织</el-button>
     </div>
 
