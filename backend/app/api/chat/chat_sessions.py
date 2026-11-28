@@ -105,6 +105,10 @@ def add_message(
             sources=body.get("sources"), thinking=body.get("thinking"),
             versions=body.get("versions"), active_version=body.get("active_version"),
             image_ids=body.get("image_ids"),
+            status=body.get("status") or "ok",
+            error_message=body.get("error_message"),
+            analysis_id=body.get("analysis_id"),
+            log_id=body.get("log_id"),
             user_id=user_id,
         )
     except ValueError as exc:
@@ -137,6 +141,65 @@ def get_messages(
         return ChatService(db).get_messages(session_id, user_id=user_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="会话不存在") from exc
+
+
+@router.get("/{session_id}/analysis")
+def get_session_analysis(
+    session_id: int,
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
+):
+    """返回会话最近一次附件分析任务，供刷新后恢复轮询/重试。
+
+    优先用会话绑定的 log_id；老会话没有 log_id 时回退到最后一条带
+    analysis_id 的消息。
+    """
+    from app.models import Analysis, ChatMessage
+
+    try:
+        session = ChatService(db).get_session(session_id, user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
+
+    analysis = None
+    log_id = session.log_id
+    if log_id:
+        analysis = (
+            db.query(Analysis)
+            .filter(Analysis.log_id == log_id)
+            .order_by(Analysis.created_at.desc(), Analysis.id.desc())
+            .first()
+        )
+    if analysis is None:
+        last = (
+            db.query(ChatMessage)
+            .filter(
+                ChatMessage.session_id == session_id,
+                ChatMessage.analysis_id.isnot(None),
+            )
+            .order_by(ChatMessage.id.desc())
+            .first()
+        )
+        if last is not None and last.analysis_id:
+            analysis = db.query(Analysis).filter(
+                Analysis.id == last.analysis_id,
+            ).first()
+
+    if analysis is None:
+        return {"analysis": None}
+
+    return {
+        "analysis": {
+            "id": analysis.id,
+            "log_id": analysis.log_id,
+            "status": analysis.status,
+            "error_message": analysis.error_message,
+            "summary": analysis.summary,
+            "model": analysis.model,
+            "created_at": analysis.created_at,
+            "updated_at": analysis.updated_at,
+        },
+    }
 
 
 def _bind_images(db: Session, body: Dict[str, Any], session_id: int, user_id: int) -> None:

@@ -262,7 +262,8 @@ class DiagnosisPipeline:
             # 无错误事件：返回日志的头部 + 尾部摘要
             head = all_lines[:20]
             tail = all_lines[-10:] if len(all_lines) > 30 else []
-            return "\n".join(head + (["..."] if tail else []) + tail)
+            base = "\n".join(head + (["..."] if tail else []) + tail)
+            return self._append_version_lines(base, all_lines, user_query)
 
         # 收集所有错误行号
         error_lines: set[int] = set()
@@ -273,7 +274,7 @@ class DiagnosisPipeline:
 
         if not error_lines:
             head = all_lines[:30]
-            return "\n".join(head)
+            return self._append_version_lines("\n".join(head), all_lines, user_query)
 
         # 为每个错误行扩展上下文窗口
         total_lines = len(all_lines)
@@ -308,6 +309,9 @@ class DiagnosisPipeline:
             result = self._enrich_with_keyword_lines(
                 result, all_lines, user_query, fragments,
             )
+
+        # 问版本/固件时，版本串所在行通常不含「版本」二字，单独补扫
+        result = self._append_version_lines(result, all_lines, user_query)
 
         # 最终长度限制
         if len(result) > MAX_TRIMMED_LOG_CHARS:
@@ -351,6 +355,41 @@ class DiagnosisPipeline:
             )
 
         return result
+
+    _VERSION_VALUE_RE = _re_module.compile(
+        r"\b\d+\.\d+\.\d+(?:[._-][A-Za-z0-9]+)*\b"
+    )
+    _VERSION_QUERY_RE = _re_module.compile(
+        r"版本|固件|软件版本|version|firmware", _re_module.IGNORECASE,
+    )
+    _VERSION_MARK_RE = _re_module.compile(
+        r"MASTER_Start|MASTER_START|版本号|firmware|version\s*[:=]",
+        _re_module.IGNORECASE,
+    )
+
+    def _append_version_lines(
+        self, result: str, all_lines: list, user_query: str,
+    ) -> str:
+        """用户问版本时，补扫所有含版本串/版本标记的行。
+
+        版本号所在日志行通常形如 `[MASTER_Start 0259] pri: 2.6.11.2_L3C_10`，
+        行内不含「版本」二字，只靠关键词匹配会漏掉，导致 LLM 误判「日志里没有」。
+        """
+        if not user_query or not self._VERSION_QUERY_RE.search(user_query):
+            return result
+
+        hits: list[str] = []
+        for i, line in enumerate(all_lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if self._VERSION_MARK_RE.search(stripped) or self._VERSION_VALUE_RE.search(stripped):
+                hits.append(f"[版本相关 行{i + 1}]: {stripped[:300]}")
+                if len(hits) >= 15:
+                    break
+        if not hits:
+            return result
+        return result + "\n\n## 版本相关日志行\n" + "\n".join(hits)
 
     # ==================================================================
     # Stage 4: 知识库检索

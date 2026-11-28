@@ -103,6 +103,10 @@ class ChatService:
         versions: Optional[List[Dict[str, Any]]] = None,
         active_version: Optional[int] = None,
         image_ids: Optional[List[int]] = None,
+        status: str = "ok",
+        error_message: Optional[str] = None,
+        analysis_id: Optional[int] = None,
+        log_id: Optional[int] = None,
     ) -> ChatMessage:
         session = self.get_session(session_id, user_id)  # 归属校验
         msg = ChatMessage(
@@ -110,6 +114,8 @@ class ChatService:
             sources=sources, thinking=thinking,
             versions=versions, active_version=active_version,
             image_ids=image_ids or None,
+            status=status or "ok", error_message=error_message,
+            analysis_id=analysis_id, log_id=log_id,
         )
         self.db.add(msg)
         # 会话更新时间随消息刷新，侧栏「最近对话」按此倒序排列
@@ -131,9 +137,13 @@ class ChatService:
         )
         if not msg:
             raise ValueError("message not found")
-        allowed = {"content", "sources", "thinking", "versions", "active_version", "image_ids"}
+        allowed = {
+            "content", "sources", "thinking", "versions", "active_version",
+            "image_ids", "status", "error_message", "analysis_id", "log_id",
+        }
+        clearable = {"error_message"}
         for key, value in (fields or {}).items():
-            if key in allowed and value is not None:
+            if key in allowed and (value is not None or key in clearable):
                 setattr(msg, key, value)
         session = self.get_session(session_id, user_id)
         session.updated_at = datetime.now(timezone.utc)

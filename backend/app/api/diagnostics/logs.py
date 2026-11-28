@@ -1,12 +1,15 @@
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.deps import require_auth
 from app.database import session as session_module
 from app.models import Log
 from app.schemas import LogResponse, LogUpdate
 from app.services import LogService
+from app.services.diagnostics.chunked_upload import ChunkedUploadService
 from app.services.diagnostics.log_service import LogUploadError
 
 
@@ -48,6 +51,76 @@ def upload_log(
         )
     except LogUploadError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+class ChunkInitRequest(BaseModel):
+    filename: str
+    size: int
+    project_id: Optional[int] = None
+    upload_user_id: Optional[int] = None
+    description: Optional[str] = None
+    fingerprint: Optional[str] = None
+    request_id: Optional[str] = None
+
+
+def _chunk_error(exc: LogUploadError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
+@router.post("/uploads/init")
+def init_chunked_upload(
+    body: ChunkInitRequest,
+    db: Session = Depends(get_db_session),
+    user_id: int = Depends(require_auth),
+) -> Dict[str, Any]:
+    """初始化分片上传；同一 fingerprint 重复 init 返回已收到的块（断点续传）。"""
+    try:
+        return ChunkedUploadService(db).init(
+            body.filename, body.size,
+            project_id=body.project_id,
+            upload_user_id=body.upload_user_id or user_id,
+            description=body.description,
+            fingerprint=body.fingerprint,
+            request_id=body.request_id,
+        )
+    except LogUploadError as exc:
+        raise _chunk_error(exc) from exc
+
+
+@router.put("/uploads/{upload_id}/chunks/{index}")
+async def put_chunk(
+    upload_id: str,
+    index: int,
+    request: Request,
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    try:
+        data = await request.body()
+        return ChunkedUploadService(db).save_chunk(upload_id, index, data)
+    except LogUploadError as exc:
+        raise _chunk_error(exc) from exc
+
+
+@router.get("/uploads/{upload_id}")
+def chunked_upload_status(
+    upload_id: str,
+    db: Session = Depends(get_db_session),
+) -> Dict[str, Any]:
+    try:
+        return ChunkedUploadService(db).status(upload_id)
+    except LogUploadError as exc:
+        raise _chunk_error(exc) from exc
+
+
+@router.post("/uploads/{upload_id}/complete", response_model=LogResponse)
+def complete_chunked_upload(
+    upload_id: str,
+    db: Session = Depends(get_db_session),
+) -> Log:
+    try:
+        return ChunkedUploadService(db).complete(upload_id)
+    except LogUploadError as exc:
+        raise _chunk_error(exc) from exc
 
 
 # ------------------------------------------------------------------

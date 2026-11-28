@@ -25,6 +25,12 @@ export interface ChatMessage {
   active_version?: number
   /** 提问附带的截图 id（chat_images.id），用于历史消息回显 */
   image_ids?: number[]
+  /** 消息状态：ok / pending / failed（文件分析失败可重试） */
+  status?: 'ok' | 'pending' | 'failed' | string
+  error_message?: string | null
+  /** 关联的异步分析任务（chat_sessions/{id}/analysis 恢复用） */
+  analysis_id?: number | null
+  log_id?: number | null
   created_at: string
 }
 
@@ -71,8 +77,27 @@ export const chatApi = {
     return client.post<ChatReply>(`/chat-sessions/${sessionId}/chat`, { content, model })
   },
   /** Store a message directly (without LLM call) — for persisting analysis results */
-  saveMessage(sessionId: number, role: string, content: string, sources?: ChatSource[], thinking?: { text: string, elapsed: number }, versions?: ChatMessageVersion[], activeVersion?: number, imageIds?: number[]) {
-    return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, { role, content, sources, thinking, versions, active_version: activeVersion, image_ids: imageIds })
+  saveMessage(
+    sessionId: number,
+    role: string,
+    content: string,
+    sources?: ChatSource[],
+    thinking?: { text: string, elapsed: number },
+    versions?: ChatMessageVersion[],
+    activeVersion?: number,
+    imageIds?: number[],
+    extra?: {
+      status?: string
+      error_message?: string | null
+      analysis_id?: number | null
+      log_id?: number | null
+    },
+  ) {
+    return client.post<ChatMessage>(`/chat-sessions/${sessionId}/messages`, {
+      role, content, sources, thinking, versions, active_version: activeVersion,
+      image_ids: imageIds,
+      ...(extra || {}),
+    })
   },
   /** 更新消息（编辑重发：content / versions / active_version 等） */
   updateMessage(sessionId: number, messageId: number, payload: {
@@ -81,8 +106,25 @@ export const chatApi = {
     thinking?: { text: string, elapsed: number }
     versions?: ChatMessageVersion[]
     active_version?: number
+    status?: string
+    error_message?: string | null
+    analysis_id?: number | null
+    log_id?: number | null
   }) {
     return client.put<ChatMessage>(`/chat-sessions/${sessionId}/messages/${messageId}`, payload)
+  },
+  /** 会话最近一次文件分析任务（刷新恢复用） */
+  getSessionAnalysis(sessionId: number) {
+    return client.get<{ analysis: any | null }>(`/chat-sessions/${sessionId}/analysis`, { timeout: 15000 })
+  },
+  /** 重试某个分析任务（沿用原 log_id，新建 request_id 幂等创建） */
+  retryAnalysis(logId: number, model?: string, userQuery?: string, opts?: { requestId?: string; sessionId?: number }) {
+    const params: any = { log_id: logId }
+    if (model) params.model = model
+    if (userQuery) params.user_query = userQuery
+    if (opts?.requestId) params.request_id = opts.requestId
+    if (opts?.sessionId) params.session_id = opts.sessionId
+    return client.post('/analyses/async', null, { params, timeout: 30000 })
   },
   /** 更新消息反馈（like / dislike / null） */
   updateFeedback(sessionId: number, messageId: number, feedback: string | null) {
@@ -170,8 +212,37 @@ export const chatApi = {
   // Log analysis (kept for file upload support)
   uploadLog(formData: FormData) {
     return client.post('/logs/upload', formData, {
-      timeout: 60000, // 大文件上传需要更长超时
+      timeout: 300000, // 大文件上传需要更长超时（12MB 日志在慢盘/网关下可能 >60s）
     })
+  },
+  /** 分片上传：初始化（同一 fingerprint 可续传） */
+  initChunkedUpload(payload: {
+    filename: string
+    size: number
+    project_id?: number
+    upload_user_id?: number
+    description?: string
+    fingerprint?: string
+    request_id?: string
+  }) {
+    return client.post('/logs/uploads/init', payload, { timeout: 30000 })
+  },
+  /** 分片上传：上传单块（8MB） */
+  uploadChunk(uploadId: string, index: number, chunk: Blob, onProgress?: (percent: number) => void) {
+    return client.put(`/logs/uploads/${uploadId}/chunks/${index}`, chunk, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+      timeout: 120000,
+      onUploadProgress: (e) => {
+        if (e.total && onProgress) onProgress(Math.round((e.loaded / e.total) * 100))
+      },
+    })
+  },
+  /** 分片上传：完成拼装并入库，返回 Log */
+  completeChunkedUpload(uploadId: string) {
+    return client.post(`/logs/uploads/${uploadId}/complete`, null, { timeout: 180000 })
+  },
+  getChunkedUploadStatus(uploadId: string) {
+    return client.get(`/logs/uploads/${uploadId}`, { timeout: 15000 })
   },
   runAnalysis(logId: number, model?: string, userQuery?: string) {
     const params: any = { log_id: logId }
@@ -180,10 +251,12 @@ export const chatApi = {
     // 诊断流水线（解析+RAG+LLM）可能需要 60-120s，给足超时
     return client.post('/analyses/run', null, { params, timeout: 180000 })
   },
-  runAnalysisAsync(logId: number, model?: string, userQuery?: string) {
+  runAnalysisAsync(logId: number, model?: string, userQuery?: string, opts?: { requestId?: string; sessionId?: number }) {
     const params: any = { log_id: logId }
     if (model) params.model = model
     if (userQuery) params.user_query = userQuery
+    if (opts?.requestId) params.request_id = opts.requestId
+    if (opts?.sessionId) params.session_id = opts.sessionId
     return client.post('/analyses/async', null, { params, timeout: 30000 })
   },
   getAnalysis(analysisId: number) {

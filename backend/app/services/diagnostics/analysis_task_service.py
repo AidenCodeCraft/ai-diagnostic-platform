@@ -6,6 +6,7 @@ from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
@@ -93,29 +94,90 @@ class AnalysisTaskService:
     def run_analysis_async(
         self, log_id: int, model: Optional[str] = None,
         user_query: Optional[str] = None,
+        request_id: Optional[str] = None,
+        session_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """创建分析任务并在后台线程执行，立即返回 pending 状态。
 
         前端通过 GET /analyses/{id} 轮询状态，完成后取 /result。
+        request_id 为客户端幂等键：同一次「上传 → 分析」重试时复用，
+        已存在则直接返回原任务，不会重复创建。
         """
+        if request_id:
+            existing = self.db.query(Analysis).filter(
+                Analysis.request_id == request_id,
+            ).first()
+            if existing is not None:
+                self._bind_session(session_id, existing.log_id)
+                logger.info(
+                    "[analysis] idempotent hit request_id=%s analysis=%s log=%s session=%s",
+                    request_id, existing.id, existing.log_id, session_id,
+                )
+                return {
+                    "id": int(existing.id),
+                    "log_id": int(existing.log_id),
+                    "status": existing.status,
+                    "model": existing.model,
+                    "request_id": request_id,
+                }
+
         log = self._get_log(log_id)
         analysis = Analysis(
             log_id=log.id,
             status="pending",
             model=model or "mock",
+            request_id=request_id,
         )
         self.db.add(analysis)
-        self.db.commit()
+        try:
+            self.db.commit()
+        except IntegrityError:
+            # 并发重试：唯一键冲突时回落到已存在任务
+            self.db.rollback()
+            existing = self.db.query(Analysis).filter(
+                Analysis.request_id == request_id,
+            ).first()
+            if existing is None:
+                raise
+            self._bind_session(session_id, existing.log_id)
+            return {
+                "id": int(existing.id),
+                "log_id": int(existing.log_id),
+                "status": existing.status,
+                "model": existing.model,
+                "request_id": request_id,
+            }
         self.db.refresh(analysis)
+        self._bind_session(session_id, int(log.id))
 
         analysis_id = int(analysis.id)
+        logger.info(
+            "[analysis] created id=%s log=%s session=%s request_id=%s",
+            analysis_id, log.id, session_id, request_id,
+        )
         _EXECUTOR.submit(self._execute_async, analysis_id, user_query or "")
         return {
             "id": analysis_id,
             "log_id": log_id,
             "status": "pending",
             "model": model or "mock",
+            "request_id": request_id,
         }
+
+    def _bind_session(self, session_id: Optional[int], log_id: Optional[int]) -> None:
+        """把本次分析对应的日志绑定到会话，供刷新后恢复轮询。"""
+        if not session_id or not log_id:
+            return
+        from app.models import ChatSession
+
+        session = self.db.query(ChatSession).filter(
+            ChatSession.id == int(session_id),
+        ).first()
+        if session is None:
+            return
+        if session.log_id != int(log_id):
+            session.log_id = int(log_id)
+            self.db.commit()
 
     def run_batch_async(
         self, log_ids: List[int], model: Optional[str] = None,
@@ -215,11 +277,18 @@ class AnalysisTaskService:
                         ) from exc
                 setattr(analysis, "status", "completed")
                 db.commit()
+                logger.info(
+                    "[analysis] completed id=%s log=%s", analysis_id, analysis.log_id,
+                )
             except Exception as exc:  # noqa: BLE001 - 后台任务需记录失败
                 logger.exception("[AnalysisAsync] analysis %d failed", analysis_id)
                 setattr(analysis, "status", "failed")
                 setattr(analysis, "error_message", str(exc)[:2000])
                 db.commit()
+                logger.warning(
+                    "[analysis] failed id=%s log=%s error=%s",
+                    analysis_id, analysis.log_id, str(exc)[:300],
+                )
         finally:
             db.close()
 

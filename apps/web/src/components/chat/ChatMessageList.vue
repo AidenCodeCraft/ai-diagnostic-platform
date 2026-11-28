@@ -77,6 +77,10 @@
               v-if="msg.role === 'assistant' && msg.content && !loading && !msg.thinking?.active && !isNoMatchResponse(msg.content) && getImages(msg).length > 0"
               :images="getImages(msg)" />
           </div>
+          <div v-if="msg.role === 'assistant' && msg.status === 'failed'" class="msg-failed">
+            <div class="msg-failed-text">{{ msg.errorMessage || '分析失败，可重试' }}</div>
+            <button v-if="msg.logId" class="msg-retry-btn" @click="emit('retryAnalysis', msg)">重试分析</button>
+          </div>
           <div v-if="msg.role === 'assistant' && msg.content && !msg.thinking?.active && !loading"
             class="message-actions">
             <el-tooltip :content="copiedId === msg.id ? '已复制' : '复制'" placement="bottom"
@@ -229,6 +233,8 @@ const emit = defineEmits<{
   (e: 'selectClarification', text: string): void
   /** 标注为回归样本（携带被标注的 assistant 消息） */
   (e: 'annotate', msg: any): void
+  /** 失败分析消息重试（沿用消息上的 logId 重新建任务） */
+  (e: 'retryAnalysis', msg: any): void
 }>()
 
 // ── 引用文档 Tooltip ──────────────────────────────────────────
@@ -1766,6 +1772,42 @@ function scrollToBottom() {
   margin-top: 10px;
   opacity: 0.7;
   transition: opacity 0.2s;
+}
+
+.msg-failed {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid #f3c2c2;
+  border-radius: 8px;
+  background: #fff5f5;
+  color: #b42318;
+  font-size: 13px;
+}
+
+.msg-failed-text {
+  flex: 1;
+  min-width: 200px;
+  line-height: 1.5;
+}
+
+.msg-retry-btn {
+  padding: 5px 12px;
+  border: 1px solid #d92d20;
+  border-radius: 6px;
+  background: #fff;
+  color: #d92d20;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.msg-retry-btn:hover {
+  background: #d92d20;
+  color: #fff;
 }
 
 .message-row:hover .message-actions {

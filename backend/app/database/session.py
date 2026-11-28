@@ -56,6 +56,11 @@ def _apply_compat_migrations() -> None:
         ("chat_messages", "versions", "JSON"),
         ("chat_messages", "active_version", "INTEGER"),
         ("chat_messages", "image_ids", "JSON"),
+        ("chat_messages", "status", "VARCHAR(20) DEFAULT 'ok' NOT NULL"),
+        ("chat_messages", "error_message", "TEXT"),
+        ("chat_messages", "analysis_id", "INTEGER"),
+        ("chat_messages", "log_id", "INTEGER"),
+        ("analyses", "request_id", "VARCHAR(64)"),
         ("users", "theme", "VARCHAR(20)"),
     ]
 

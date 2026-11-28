@@ -93,7 +93,7 @@
           <ChatMessageList ref="msgListRef" :key="'cl-' + currentChatId"
             :messages="displayMessages" :loading="loadingPhase !== 'idle'" :isEmpty="displayMessages.length === 0"
             :chatId="currentChatId"
-            @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editSend="handleEditSend"
+            @previewFile="previewFile" @openKnowledge="openKnowledge" @regenerate="handleRegenerate" @editSend="handleEditSend" @retryAnalysis="handleRetryAnalysis"
             @switchVersion="handleSwitchVersion"
             @annotate="handleAnnotate"
             @selectClarification="onSelectClarification" />
@@ -475,6 +475,10 @@ async function selectChat(id: number, options: { navigate?: boolean; silent?: bo
         _dbId: m.id,
         versions: hasVersions ? m.versions : undefined,
         activeVersion: hasVersions ? activeIdx : undefined,
+        status: m.status || 'ok',
+        errorMessage: m.error_message || '',
+        analysisId: m.analysis_id ?? undefined,
+        logId: m.log_id ?? undefined,
       }
       
       // 恢复持久化的思维链数据（短内容默认展开，长内容折叠）
@@ -493,6 +497,9 @@ async function selectChat(id: number, options: { navigate?: boolean; silent?: bo
     }))
     msgs.forEach((m: any) => messageIds.add(m.id.toString()))
     setActiveChatId(id)
+
+    // 刷新/切换回来时恢复上次未完成的分析（pending），避免“问题在、回答没了”
+    void resumeSessionAnalysis(id)
     
     // 检查是否有日志分析结果，如果有则可以生成报告
     const hasAnalysis = msgs.some((m: any) => 
@@ -893,6 +900,273 @@ function waitForAnalysis(
 /** 预处理进度轮询的停止函数，按 logId 存放（分析结束即停） */
 const ingestStops = new Map<number, () => void>()
 
+/** 大文件走分片上传的阈值与分片大小（与后端 CHUNK_SIZE 一致） */
+const CHUNK_THRESHOLD = 32 * 1024 * 1024
+const CHUNK_SIZE = 8 * 1024 * 1024
+
+function newRequestId(): string {
+  try {
+    const c = globalThis.crypto as any
+    if (c?.randomUUID) return c.randomUUID()
+  } catch { /* ignore */ }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+/** 上传单个日志：小文件直传，大文件分片（断点续传），返回后端 log id */
+async function uploadLogFile(fa: FileAttachment, text: string): Promise<number> {
+  const file = fa.file
+  if (file.size > CHUNK_THRESHOLD) {
+    const fingerprint = `${fa.name}:${file.size}:${file.lastModified}`
+    const requestId = newRequestId()
+    const init = await chatApi.initChunkedUpload({
+      filename: fa.name,
+      size: file.size,
+      description: text,
+      fingerprint,
+      request_id: requestId,
+    })
+    const uploadId: string = init.data.upload_id
+    const chunkSize = Number(init.data.chunk_size) || CHUNK_SIZE
+    const total = Number(init.data.total_chunks) || Math.ceil(file.size / chunkSize)
+    const received = new Set<number>((init.data.received || []).map((n: any) => Number(n)))
+    for (let index = 0; index < total; index++) {
+      if (received.has(index)) continue
+      const start = index * chunkSize
+      const blob = file.slice(start, Math.min(file.size, start + chunkSize))
+      await chatApi.uploadChunk(uploadId, index, blob, (percent) => {
+        fa.progress = Math.min(99, Math.round(((index + percent / 100) / total) * 100))
+      })
+    }
+    const done = await chatApi.completeChunkedUpload(uploadId)
+    fa.progress = 100
+    return Number(done.data?.id)
+  }
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('description', text)
+  const resp = await client.post('/logs/upload', fd, {
+    timeout: 300000,
+    onUploadProgress: (e) => {
+      if (e.total) fa.progress = Math.round((e.loaded / e.total) * 100)
+    },
+  })
+  return Number(resp.data?.id)
+}
+
+/** 把分析结果渲染成回答文本（与 processFiles 原逻辑一致） */
+function analysisResponseText(detail: any, name?: string): string {
+  return detail.diagnosis_markdown || [
+    `## ${name || '日志'} 的诊断结果`,
+    '',
+    '### 诊断摘要',
+    detail.summary || '分析完成',
+    '',
+    '### 根因分析',
+    detail.root_cause || '根因待确认',
+    '',
+    `诊断置信度：**${((detail.confidence || 0) * 100).toFixed(0)}%**`,
+    '',
+    '### 建议措施',
+    ...(detail.next_steps || []).map((s: string, i: number) => `${i + 1}. ${s}`),
+  ].join('\n')
+}
+
+/** 轮询分析完成后把结果写回本地消息 + 数据库 */
+async function applyAnalysisResult(
+  chatId: number,
+  msg: any,
+  detail: any,
+  faName?: string,
+): Promise<void> {
+  const sources = detail.sources || detail.knowledge_sources || detail.references || []
+  const response = analysisResponseText(detail, faName)
+  msg.content = response
+  msg.sources = sources
+  msg.status = 'ok'
+  msg.errorMessage = ''
+  if (detail.needs_clarification && (detail.questions || []).length) {
+    msg.clarification = detail.questions
+    pendingClarificationByChat.set(chatId, { logId: msg.logId, questions: detail.questions })
+  } else {
+    pendingClarificationByChat.delete(chatId)
+  }
+  msg.thinking.active = false
+  const thinkingData = {
+    text: msg.thinking.text,
+    elapsed: msg.thinking.elapsed,
+  }
+  if (msg._dbId != null) {
+    await chatApi.updateMessage(chatId, msg._dbId, {
+      content: response,
+      sources,
+      thinking: thinkingData,
+      status: 'ok',
+      error_message: '',
+    }).catch((e: any) => console.warn('[applyAnalysisResult] update failed:', e))
+  } else {
+    await chatApi.saveMessage(chatId, 'assistant', response, sources, thinkingData, undefined, undefined, undefined, {
+      status: 'ok',
+      analysis_id: msg.analysisId ?? null,
+      log_id: msg.logId ?? null,
+    }).then(({ data: saved }) => { if (saved?.id != null) msg._dbId = saved.id }).catch(() => {})
+  }
+  canGenerateReport.value = true
+}
+
+/** 标记分析失败并落库（刷新后仍能看到失败态与重试按钮） */
+async function markAnalysisFailed(chatId: number, msg: any, errorText: string): Promise<void> {
+  msg.status = 'failed'
+  msg.errorMessage = errorText
+  msg.content = ''
+  msg.thinking.active = false
+  if (msg._dbId != null) {
+    await chatApi.updateMessage(chatId, msg._dbId, {
+      content: '',
+      status: 'failed',
+      error_message: errorText,
+      thinking: { text: msg.thinking.text, elapsed: msg.thinking.elapsed },
+    }).catch(() => {})
+  } else {
+    await chatApi.saveMessage(chatId, 'assistant', '', undefined, {
+      text: msg.thinking.text,
+      elapsed: msg.thinking.elapsed,
+    }, undefined, undefined, undefined, {
+      status: 'failed',
+      error_message: errorText,
+      analysis_id: msg.analysisId ?? null,
+      log_id: msg.logId ?? null,
+    }).then(({ data: saved }) => { if (saved?.id != null) msg._dbId = saved.id }).catch(() => {})
+  }
+}
+
+const resumingSessions = new Set<number>()
+
+/**
+ * 进入会话时恢复未完成的分析：
+ * - 末条 assistant 为 pending：查会话最近分析任务，继续轮询/拉结果；
+ * - 分析任务已丢失：标记 failed，用户可点「重试」重跑（log_id 还在消息行上）。
+ */
+async function resumeSessionAnalysis(chatId: number) {
+  if (resumingSessions.has(chatId)) return
+  const list = messagesByChat.get(chatId)
+  if (!list || !list.length) return
+  let pending: any = null
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i]
+    if (m.role === 'assistant' && m.status === 'pending') { pending = m; break }
+    // 跳过失败/成功的历史消息
+    if (m.role === 'assistant') break
+    if (m.role === 'user') break
+  }
+  if (!pending) {
+    // 兼容旧数据：末条是带附件的提问、后面没有任何回答（旧版本不落失败态）
+    const last = list[list.length - 1]
+    if (!last || last.role !== 'user' || !(last.files && last.files.length)) return
+    pending = {
+      id: `recover-${Date.now()}`,
+      role: 'assistant',
+      content: '',
+      createdAt: Date.now(),
+      status: 'pending',
+      thinking: { text: '', elapsed: 0, active: true },
+      sources: [],
+    }
+    list.push(pending)
+  }
+  resumingSessions.add(chatId)
+  try {
+    setLoadingPhase(chatId, 'analyzing')
+    pending.thinking = pending.thinking || { text: '', elapsed: 0, active: true }
+    pending.thinking.active = true
+    if (!pending.thinking.text) pending.thinking.text = '正在恢复上次分析…'
+
+    let analysis: any = null
+    try {
+      const { data } = await chatApi.getSessionAnalysis(chatId)
+      analysis = data?.analysis || null
+    } catch (e) {
+      console.warn('[resumeSessionAnalysis] query failed:', e)
+    }
+
+    if (!analysis) {
+      await markAnalysisFailed(chatId, pending, '上次分析未完成（服务端没有任务记录），可点击重试')
+      return
+    }
+
+    pending.analysisId = analysis.id
+    if (analysis.status === 'completed') {
+      const detail = (await chatApi.getAnalysisResult(analysis.id)).data
+      await applyAnalysisResult(chatId, pending, detail)
+    } else if (analysis.status === 'failed') {
+      await markAnalysisFailed(chatId, pending, analysis.error_message || '分析失败')
+    } else {
+      const detail = await waitForAnalysis(analysis.id, (text) => {
+        if (!pending.thinking.text.includes(text)) {
+          pending.thinking.text = pending.thinking.text
+            ? `${pending.thinking.text}\n${text}` : text
+        }
+        pending.thinking.elapsed = Math.max(1, Math.round((Date.now() - Date.parse(pending.created_at || '')) / 1000)) || pending.thinking.elapsed
+      })
+      if (detail) await applyAnalysisResult(chatId, pending, detail)
+    }
+  } catch (e: any) {
+    await markAnalysisFailed(chatId, pending, `恢复分析失败：${formatApiError(e)}`)
+  } finally {
+    resumingSessions.delete(chatId)
+    setLoadingPhase(chatId, 'idle')
+    if (currentChatId.value === chatId) msgListRef.value?.scrollToBottom()
+  }
+}
+
+/** 失败消息上的「重试分析」：沿用原 log_id 重新建任务并轮询 */
+async function handleRetryAnalysis(msg: any) {
+  const chatId = currentChatId.value
+  if (!chatId) return
+  const logId = Number(msg.logId)
+  if (!logId) {
+    ElMessage.warning('缺少日志记录，无法重试；请重新上传日志')
+    return
+  }
+  const list = messagesByChat.get(chatId) || []
+  const idx = list.findIndex((m: any) => m.id === msg.id)
+  const prevUser = idx > 0
+    ? [...list.slice(0, idx)].reverse().find((m: any) => m.role === 'user')
+    : null
+  const query = String(prevUser?.content || '').replace(/\n?\[上传文件:.*?\]/g, '').trim()
+
+  msg.status = 'pending'
+  msg.errorMessage = ''
+  msg.content = ''
+  msg.sources = []
+  msg.thinking = { text: '正在重新提交分析…', elapsed: 0, active: true }
+  if (msg._dbId != null) {
+    chatApi.updateMessage(chatId, msg._dbId, {
+      status: 'pending', error_message: '', content: '',
+    }).catch(() => {})
+  }
+  setLoadingPhase(chatId, 'analyzing')
+  try {
+    const queued = await chatApi.runAnalysisAsync(logId, selectedModel.value, query, {
+      requestId: newRequestId(),
+      sessionId: chatId,
+    })
+    const analysisId = queued.data?.id
+    if (!analysisId) throw new Error('分析任务创建失败')
+    msg.analysisId = analysisId
+    if (msg._dbId != null) {
+      chatApi.updateMessage(chatId, msg._dbId, { analysis_id: analysisId, status: 'pending' }).catch(() => {})
+    }
+    const detail = await waitForAnalysis(analysisId, (text) => {
+      msg.thinking.text = msg.thinking.text === '正在重新提交分析…' ? text : `${msg.thinking.text}\n${text}`
+    })
+    if (detail) await applyAnalysisResult(chatId, msg, detail)
+  } catch (e: any) {
+    await markAnalysisFailed(chatId, msg, `分析失败：${formatApiError(e)}`)
+  } finally {
+    setLoadingPhase(chatId, 'idle')
+  }
+}
+
 async function processFiles(files: FileAttachment[], text: string, chatId: number) {
   setLoadingPhase(chatId, 'uploading')
 
@@ -900,23 +1174,12 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
   const uploadResults = await Promise.allSettled(
     files.map(async (fa) => {
       fa.status = 'uploading'
-      const fd = new FormData()
-      fd.append('file', fa.file)
-      fd.append('description', text)
-
       try {
-        // axios 自动处理 multipart/form-data 的 Content-Type（含 boundary）
-        const resp = await client.post('/logs/upload', fd, {
-          onUploadProgress: (e) => {
-            if (e.total) fa.progress = Math.round((e.loaded / e.total) * 100)
-          },
-        })
-        fa.progress = 100
+        const logId = await uploadLogFile(fa, text)
         fa.status = 'parsing'
-        const logId = Number(resp.data?.id)
         if (import.meta.env.DEV) console.log(`[processFiles] upload OK: ${fa.name} → logId=${logId}`)
         if (!logId || logId <= 0) {
-          throw new Error(`服务器返回了无效的日志ID: ${resp.data?.id}`)
+          throw new Error(`服务器返回了无效的日志ID: ${logId}`)
         }
         // 上传成功后立刻跟预处理链的真实进度：解析 → 模板 → 压缩 → 收尾
         ingestStops.set(
@@ -978,6 +1241,8 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
         role: 'assistant',
         content: '',
         createdAt: analysisStartedAt,
+        status: 'pending',
+        logId,
         thinking: {
           elapsed: 0,
           active: true,
@@ -1012,63 +1277,51 @@ async function processFiles(files: FileAttachment[], text: string, chatId: numbe
       try {
         updateThinking('正在解析日志并提取关键错误片段…')
 
+        // 先落一条 pending 占位消息：即使这一步之后刷新/断网，刷新后仍能看到
+        // “分析未完成”并可直接重试（带 log_id，后端可重新建任务）。
+        try {
+          const { data: saved } = await chatApi.saveMessage(
+            chatId, 'assistant', '', undefined, undefined, undefined, undefined, undefined,
+            { status: 'pending', log_id: logId },
+          )
+          if (saved?.id != null) processingMsg._dbId = saved.id
+        } catch (e) {
+          console.warn('[processFiles] save pending message failed:', e)
+        }
+
         if (import.meta.env.DEV) console.log(`[processFiles] runAnalysisAsync: logId=${logId} model=${selectedModel.value} query=${text?.slice(0, 50)}`)
         // 提问文本去掉文件标签，避免干扰后端按用户问题检索/分析
         const queryText = text.replace(/\n?\[上传文件:.*?\]/g, '').trim()
-        const queued = await chatApi.runAnalysisAsync(logId, selectedModel.value, queryText)
+        const requestId = newRequestId()
+        const queued = await chatApi.runAnalysisAsync(logId, selectedModel.value, queryText, {
+          requestId,
+          sessionId: chatId,
+        })
         const analysisId = queued.data?.id
         if (!analysisId) throw new Error('分析任务创建失败')
+        processingMsg.analysisId = analysisId
+        if (processingMsg._dbId != null) {
+          chatApi.updateMessage(chatId, processingMsg._dbId, {
+            analysis_id: analysisId,
+            log_id: logId,
+            status: 'pending',
+          }).catch(() => {})
+        }
         updateThinking('规则引擎匹配 + 知识库检索中…')
 
         const detail = await waitForAnalysis(analysisId, updateThinking)
         if (detail) {
           lastAnalysisByChat.set(chatId, detail)
-          const sources = detail.sources || detail.knowledge_sources || detail.references || []
-
-          // 优先使用后端预生成的 Markdown，回退到前端组装
-          const response = detail.diagnosis_markdown || [
-            `## ${fa.name} 的诊断结果`,
-            '',
-            '### 诊断摘要',
-            detail.summary || '分析完成',
-            '',
-            '### 根因分析',
-            detail.root_cause || '根因待确认',
-            '',
-            `诊断置信度：**${((detail.confidence || 0) * 100).toFixed(0)}%**`,
-            '',
-            '### 建议措施',
-            ...(detail.next_steps || []).map((s: string, i: number) => `${i + 1}. ${s}`),
-          ].join('\n')
-
-          processingMsg.content = response
-          processingMsg.sources = sources
-          if (detail.needs_clarification && (detail.questions || []).length) {
-            processingMsg.clarification = detail.questions
-            pendingClarificationByChat.set(chatId, { logId, questions: detail.questions })
-          } else {
-            pendingClarificationByChat.delete(chatId)
-          }
           processingMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - analysisStartedAt) / 1000))
-          processingMsg.thinking.active = false
-          canGenerateReport.value = true
+          await applyAnalysisResult(chatId, processingMsg, detail, fa.name)
           fa.status = 'done'
           ingestStops.get(logId)?.()
           ingestStops.delete(logId)
-
-          // 保存消息时包含思维链数据
-          const thinkingData = {
-            text: processingMsg.thinking.text,
-            elapsed: processingMsg.thinking.elapsed,
-          }
-          await chatApi.saveMessage(chatId, 'assistant', response, sources, thinkingData)
-            .then(({ data: saved }) => { if (saved?.id != null) processingMsg._dbId = saved.id })
-            .catch(() => {})
         }
       } catch (e: any) {
-        processingMsg.content = `❌ 分析 \`${fa.name}\` 失败：${formatApiError(e)}`
+        const errText = `分析 \`${fa.name}\` 失败：${formatApiError(e)}`
         processingMsg.thinking.elapsed = Math.max(1, Math.round((Date.now() - analysisStartedAt) / 1000))
-        processingMsg.thinking.active = false
+        await markAnalysisFailed(chatId, processingMsg, errText)
         fa.status = 'error'
         fa.error = e.response?.data?.detail || e.message
         ingestStops.get(logId)?.()

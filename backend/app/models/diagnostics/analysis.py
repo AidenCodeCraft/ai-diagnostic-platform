@@ -26,6 +26,8 @@ class Analysis(Base):
     next_steps = Column(Text)
     model = Column(String(100))
     error_message = Column(Text, nullable=True)
+    # 客户端幂等键：同一次「上传→分析」重试时复用，避免创建重复任务
+    request_id = Column(String(64), nullable=True, unique=True, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,

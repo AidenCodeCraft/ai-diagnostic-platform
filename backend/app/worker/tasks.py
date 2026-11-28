@@ -292,10 +292,22 @@ def build_pipeline_chain(log_id: int, plans: List[ChunkPlan]):
 
 @celery_app.task(name="ingest.finalize", bind=True)
 def ingest_finalize(self, log_id: int) -> Dict[str, Any]:
-    """汇总整条链状态。"""
+    """汇总整条链状态，并把日志状态推进到 parsed。
+
+    之前 finalize 只汇总任务状态，Log.status 永远停在 uploaded，
+    前端/分析侧无法区分「预处理完成」与「仅上传」。
+    """
 
     def worker(store: TaskStateStore) -> Dict[str, Any]:
-        return {"stage": "finalize", "summary": store.summary(log_id)}
+        from app.models import Log
+
+        summary = store.summary(log_id)
+        log = store.db.query(Log).filter(Log.id == log_id).first()
+        if log is not None and log.status in ("uploaded", "parsing"):
+            log.status = "parsed"  # type: ignore[assignment]
+            store.db.commit()
+            logger.info("[ingest] log %s status -> parsed", log_id)
+        return {"stage": "finalize", "summary": summary}
 
     return _run_stage("finalize", log_id, worker)
 

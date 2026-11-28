@@ -39,4 +39,10 @@ class ChatMessage(Base):
     active_version = Column(Integer, nullable=True)  # versions 中当前展示的下标
     # 提问附带的截图 id 列表（chat_images.id）：历史消息据此回显缩略图
     image_ids = Column(JSON, nullable=True)
+    # 消息状态：ok（默认）/ pending（分析进行中）/ failed（失败或超时，可重试）
+    status = Column(String(20), nullable=False, default="ok")
+    error_message = Column(Text, nullable=True)
+    # 附件分析消息关联的分析任务与日志，用于刷新后恢复轮询/重试
+    analysis_id = Column(Integer, nullable=True)
+    log_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

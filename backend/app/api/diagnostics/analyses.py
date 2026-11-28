@@ -74,12 +74,19 @@ def run_analysis_async(
     log_id: int = Query(...),
     model: Optional[str] = Query(default=None),
     user_query: Optional[str] = Query(default=None, max_length=2000),
+    request_id: Optional[str] = Query(default=None, max_length=64),
+    session_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db_session),
 ) -> Dict[str, Any]:
-    """异步执行分析：立即返回 pending，前端轮询 /analyses/{id} 获取状态。"""
+    """异步执行分析：立即返回 pending，前端轮询 /analyses/{id} 获取状态。
+
+    request_id: 客户端幂等键，重复提交（超时重试/刷新恢复）返回同一任务。
+    session_id: 会话 id，用于把日志绑定到会话，刷新后可恢复分析。
+    """
     try:
         return AnalysisTaskService(db).run_analysis_async(
             log_id=log_id, model=model, user_query=user_query,
+            request_id=request_id, session_id=session_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
